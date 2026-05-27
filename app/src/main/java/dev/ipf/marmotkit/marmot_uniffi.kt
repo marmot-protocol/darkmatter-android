@@ -899,6 +899,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -994,6 +998,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_group_details(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_group_forensics_json(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`mode`: RustBuffer.ByValue,`publicRedactionSaltHex`: RustBuffer.ByValue,
+    ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_group_management_state(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_group_members(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
@@ -1006,6 +1012,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_invite_members_detailed(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`memberRefs`: RustBuffer.ByValue,
     ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_is_stopping(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun uniffi_marmot_uniffi_fn_method_marmot_leave_group(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_list_accounts(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -1276,6 +1284,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_group_details(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_group_forensics_json(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_group_management_state(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_group_members(
@@ -1287,6 +1297,8 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_checksum_method_marmot_invite_members(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_invite_members_detailed(
+    ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_is_stopping(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_leave_group(
     ): Short
@@ -1484,6 +1496,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_group_details() != 55062.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_group_forensics_json() != 53970.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_group_management_state() != 47526.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1500,6 +1515,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_invite_members_detailed() != 32257.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_is_stopping() != 60094.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_leave_group() != 31366.toShort()) {
@@ -3219,6 +3237,14 @@ public interface MarmotInterface {
     suspend fun `groupDetails`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): GroupDetailsFfi
     
     /**
+     * Export a forensic JSON bundle for this account/device's local view of a
+     * group. Public mode redacts operational identifiers, payload bytes, and
+     * stable payload digests. Pass the same public salt across devices when
+     * comparing public dumps from one incident.
+     */
+    suspend fun `groupForensicsJson`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `mode`: ForensicsDumpModeFfi, `publicRedactionSaltHex`: kotlin.String?): kotlin.String
+
+    /**
      * Current caller permissions plus per-member action availability.
      */
     suspend fun `groupManagementState`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): GroupManagementStateFfi
@@ -3240,6 +3266,13 @@ public interface MarmotInterface {
     
     suspend fun `inviteMembersDetailed`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `memberRefs`: List<kotlin.String>): GroupMutationResultFfi
     
+    /**
+     * True once shutdown has started. Host apps can use this to avoid
+     * launching more subscriptions or account work while they are moving to
+     * the background.
+     */
+    fun `isStopping`(): kotlin.Boolean
+
     suspend fun `leaveGroup`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): SendSummaryFfi
     
     /**
@@ -3992,6 +4025,33 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
 
     
     /**
+     * Export a forensic JSON bundle for this account/device's local view of a
+     * group. Public mode redacts operational identifiers, payload bytes, and
+     * stable payload digests. Pass the same public salt across devices when
+     * comparing public dumps from one incident.
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `groupForensicsJson`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `mode`: ForensicsDumpModeFfi, `publicRedactionSaltHex`: kotlin.String?) : kotlin.String {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_group_forensics_json(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),FfiConverterTypeForensicsDumpModeFfi.lower(`mode`),FfiConverterOptionalString.lower(`publicRedactionSaltHex`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterString.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
+
+
+    /**
      * Current caller permissions plus per-member action availability.
      */
     @Throws(MarmotKitException::class)
@@ -4127,6 +4187,23 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
     }
 
     
+    /**
+     * True once shutdown has started. Host apps can use this to avoid
+     * launching more subscriptions or account work while they are moving to
+     * the background.
+     */override fun `isStopping`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_is_stopping(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+
     @Throws(MarmotKitException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `leaveGroup`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String) : SendSummaryFfi {
@@ -7426,6 +7503,38 @@ public object FfiConverterTypeAgentStreamUpdateFfi : FfiConverterRustBuffer<Agen
 
 
 
+
+enum class ForensicsDumpModeFfi {
+
+    PUBLIC,
+    SENSITIVE;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeForensicsDumpModeFfi: FfiConverterRustBuffer<ForensicsDumpModeFfi> {
+    override fun read(buf: ByteBuffer) = try {
+
+        ForensicsDumpModeFfi.entries[buf.getInt() - 1]
+
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ForensicsDumpModeFfi) = 4UL
+
+    override fun write(value: ForensicsDumpModeFfi, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
 /**
  * Top-level event firehose, FFI-shaped. Agent streams collapse to a single
  * "agent stream activity" variant — host apps do not differentiate them at
@@ -7679,6 +7788,12 @@ sealed class MarmotKitException: kotlin.Exception() {
             get() = ""
     }
     
+    class RuntimeStopping(
+        ) : MarmotKitException() {
+        override val message
+            get() = ""
+    }
+
     class NotGroupAdmin(
         
         val `groupIdHex`: kotlin.String
@@ -7779,28 +7894,29 @@ public object FfiConverterTypeMarmotKitError : FfiConverterRustBuffer<MarmotKitE
                 FfiConverterString.read(buf),
                 )
             8 -> MarmotKitException.TransportClosed()
-            9 -> MarmotKitException.NotGroupAdmin(
+            9 -> MarmotKitException.RuntimeStopping()
+            10 -> MarmotKitException.NotGroupAdmin(
                 FfiConverterString.read(buf),
                 )
-            10 -> MarmotKitException.AdminCannotSelfRemove(
+            11 -> MarmotKitException.AdminCannotSelfRemove(
                 FfiConverterString.read(buf),
                 )
-            11 -> MarmotKitException.WouldRemoveLastAdmin(
+            12 -> MarmotKitException.WouldRemoveLastAdmin(
                 FfiConverterString.read(buf),
                 )
-            12 -> MarmotKitException.MemberNotInGroup(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            13 -> MarmotKitException.AlreadyAdmin(
+            13 -> MarmotKitException.MemberNotInGroup(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            14 -> MarmotKitException.NotAdmin(
+            14 -> MarmotKitException.AlreadyAdmin(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            15 -> MarmotKitException.Runtime(
+            15 -> MarmotKitException.NotAdmin(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            16 -> MarmotKitException.Runtime(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -7845,6 +7961,10 @@ public object FfiConverterTypeMarmotKitError : FfiConverterRustBuffer<MarmotKitE
                 + FfiConverterString.allocationSize(value.`details`)
             )
             is MarmotKitException.TransportClosed -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is MarmotKitException.RuntimeStopping -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
@@ -7930,41 +8050,45 @@ public object FfiConverterTypeMarmotKitError : FfiConverterRustBuffer<MarmotKitE
                 buf.putInt(8)
                 Unit
             }
-            is MarmotKitException.NotGroupAdmin -> {
+            is MarmotKitException.RuntimeStopping -> {
                 buf.putInt(9)
-                FfiConverterString.write(value.`groupIdHex`, buf)
                 Unit
             }
-            is MarmotKitException.AdminCannotSelfRemove -> {
+            is MarmotKitException.NotGroupAdmin -> {
                 buf.putInt(10)
                 FfiConverterString.write(value.`groupIdHex`, buf)
                 Unit
             }
-            is MarmotKitException.WouldRemoveLastAdmin -> {
+            is MarmotKitException.AdminCannotSelfRemove -> {
                 buf.putInt(11)
                 FfiConverterString.write(value.`groupIdHex`, buf)
                 Unit
             }
-            is MarmotKitException.MemberNotInGroup -> {
+            is MarmotKitException.WouldRemoveLastAdmin -> {
                 buf.putInt(12)
                 FfiConverterString.write(value.`groupIdHex`, buf)
-                FfiConverterString.write(value.`memberIdHex`, buf)
                 Unit
             }
-            is MarmotKitException.AlreadyAdmin -> {
+            is MarmotKitException.MemberNotInGroup -> {
                 buf.putInt(13)
                 FfiConverterString.write(value.`groupIdHex`, buf)
                 FfiConverterString.write(value.`memberIdHex`, buf)
                 Unit
             }
-            is MarmotKitException.NotAdmin -> {
+            is MarmotKitException.AlreadyAdmin -> {
                 buf.putInt(14)
                 FfiConverterString.write(value.`groupIdHex`, buf)
                 FfiConverterString.write(value.`memberIdHex`, buf)
                 Unit
             }
-            is MarmotKitException.Runtime -> {
+            is MarmotKitException.NotAdmin -> {
                 buf.putInt(15)
+                FfiConverterString.write(value.`groupIdHex`, buf)
+                FfiConverterString.write(value.`memberIdHex`, buf)
+                Unit
+            }
+            is MarmotKitException.Runtime -> {
+                buf.putInt(16)
                 FfiConverterString.write(value.`details`, buf)
                 Unit
             }
