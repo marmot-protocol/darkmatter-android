@@ -929,6 +929,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -961,6 +963,8 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_fn_free_chatlistsubscription(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
     fun uniffi_marmot_uniffi_fn_method_chatlistsubscription_next(`ptr`: Pointer,
+    ): Long
+    fun uniffi_marmot_uniffi_fn_method_chatlistsubscription_next_update(`ptr`: Pointer,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_chatlistsubscription_snapshot(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
@@ -1292,6 +1296,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_chatlistsubscription_next(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_chatlistsubscription_next_update(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_chatlistsubscription_snapshot(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_chatssubscription_next(
@@ -1500,6 +1506,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_chatlistsubscription_next() != 4327.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_chatlistsubscription_next_update() != 33027.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_chatlistsubscription_snapshot() != 64263.toShort()) {
@@ -2495,6 +2504,8 @@ public interface ChatListSubscriptionInterface {
 
     suspend fun `next`(): ChatListRowFfi?
 
+    suspend fun `nextUpdate`(): ChatListSubscriptionUpdateFfi?
+
     fun `snapshot`(): List<ChatListRowFfi>
 
     companion object
@@ -2596,6 +2607,26 @@ open class ChatListSubscription: Disposable, AutoCloseable, ChatListSubscription
         { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
         // lift function
         { FfiConverterOptionalTypeChatListRowFfi.lift(it) },
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
+
+
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `nextUpdate`() : ChatListSubscriptionUpdateFfi? {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_chatlistsubscription_next_update(
+                thisPtr,
+
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterOptionalTypeChatListSubscriptionUpdateFfi.lift(it) },
         // Error FFI converter
         UniffiNullRustCallStatusErrorHandler,
     )
@@ -8114,7 +8145,14 @@ data class ReceivedMessageFfi (
     /**
      * Nostr `tags` of the inner Marmot app event.
      */
-    var `tags`: List<MessageTagFfi>
+    var `tags`: List<MessageTagFfi>,
+    /**
+     * Source-event timestamp (seconds since epoch) for the MLS-delivered
+     * message. Clients should sort the timeline by this value so chronology
+     * reflects send time, not delivery time. Zero means the timestamp was
+     * unavailable at decode time.
+     */
+    var `recordedAt`: kotlin.ULong
 ) {
 
     companion object
@@ -8133,6 +8171,7 @@ public object FfiConverterTypeReceivedMessageFfi: FfiConverterRustBuffer<Receive
             FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterSequenceTypeMessageTagFfi.read(buf),
+            FfiConverterULong.read(buf),
         )
     }
 
@@ -8143,7 +8182,8 @@ public object FfiConverterTypeReceivedMessageFfi: FfiConverterRustBuffer<Receive
             FfiConverterOptionalString.allocationSize(value.`senderDisplayName`) +
             FfiConverterString.allocationSize(value.`plaintext`) +
             FfiConverterULong.allocationSize(value.`kind`) +
-            FfiConverterSequenceTypeMessageTagFfi.allocationSize(value.`tags`)
+            FfiConverterSequenceTypeMessageTagFfi.allocationSize(value.`tags`) +
+            FfiConverterULong.allocationSize(value.`recordedAt`)
     )
 
     override fun write(value: ReceivedMessageFfi, buf: ByteBuffer) {
@@ -8154,6 +8194,7 @@ public object FfiConverterTypeReceivedMessageFfi: FfiConverterRustBuffer<Receive
             FfiConverterString.write(value.`plaintext`, buf)
             FfiConverterULong.write(value.`kind`, buf)
             FfiConverterSequenceTypeMessageTagFfi.write(value.`tags`, buf)
+            FfiConverterULong.write(value.`recordedAt`, buf)
     }
 }
 
@@ -8890,6 +8931,76 @@ public object FfiConverterTypeAgentStreamUpdateFfi : FfiConverterRustBuffer<Agen
             is AgentStreamUpdateFfi.Failed -> {
                 buf.putInt(3)
                 FfiConverterString.write(value.`message`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class ChatListSubscriptionUpdateFfi {
+
+    data class Row(
+        val `row`: ChatListRowFfi) : ChatListSubscriptionUpdateFfi() {
+        companion object
+    }
+
+    data class RemoveRow(
+        val `groupIdHex`: kotlin.String) : ChatListSubscriptionUpdateFfi() {
+        companion object
+    }
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeChatListSubscriptionUpdateFfi : FfiConverterRustBuffer<ChatListSubscriptionUpdateFfi>{
+    override fun read(buf: ByteBuffer): ChatListSubscriptionUpdateFfi {
+        return when(buf.getInt()) {
+            1 -> ChatListSubscriptionUpdateFfi.Row(
+                FfiConverterTypeChatListRowFfi.read(buf),
+                )
+            2 -> ChatListSubscriptionUpdateFfi.RemoveRow(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ChatListSubscriptionUpdateFfi) = when(value) {
+        is ChatListSubscriptionUpdateFfi.Row -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeChatListRowFfi.allocationSize(value.`row`)
+            )
+        }
+        is ChatListSubscriptionUpdateFfi.RemoveRow -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`groupIdHex`)
+            )
+        }
+    }
+
+    override fun write(value: ChatListSubscriptionUpdateFfi, buf: ByteBuffer) {
+        when(value) {
+            is ChatListSubscriptionUpdateFfi.Row -> {
+                buf.putInt(1)
+                FfiConverterTypeChatListRowFfi.write(value.`row`, buf)
+                Unit
+            }
+            is ChatListSubscriptionUpdateFfi.RemoveRow -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`groupIdHex`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -10308,6 +10419,38 @@ public object FfiConverterOptionalTypeAgentStreamUpdateFfi: FfiConverterRustBuff
         } else {
             buf.put(1)
             FfiConverterTypeAgentStreamUpdateFfi.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeChatListSubscriptionUpdateFfi: FfiConverterRustBuffer<ChatListSubscriptionUpdateFfi?> {
+    override fun read(buf: ByteBuffer): ChatListSubscriptionUpdateFfi? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeChatListSubscriptionUpdateFfi.read(buf)
+    }
+
+    override fun allocationSize(value: ChatListSubscriptionUpdateFfi?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeChatListSubscriptionUpdateFfi.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ChatListSubscriptionUpdateFfi?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeChatListSubscriptionUpdateFfi.write(value, buf)
         }
     }
 }
