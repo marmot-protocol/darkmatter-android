@@ -26,17 +26,18 @@ import dev.ipf.marmotkit.AgentStreamSubscription
 import dev.ipf.marmotkit.AppMessageRecordFfi
 import dev.ipf.marmotkit.ChatListRowFfi
 import dev.ipf.marmotkit.ChatListSubscription
+import dev.ipf.marmotkit.ChatListSubscriptionUpdateFfi
+import dev.ipf.marmotkit.ChatListUpdateTriggerFfi
 import dev.ipf.marmotkit.ChatsSubscription
 import dev.ipf.marmotkit.ForensicsDumpModeFfi
 import dev.ipf.marmotkit.GroupStateSubscription
-import dev.ipf.marmotkit.MessageUpdateFfi
-import dev.ipf.marmotkit.MessagesSubscription
-import dev.ipf.marmotkit.RuntimeMessageReceivedFfi
 import dev.ipf.marmotkit.TimelineMessageQueryFfi
+import dev.ipf.marmotkit.TimelineMessageChangeFfi
 import dev.ipf.marmotkit.TimelineMessageRecordFfi
 import dev.ipf.marmotkit.TimelineMessagesSubscription
 import dev.ipf.marmotkit.TimelinePageFfi
 import dev.ipf.marmotkit.TimelineSubscriptionUpdateFfi
+import dev.ipf.marmotkit.TimelineUpdateTriggerFfi
 
 data class ChatListItem(
     val group: AppGroupRecordFfi,
@@ -79,23 +80,6 @@ internal fun sortChatListItems(items: List<ChatListItem>): List<ChatListItem> {
         compareByDescending<ChatListItem> { it.group.pendingConfirmation }
             .thenByDescending { it.latestAt ?: 0uL }
             .thenBy { (it.projectedTitle ?: it.group.name.ifBlank { it.group.groupIdHex }).lowercase() },
-    )
-}
-
-private fun appMessageRecordFromReceived(
-    received: RuntimeMessageReceivedFfi,
-    recordedAt: ULong,
-): AppMessageRecordFfi {
-    return AppMessageRecordFfi(
-        messageIdHex = received.message.messageIdHex,
-        direction = "received",
-        groupIdHex = received.message.groupIdHex,
-        sender = received.message.sender,
-        plaintext = received.message.plaintext,
-        kind = received.message.kind,
-        tags = received.message.tags,
-        recordedAt = recordedAt,
-        receivedAt = recordedAt,
     )
 }
 
@@ -250,12 +234,25 @@ class ChatsController(private val appState: DarkMatterAppState) {
             coroutineScope {
                 launch {
                     while (isActive) {
-                        val row = withContext(Dispatchers.IO) {
-                            chatListStream.next()
+                        val update = withContext(Dispatchers.IO) {
+                            chatListStream.nextUpdate()
                         } ?: break
-                        requestChatRowProfiles(row)
-                        chatsDebug { "chat list update account=${accountRef.take(8)} ${row.debugSummary()}" }
-                        foldChatRow(row)
+                        when (update) {
+                            is ChatListSubscriptionUpdateFfi.Row -> {
+                                val row = update.row
+                                requestChatRowProfiles(row)
+                                chatsDebug {
+                                    "chat list update account=${accountRef.take(8)} trigger=${update.trigger} ${row.debugSummary()}"
+                                }
+                                foldChatRow(row)
+                            }
+                            is ChatListSubscriptionUpdateFfi.RemoveRow -> {
+                                chatsDebug {
+                                    "chat list remove account=${accountRef.take(8)} trigger=${update.trigger} id=${update.groupIdHex.take(8)}"
+                                }
+                                removeChatRow(update.groupIdHex)
+                            }
+                        }
                     }
                 }
                 launch {
@@ -316,6 +313,11 @@ class ChatsController(private val appState: DarkMatterAppState) {
         recompute()
     }
 
+    private fun removeChatRow(groupIdHex: String) {
+        chatRows = chatRows.filterNot { it.groupIdHex == groupIdHex }
+        recompute()
+    }
+
     private fun requestGroupProfiles(group: AppGroupRecordFfi) {
         appState.requestProfiles(
             listOfNotNull(group.welcomerAccountIdHex) + group.admins,
@@ -344,6 +346,22 @@ private fun AppGroupRecordFfi.debugSummary(): String {
 private fun ChatListRowFfi.debugSummary(): String {
     return "id=${groupIdHex.take(8)} archived=$archived pending=$pendingConfirmation unread=$unreadCount " +
         "last=${lastMessage?.messageIdHex?.take(8)} title=${title.ifBlank { "<blank>" }}"
+}
+
+private fun TimelineUpdateTriggerFfi.recomputesReactions(): Boolean {
+    return when (this) {
+        TimelineUpdateTriggerFfi.REACTION_ADDED,
+        TimelineUpdateTriggerFfi.REACTION_REMOVED,
+        TimelineUpdateTriggerFfi.MESSAGE_DELETED,
+        TimelineUpdateTriggerFfi.MESSAGE_EDITED_OR_REPROJECTED,
+        TimelineUpdateTriggerFfi.SNAPSHOT_REFRESH -> true
+        TimelineUpdateTriggerFfi.NEW_MESSAGE,
+        TimelineUpdateTriggerFfi.REPLY_PREVIEW_CHANGED,
+        TimelineUpdateTriggerFfi.AGENT_STREAM_STARTED,
+        TimelineUpdateTriggerFfi.AGENT_STREAM_FINISHED,
+        TimelineUpdateTriggerFfi.DELIVERY_OR_SEND_STATE_CHANGED,
+        TimelineUpdateTriggerFfi.RECEIPT_CHANGED -> false
+    }
 }
 
 private inline fun chatsDebug(message: () -> String) {
@@ -415,9 +433,12 @@ class ConversationController(
 
     private val messageById = linkedMapOf<String, AppMessageRecordFfi>()
     private val timelineRecords = linkedMapOf<String, TimelineMessageRecordFfi>()
+    private val timelineItemsById = linkedMapOf<String, TimelineMessage>()
+    private val timelineOrder = mutableListOf<String>()
     private val optimisticMessages = linkedMapOf<String, TimelineMessage>()
     private val optimisticReactionChanges = linkedMapOf<String, OptimisticReactionChange>()
     private val activeStreamIds = mutableSetOf<String>()
+    private val removedStreamIds = mutableSetOf<String>()
     private var hasLoadedOlderPages = false
 
     val title: String
@@ -465,7 +486,6 @@ class ConversationController(
         isLoading = true
         error = null
         var timelineSubscription: TimelineMessagesSubscription? = null
-        var streamStartSubscription: MessagesSubscription? = null
         var groupSubscription: GroupStateSubscription? = null
         try {
             val timelineStream = appState.marmotIo {
@@ -479,8 +499,6 @@ class ConversationController(
 
             val groupStream = appState.marmotIo { subscribeGroupState(account, group.groupIdHex) }
             groupSubscription = groupStream
-            val streamStartStream = appState.marmotIo { subscribeMessages(account, group.groupIdHex) }
-            streamStartSubscription = streamStartStream
             val groupSnapshot = withContext(Dispatchers.IO) {
                 groupStream.snapshot()
             }
@@ -511,15 +529,11 @@ class ConversationController(
                             is TimelineSubscriptionUpdateFfi.Projection -> {
                                 val projection = update.update.update
                                 if (projection.groupIdHex == group.groupIdHex) {
-                                    applyTimelinePage(
-                                        TimelinePageFfi(
-                                            messages = projection.messages,
-                                            hasMoreBefore = hasMoreBefore,
-                                            hasMoreAfter = false,
-                                        ),
-                                        replaceWindow = false,
-                                        updatePagination = false,
+                                    applyChatListProjection(
+                                        projection.chatListTrigger,
+                                        projection.chatListRow,
                                     )
+                                    applyTimelineChanges(projection.changes)
                                 } else {
                                     emptyList()
                                 }
@@ -527,20 +541,6 @@ class ConversationController(
                         }
                         markLatestVisibleRead(account)
                         streamIds.forEach { streamId ->
-                            if (activeStreamIds.add(streamId)) {
-                                launch { watchAgentTextStream(account, streamId) }
-                            }
-                        }
-                    }
-                }
-                launch {
-                    while (isActive) {
-                        val update = withContext(Dispatchers.IO) {
-                            streamStartStream.next()
-                        } ?: break
-                        if (update is MessageUpdateFfi.AgentStreamStarted) {
-                            val record = appMessageRecordFromReceived(update.received, nowSeconds())
-                            val streamId = MessageProjector.streamId(record) ?: continue
                             if (activeStreamIds.add(streamId)) {
                                 launch { watchAgentTextStream(account, streamId) }
                             }
@@ -568,7 +568,6 @@ class ConversationController(
         } finally {
             withContext(Dispatchers.IO) {
                 runCatching { groupSubscription?.close() }
-                runCatching { streamStartSubscription?.close() }
                 runCatching { timelineSubscription?.close() }
             }
         }
@@ -597,7 +596,7 @@ class ConversationController(
         )
         optimisticMessages["msg:$tempId"] = TimelineMessage("msg:$tempId", optimistic, MessageStatus.Pending)
         messageById[tempId] = optimistic
-        renderTimeline()
+        publishTimelineFromIndexes()
         replyingTo = null
         sendInFlight = true
         try {
@@ -611,10 +610,10 @@ class ConversationController(
             if (confirmedId.isNotEmpty()) messageById[confirmedId] = confirmed
             optimisticMessages.remove("msg:$tempId")
             optimisticMessages["msg:$confirmedId"] = TimelineMessage("msg:$confirmedId", confirmed, MessageStatus.Sent)
-            renderTimeline()
+            publishTimelineFromIndexes()
         } catch (throwable: Throwable) {
             optimisticMessages["msg:$tempId"] = TimelineMessage("msg:$tempId", optimistic, MessageStatus.Failed)
-            renderTimeline()
+            publishTimelineFromIndexes()
             appState.present(R.string.toast_send_failed, AppText.Plain(throwable.message ?: throwable.javaClass.simpleName))
         } finally {
             sendInFlight = false
@@ -732,7 +731,6 @@ class ConversationController(
                     description.trim().takeIf { it.isNotEmpty() },
                 )
             }
-            group = group.copy(name = name.trim(), description = description.trim())
             appState.present(R.string.toast_group_updated)
         }.onFailure {
             appState.present(R.string.toast_couldnt_update_group, AppText.Plain(it.message ?: it.javaClass.simpleName))
@@ -914,11 +912,11 @@ class ConversationController(
     ): List<String> {
         if (replaceWindow) {
             timelineRecords.clear()
+            timelineItemsById.clear()
+            timelineOrder.clear()
         }
         page.messages.forEach { record ->
-            timelineRecords[record.messageIdHex] = record
-            val actionRecord = TimelineProjector.toAppMessageRecord(record)
-            messageById[record.messageIdHex] = actionRecord
+            val actionRecord = upsertProjectedRecord(record)
             appState.requestProfile(record.sender)
             record.replyPreview?.let { appState.requestProfile(it.sender) }
             if (record.deleted) {
@@ -942,6 +940,86 @@ class ConversationController(
             .map { TimelineProjector.toAppMessageRecord(it) }
             .filter { MessageProjector.isStreamStart(it) }
             .mapNotNull { MessageProjector.streamId(it) }
+    }
+
+    private fun applyTimelineChanges(changes: List<TimelineMessageChangeFfi>): List<String> {
+        val streamIds = mutableListOf<String>()
+        val reactionTargets = linkedSetOf<String>()
+        changes.forEach { change ->
+            when (change) {
+                is TimelineMessageChangeFfi.Upsert -> {
+                    val record = change.message
+                    val actionRecord = upsertProjectedRecord(record)
+                    if (change.trigger.recomputesReactions()) {
+                        reactionTargets.add(record.messageIdHex)
+                    }
+                    appState.requestProfile(record.sender)
+                    record.replyPreview?.let { appState.requestProfile(it.sender) }
+                    if (record.deleted) {
+                        deletedMessageIds = deletedMessageIds - record.messageIdHex
+                    }
+                    if (MessageProjector.isStreamStart(actionRecord)) {
+                        MessageProjector.streamId(actionRecord)?.let { streamId ->
+                            removedStreamIds.remove(streamId)
+                            streamIds.add(streamId)
+                        }
+                    }
+                    if (MessageProjector.isStreamFinal(actionRecord)) {
+                        MessageProjector.streamId(actionRecord)?.let { streamId ->
+                            activeStreamIds.remove(streamId)
+                            optimisticMessages.remove("stream:$streamId")
+                        }
+                    }
+                }
+                is TimelineMessageChangeFfi.Remove -> {
+                    val removed = timelineRecords[change.messageIdHex]
+                    removed
+                        ?.let(TimelineProjector::toAppMessageRecord)
+                        ?.takeIf(MessageProjector::isStreamStart)
+                        ?.let(MessageProjector::streamId)
+                        ?.let { streamId ->
+                            removedStreamIds.add(streamId)
+                            activeStreamIds.remove(streamId)
+                            optimisticMessages.remove("stream:$streamId")
+                        }
+                    removeProjectedRecord(change.messageIdHex)
+                    messageById.remove(change.messageIdHex)
+                    reactionTargets.add(change.messageIdHex)
+                    deletedMessageIds = deletedMessageIds - change.messageIdHex
+                    optimisticMessages.remove("msg:${change.messageIdHex}")
+                    optimisticReactionChanges.entries
+                        .filter { (_, reaction) -> reaction.targetMessageId == change.messageIdHex }
+                        .map { it.key }
+                        .forEach(optimisticReactionChanges::remove)
+                }
+            }
+        }
+        pruneConfirmedOptimisticMessages()
+        pruneConfirmedOptimisticReactions()
+        recomputeReactions(reactionTargets)
+        publishTimelineFromIndexes()
+        return streamIds
+    }
+
+    private fun applyChatListProjection(trigger: ChatListUpdateTriggerFfi, row: ChatListRowFfi?) {
+        val projected = row ?: return
+        when (trigger) {
+            ChatListUpdateTriggerFfi.ARCHIVE_CHANGED,
+            ChatListUpdateTriggerFfi.PENDING_CONFIRMATION_CHANGED,
+            ChatListUpdateTriggerFfi.NEW_GROUP,
+            ChatListUpdateTriggerFfi.MEMBERSHIP_CHANGED,
+            ChatListUpdateTriggerFfi.SNAPSHOT_REFRESH -> {
+                group = group.copy(
+                    name = projected.groupName.ifBlank { group.name },
+                    archived = projected.archived,
+                    pendingConfirmation = projected.pendingConfirmation,
+                )
+            }
+            ChatListUpdateTriggerFfi.NEW_LAST_MESSAGE,
+            ChatListUpdateTriggerFfi.LAST_MESSAGE_DELETED,
+            ChatListUpdateTriggerFfi.UNREAD_CHANGED,
+            ChatListUpdateTriggerFfi.REMOVED -> Unit
+        }
     }
 
     private suspend fun initializeReadState(account: String) {
@@ -982,28 +1060,83 @@ class ConversationController(
     }
 
     private fun renderTimeline() {
-        val projected = timelineRecords.values.map { record ->
-            val actionRecord = TimelineProjector.toAppMessageRecord(record)
-            val streamId = MessageProjector.streamId(actionRecord).takeIf { MessageProjector.isStreamStart(actionRecord) }
-            val displayRecord = if (streamId != null) {
-                actionRecord.copy(plaintext = actionRecord.plaintext.ifBlank { copy.waitingForStream })
-            } else {
-                actionRecord
-            }
-            TimelineMessage(
-                id = streamId?.let { "stream:$it" } ?: "msg:${record.messageIdHex}",
-                record = displayRecord,
-                status = when {
-                    streamId != null -> MessageStatus.Streaming
-                    MessageProjector.isMine(actionRecord, appState.activeAccount?.accountIdHex) -> MessageStatus.Sent
-                    else -> MessageStatus.Received
-                },
-                projected = record,
-            )
+        timelineItemsById.clear()
+        timelineOrder.clear()
+        timelineRecords.values.forEach(::upsertProjectedRecord)
+        publishTimelineFromIndexes()
+    }
+
+    private fun upsertProjectedRecord(record: TimelineMessageRecordFfi): AppMessageRecordFfi {
+        val previousItemId = timelineRecords[record.messageIdHex]?.let(::projectedItemId)
+        if (previousItemId != null) {
+            timelineItemsById.remove(previousItemId)
+            timelineOrder.remove(previousItemId)
         }
+        timelineRecords[record.messageIdHex] = record
+        val actionRecord = TimelineProjector.toAppMessageRecord(record)
+        messageById[record.messageIdHex] = actionRecord
+        val item = timelineMessageFromProjection(record, actionRecord)
+        timelineItemsById[item.id] = item
+        insertTimelineItemId(item.id, item)
+        return actionRecord
+    }
+
+    private fun removeProjectedRecord(messageIdHex: String) {
+        val itemId = timelineRecords[messageIdHex]?.let(::projectedItemId) ?: "msg:$messageIdHex"
+        timelineRecords.remove(messageIdHex)
+        timelineItemsById.remove(itemId)
+        timelineOrder.remove(itemId)
+    }
+
+    private fun timelineMessageFromProjection(
+        record: TimelineMessageRecordFfi,
+        actionRecord: AppMessageRecordFfi = TimelineProjector.toAppMessageRecord(record),
+    ): TimelineMessage {
+        val streamId = MessageProjector.streamId(actionRecord).takeIf { MessageProjector.isStreamStart(actionRecord) }
+        val displayRecord = if (streamId != null) {
+            actionRecord.copy(plaintext = actionRecord.plaintext.ifBlank { copy.waitingForStream })
+        } else {
+            actionRecord
+        }
+        return TimelineMessage(
+            id = streamId?.let { "stream:$it" } ?: "msg:${record.messageIdHex}",
+            record = displayRecord,
+            status = when {
+                streamId != null -> MessageStatus.Streaming
+                MessageProjector.isMine(actionRecord, appState.activeAccount?.accountIdHex) -> MessageStatus.Sent
+                else -> MessageStatus.Received
+            },
+            projected = record,
+        )
+    }
+
+    private fun projectedItemId(record: TimelineMessageRecordFfi): String {
+        val actionRecord = TimelineProjector.toAppMessageRecord(record)
+        val streamId = MessageProjector.streamId(actionRecord).takeIf { MessageProjector.isStreamStart(actionRecord) }
+        return streamId?.let { "stream:$it" } ?: "msg:${record.messageIdHex}"
+    }
+
+    private fun insertTimelineItemId(itemId: String, item: TimelineMessage) {
+        val insertAt = timelineOrder.indexOfFirst { existingId ->
+            val existing = timelineItemsById[existingId] ?: return@indexOfFirst false
+            compareTimelineItems(item, existing) < 0
+        }
+        if (insertAt == -1) {
+            timelineOrder.add(itemId)
+        } else {
+            timelineOrder.add(insertAt, itemId)
+        }
+    }
+
+    private fun publishTimelineFromIndexes() {
+        val projected = timelineOrder.mapNotNull { timelineItemsById[it] }
         timeline = (optimisticMessages.values + projected)
             .distinctBy { it.id }
-            .sortedWith(compareBy<TimelineMessage> { it.record.recordedAt }.thenBy { it.id })
+            .sortedWith(::compareTimelineItems)
+    }
+
+    private fun compareTimelineItems(left: TimelineMessage, right: TimelineMessage): Int {
+        return compareValuesBy(left, right, { it.record.recordedAt }, { it.id })
     }
 
     private fun recomputeReactions() {
@@ -1039,6 +1172,55 @@ class ConversationController(
         }.filterValues { it.isNotEmpty() }
     }
 
+    private fun recomputeReactions(targetMessageIds: Set<String>) {
+        if (targetMessageIds.isEmpty()) return
+        val next = reactions.toMutableMap()
+        targetMessageIds.forEach { target ->
+            val tallies = reactionTalliesFor(target)
+            if (tallies.isEmpty()) {
+                next.remove(target)
+            } else {
+                next[target] = tallies
+            }
+        }
+        reactions = next
+    }
+
+    private fun reactionTalliesFor(targetMessageId: String): List<ReactionTally> {
+        val mine = appState.activeAccount?.accountIdHex
+        val sendersByEmoji = linkedMapOf<String, MutableSet<String>>()
+        timelineRecords[targetMessageId]?.reactions?.byEmoji?.forEach { summary ->
+            sendersByEmoji.getOrPut(summary.emoji) { linkedSetOf() }.addAll(summary.senders)
+        }
+        if (mine != null) {
+            optimisticReactionChanges.values
+                .filter { it.targetMessageId == targetMessageId }
+                .forEach { change ->
+                    val senders = sendersByEmoji.getOrPut(change.emoji) { linkedSetOf() }
+                    if (change.add) {
+                        senders.add(mine)
+                    } else {
+                        senders.remove(mine)
+                    }
+                }
+        }
+        return sendersByEmoji.mapNotNull { (emoji, senders) ->
+            if (senders.isEmpty()) {
+                null
+            } else {
+                ReactionTally(
+                    emoji = emoji,
+                    count = senders.size,
+                    mine = mine != null && senders.contains(mine),
+                )
+            }
+        }.sortedWith(
+            compareByDescending<ReactionTally> { it.count }
+                .thenByDescending { it.mine }
+                .thenBy { it.emoji },
+        )
+    }
+
     private fun baseReactionSenders(): LinkedHashMap<String, LinkedHashMap<String, MutableSet<String>>> {
         val result = linkedMapOf<String, LinkedHashMap<String, MutableSet<String>>>()
         timelineRecords.values.forEach { record ->
@@ -1061,7 +1243,7 @@ class ConversationController(
     }
 
     private suspend fun watchAgentTextStream(account: String, streamId: String) {
-        var text = ""
+        val text = StringBuilder()
         var subscription: AgentStreamSubscription? = null
         try {
             val streamSubscription = appState.marmotIo {
@@ -1078,14 +1260,18 @@ class ConversationController(
                 val update = withContext(Dispatchers.IO) {
                     streamSubscription.next()
                 } ?: break
+                if (streamId in removedStreamIds) {
+                    break
+                }
                 when (update) {
                     is AgentStreamUpdateFfi.Chunk -> {
-                        text += update.text
-                        updateStreamPreview(streamId, text, MessageStatus.Streaming)
+                        text.append(update.text)
+                        updateStreamPreview(streamId, text.toString(), MessageStatus.Streaming)
                     }
                     is AgentStreamUpdateFfi.Finished -> {
-                        text = update.text
-                        updateStreamPreview(streamId, text, MessageStatus.Sent)
+                        text.clear()
+                        text.append(update.text)
+                        updateStreamPreview(streamId, text.toString(), MessageStatus.Sent)
                     }
                     is AgentStreamUpdateFfi.Failed -> {
                         updateStreamPreview(streamId, copy.streamFailed(update.message), MessageStatus.Failed)
@@ -1107,6 +1293,7 @@ class ConversationController(
     }
 
     private fun updateStreamPreview(streamId: String, plaintext: String, status: MessageStatus) {
+        if (streamId in removedStreamIds) return
         val id = "stream:$streamId"
         val existing = optimisticMessages[id]?.record ?: timeline.firstOrNull { it.id == id }?.record
         val record = (existing ?: AppMessageRecordFfi(
@@ -1121,7 +1308,7 @@ class ConversationController(
             receivedAt = nowSeconds(),
         )).copy(plaintext = plaintext)
         optimisticMessages[id] = TimelineMessage(id, record, status)
-        renderTimeline()
+        publishTimelineFromIndexes()
     }
 
     private fun nowSeconds(): ULong = (System.currentTimeMillis() / 1000L).toULong()
