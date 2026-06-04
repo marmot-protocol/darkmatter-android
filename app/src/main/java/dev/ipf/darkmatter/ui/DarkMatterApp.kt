@@ -1347,6 +1347,15 @@ private fun ConversationScreen(
                     initialDraft = appState.draftFor(groupIdHex).orEmpty(),
                     onDraftChange = { appState.setDraft(groupIdHex, it) },
                     draftKey = groupIdHex,
+                    onAfterSend = {
+                        // Always pull the user down to see their just-sent
+                        // bubble, even if they were reading older history.
+                        // Matches standard chat-app behavior.
+                        scope.launch {
+                            val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                            listState.animateScrollToItem(lastIndex)
+                        }
+                    },
                 )
             }
         },
@@ -2392,6 +2401,7 @@ private fun ComposerBar(
     initialDraft: String = "",
     onDraftChange: (String) -> Unit = {},
     draftKey: Any? = null,
+    onAfterSend: () -> Unit = {},
 ) {
     // Keyed on draftKey so switching to a different chat re-hydrates the text
     // field from that chat's saved draft rather than carrying state across.
@@ -2450,6 +2460,7 @@ private fun ComposerBar(
                         onSend(text)
                         text = ""
                         onDraftChange("")
+                        onAfterSend()
                     }
                 },
                 modifier = Modifier.size(52.dp),
