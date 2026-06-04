@@ -99,6 +99,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1426,7 +1427,7 @@ private fun ConversationScreen(
                         LoadingScreen()
                     }
                     if (initialTimelineAnchored && !nearBottom) {
-                        FloatingActionButton(
+                        SmallFloatingActionButton(
                             onClick = {
                                 scope.launch {
                                     val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
@@ -1435,7 +1436,7 @@ private fun ConversationScreen(
                             },
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
-                                .padding(16.dp),
+                                .padding(12.dp),
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         ) {
@@ -1443,12 +1444,13 @@ private fun ConversationScreen(
                                 Icon(
                                     Icons.Default.ArrowDownward,
                                     contentDescription = stringResource(R.string.jump_to_newest),
+                                    modifier = Modifier.size(20.dp),
                                 )
                                 if (unreadIncomingCount > 0) {
                                     Badge(
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .offset(x = 12.dp, y = (-12).dp),
+                                            .offset(x = 10.dp, y = (-10).dp),
                                     ) {
                                         Text(
                                             if (unreadIncomingCount > 99) "99+" else unreadIncomingCount.toString(),
