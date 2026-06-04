@@ -358,16 +358,17 @@ class DarkMatterAppState(context: Context) {
     }
 
     fun signOutActiveAccount() {
-        // Capture the signed-out account's accountIdHex BEFORE we switch
-        // activeAccountRef — otherwise activeAccount resolves to the new
-        // account and we lose the key needed to purge per-account state.
-        val signedOutAccountIdHex = activeAccount?.accountIdHex
+        // Sign-out is a non-destructive session switch: the identity stays in
+        // the device keychain and the user can switch back to it. Per-account
+        // state that the user would expect to find on return (drafts, recent
+        // emoji, etc.) MUST persist across this transition. The only correct
+        // place to call DraftStore.clearAllForAccount is a real
+        // identity-delete flow, which doesn't exist yet.
         val next = accounts.firstOrNull { it.label != activeAccountRef }?.label
         activeAccountRef = next
         preferences.edit().apply {
             if (next == null) remove(ACTIVE_ACCOUNT_KEY) else putString(ACTIVE_ACCOUNT_KEY, next)
         }.apply()
-        signedOutAccountIdHex?.let { draftStore.clearAllForAccount(it) }
         next?.let { label ->
             accounts.firstOrNull { it.label == label }?.accountIdHex?.let { warmProfile(it) }
         }
