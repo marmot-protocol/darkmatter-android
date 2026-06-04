@@ -798,16 +798,18 @@ class ConversationController(
     /**
      * Drops a failed outgoing send from the local timeline. Purely client-side
      * cleanup; the message was never accepted by the relay so there's nothing
-     * to retract. Tracks the id in [discardedDuringRetry] so an in-flight
-     * retry's terminal write doesn't resurrect the bubble.
+     * to retract. Only tracks the id in [discardedDuringRetry] when status is
+     * Pending (retry in flight); otherwise the set would grow unbounded with
+     * keys no retry coroutine ever consults.
      */
     fun discardFailedSend(item: TimelineMessage) {
         val key = item.id
         val tempId = item.record.messageIdHex
-        // Accept either Failed (no retry in flight) or Pending (retry in
-        // flight); other statuses (Sent/Streaming) aren't user-discardable.
-        if (item.status != MessageStatus.Failed && item.status != MessageStatus.Pending) return
-        discardedDuringRetry.add(key)
+        when (item.status) {
+            MessageStatus.Failed -> Unit
+            MessageStatus.Pending -> discardedDuringRetry.add(key)
+            else -> return
+        }
         optimisticMessages.remove(key)
         messageById.remove(tempId)
         publishTimelineFromIndexes()

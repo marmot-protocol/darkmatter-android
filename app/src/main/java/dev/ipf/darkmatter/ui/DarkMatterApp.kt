@@ -1145,6 +1145,25 @@ private fun NewChatSheet(
     }
 }
 
+/** Within this many items of the trailing edge counts as "at bottom". */
+private const val ConversationNearBottomItemSlack = 3
+
+/**
+ * Shared definition of "user is at (or near) the newest message". Used both
+ * by the auto-scroll LaunchedEffect (issue #59) and the jump-to-newest FAB
+ * so they can't disagree on the threshold.
+ */
+private fun isNearBottom(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    timelineSize: Int,
+    hasOlderHeader: Boolean,
+): Boolean {
+    if (!listState.canScrollForward) return true
+    val olderHeaderCount = if (hasOlderHeader) 1 else 0
+    val bottomTimelineIndex = timelineSize + 1 + olderHeaderCount
+    return listState.firstVisibleItemIndex >= bottomTimelineIndex - ConversationNearBottomItemSlack
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConversationScreen(
@@ -1173,15 +1192,22 @@ private fun ConversationScreen(
     // Jump-to-newest plumbing: track the count of INCOMING messages received
     // while the user was scrolled away. Own outgoing sends are excluded so
     // tapping send while scrolled up doesn't bump the badge.
-    val atBottom by remember { derivedStateOf { !listState.canScrollForward } }
-    val incomingTimelineCount by remember {
+    //
+    // The derivedStateOf is keyed on chat.id so a chat switch swaps it to the
+    // new controller's timeline atomically with lastSeenIncomingCount's reset.
+    val nearBottom by remember {
+        derivedStateOf {
+            isNearBottom(listState, controller.timeline.size, controller.hasMoreBefore || controller.isLoadingOlder)
+        }
+    }
+    val incomingTimelineCount by remember(chat.id) {
         derivedStateOf {
             controller.timeline.count { it.record.direction == "received" }
         }
     }
     var lastSeenIncomingCount by remember(chat.id) { mutableStateOf(incomingTimelineCount) }
-    LaunchedEffect(atBottom, incomingTimelineCount) {
-        if (atBottom) lastSeenIncomingCount = incomingTimelineCount
+    LaunchedEffect(nearBottom, incomingTimelineCount) {
+        if (nearBottom) lastSeenIncomingCount = incomingTimelineCount
     }
     val unreadIncomingCount = (incomingTimelineCount - lastSeenIncomingCount).coerceAtLeast(0)
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
@@ -1237,9 +1263,9 @@ private fun ConversationScreen(
             // anchor for this conversation OR (b) when the user is still
             // pinned to the newest message. Otherwise leave their scroll
             // position alone so reading older history isn't interrupted by
-            // every incoming message (see issue #59).
-            val nearBottom = !listState.canScrollForward ||
-                listState.firstVisibleItemIndex >= bottomTimelineIndex - 3
+            // every incoming message (see issue #59). Shared `nearBottom`
+            // threshold ensures the FAB doesn't briefly flicker for a user
+            // exactly at the edge.
             if (!initialTimelineAnchored || nearBottom) {
                 listState.scrollToItem(bottomTimelineIndex)
                 initialTimelineAnchored = true
@@ -1390,7 +1416,7 @@ private fun ConversationScreen(
                     if (!initialTimelineAnchored) {
                         LoadingScreen()
                     }
-                    if (initialTimelineAnchored && !atBottom) {
+                    if (initialTimelineAnchored && !nearBottom) {
                         FloatingActionButton(
                             onClick = {
                                 scope.launch {
