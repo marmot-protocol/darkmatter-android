@@ -1190,39 +1190,48 @@ private fun ConversationScreen(
     var initialTimelineLoadStarted by remember(chat.id) { mutableStateOf(false) }
     var highlightedMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
     var navigateReplyJob by remember(chat.id) { mutableStateOf<Job?>(null) }
-    // Jump-to-newest plumbing. The badge shows incoming messages that live
-    // BELOW the viewport (newer than the last item the user can see), so it
-    // decrements naturally as the user scrolls down and is 0 when they reach
-    // the bottom. This model is intentionally view-derived rather than
-    // persisted: it survives chat re-entry and never claims as "unread"
-    // anything the user has already scrolled past.
+    // Jump-to-newest plumbing.
+    //
+    // Badge = incoming messages newer than the highest-index timeline row the
+    // user has ever had on screen during this composition. The high-water
+    // mark only INCREASES, so scrolling back up past read messages doesn't
+    // resurrect the badge.
+    //
+    //   HWM advances when the viewport reaches a new highest-visible row.
+    //   New incoming arrivals (which extend the timeline beyond HWM) bump
+    //   the badge. On chat re-entry, the auto-scroll's snap to the bottom
+    //   immediately advances HWM to the last timeline index, so the badge
+    //   shows 0 — matching WhatsApp/Signal semantics.
     val nearBottom by remember {
         derivedStateOf {
             isNearBottom(listState, controller.timeline.size, controller.hasMoreBefore || controller.isLoadingOlder)
         }
     }
-    val unreadIncomingCount by remember {
+    var highestSeenTimelineIndex by remember(chat.id) { mutableStateOf(-1) }
+    val currentHighestVisibleTimelineIndex by remember {
         derivedStateOf {
-            if (!initialTimelineAnchored) return@derivedStateOf 0
             val visible = listState.layoutInfo.visibleItemsInfo
-            if (visible.isEmpty() || controller.timeline.isEmpty()) return@derivedStateOf 0
+            if (visible.isEmpty()) return@derivedStateOf -1
             val olderHeader = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
             // LazyColumn layout: [Spacer][maybe older-loading][timeline items][Spacer]
-            // First timeline item lands at list index 1 + olderHeader.
             val firstTimelineListIndex = 1 + olderHeader
-            val highestVisibleTimelineIndex = visible.last().index - firstTimelineListIndex
-            if (highestVisibleTimelineIndex < 0) {
-                // Viewport is above the first timeline message; everything counts as unread.
-                controller.timeline.count { it.record.direction == "received" }
-            } else if (highestVisibleTimelineIndex >= controller.timeline.lastIndex) {
-                0
-            } else {
-                val from = highestVisibleTimelineIndex + 1
-                val to = controller.timeline.size
-                controller.timeline
-                    .subList(from, to)
-                    .count { it.record.direction == "received" }
-            }
+            (visible.last().index - firstTimelineListIndex)
+                .coerceAtMost(controller.timeline.lastIndex)
+        }
+    }
+    LaunchedEffect(currentHighestVisibleTimelineIndex) {
+        if (currentHighestVisibleTimelineIndex > highestSeenTimelineIndex) {
+            highestSeenTimelineIndex = currentHighestVisibleTimelineIndex
+        }
+    }
+    val unreadIncomingCount by remember {
+        derivedStateOf {
+            if (!initialTimelineAnchored || controller.timeline.isEmpty()) return@derivedStateOf 0
+            val after = highestSeenTimelineIndex + 1
+            if (after >= controller.timeline.size) return@derivedStateOf 0
+            controller.timeline
+                .subList(after.coerceAtLeast(0), controller.timeline.size)
+                .count { it.record.direction == "received" }
         }
     }
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
