@@ -134,6 +134,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -204,6 +205,8 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.LifecycleOwner
@@ -1279,22 +1282,52 @@ private fun ConversationScreen(
         controller.start()
     }
     val latestTimelineItemId = controller.timeline.lastOrNull()?.id
-    val bottomTimelineIndex = controller.timeline.size + 1 +
-        if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
+    val olderHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
+    val bottomTimelineIndex = controller.timeline.size + 1 + olderHeaderCount
     LaunchedEffect(latestTimelineItemId, imeBottom) {
         if (controller.timeline.isNotEmpty()) {
-            // Only force-snap to the newest message on (a) the very first
-            // anchor for this conversation OR (b) when the user is still
-            // pinned to the newest message. Otherwise leave their scroll
-            // position alone so reading older history isn't interrupted by
-            // every incoming message (see issue #59). Shared `nearBottom`
-            // threshold ensures the FAB doesn't briefly flicker for a user
-            // exactly at the edge.
-            if (!initialTimelineAnchored || nearBottom) {
-                listState.scrollToItem(bottomTimelineIndex)
+            if (!initialTimelineAnchored) {
+                // First-time anchor on chat open. If there are unread
+                // messages, land at the first unread one so the user can
+                // read forward from there; otherwise drop them at the
+                // newest message.
+                val firstUnreadTimelineIndex = controller.firstUnreadTimelineIndex(chat.unreadCount.toInt())
+                val targetIndex = if (firstUnreadTimelineIndex >= 0) {
+                    1 + olderHeaderCount + firstUnreadTimelineIndex
+                } else {
+                    bottomTimelineIndex
+                }
+                listState.scrollToItem(targetIndex)
                 initialTimelineAnchored = true
+            } else if (nearBottom) {
+                // User is still pinned to the newest message; follow new
+                // incoming messages down. Reading older history isn't
+                // interrupted by this branch (see issue #59).
+                listState.scrollToItem(bottomTimelineIndex)
             }
         }
+    }
+
+    // Scroll-driven read pointer advance. Whenever the user settles on a new
+    // higher-index timeline row, mark that row as read on the Rust side so
+    // the chat-list unread count decrements incrementally. Settle-only
+    // (`!isScrollInProgress`) keeps us from hammering the FFI during scroll.
+    LaunchedEffect(listState, chat.id) {
+        snapshotFlow {
+            if (!initialTimelineAnchored || listState.isScrollInProgress) {
+                -1
+            } else {
+                currentHighestVisibleTimelineIndex
+            }
+        }
+            .filter { it >= 0 }
+            .distinctUntilChanged()
+            .collect { index ->
+                val messageId = controller.timeline.getOrNull(index)?.record?.messageIdHex
+                if (messageId?.isNotBlank() == true) {
+                    controller.markReadUpTo(messageId)
+                }
+            }
     }
     val openDetailsDescription = stringResource(R.string.details)
     Scaffold(

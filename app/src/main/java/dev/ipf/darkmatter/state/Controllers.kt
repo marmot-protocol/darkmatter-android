@@ -487,6 +487,10 @@ class ConversationController(
     private val activeStreamIds = mutableSetOf<String>()
     private val removedStreamIds = mutableSetOf<String>()
     private var hasLoadedOlderPages = false
+    // Last message id we successfully marked as read on the Rust side.
+    // Dedupes scroll-driven [markReadUpTo] calls so settling on the same row
+    // doesn't issue redundant FFI hops.
+    private var lastReadMessageId: String? = null
 
     val title: String
         get() = title()
@@ -542,7 +546,9 @@ class ConversationController(
             val snapshot = withContext(Dispatchers.IO) { timelineStream.snapshot() }
             val snapshotStreamIds = snapshot?.let { applyTimelinePage(it, replaceWindow = true, updatePagination = true) }.orEmpty()
             initializeReadState(account)
-            markLatestVisibleRead(account)
+            // Don't blanket-mark the absolute newest as read here — the UI
+            // layer now drives mark-read as the user scrolls so partial-read
+            // sessions retain accurate unread counts on the chat list.
 
             val groupStream = appState.marmotIo { subscribeGroupState(account, group.groupIdHex) }
             groupSubscription = groupStream
@@ -586,7 +592,12 @@ class ConversationController(
                                 }
                             }
                         }
-                        markLatestVisibleRead(account)
+                        // Scroll-driven mark-read in the UI layer handles the
+                        // user-visible read pointer. The projection-update
+                        // path no longer force-marks the absolute newest as
+                        // read; if the user is scrolled up reading older
+                        // history, an incoming message must remain unread
+                        // until they actually scroll to it.
                         streamIds.forEach { streamId ->
                             if (activeStreamIds.add(streamId)) {
                                 launch { watchAgentTextStream(account, streamId) }
@@ -1234,6 +1245,50 @@ class ConversationController(
         }.onFailure {
             Log.w("DMConversation", "mark read failed for ${group.groupIdHex.take(8)} message=${messageId.take(8)}", it)
         }
+    }
+
+    /**
+     * Advance the per-chat read pointer to [messageId]. Called from the UI
+     * layer when the user has actually scrolled past a message; lets the
+     * chat-list unread count decrement incrementally during the session
+     * instead of being zeroed out on chat open.
+     *
+     * Reuses the controller's [lastReadMessageId] dedupe so a quiet scroll
+     * (settled on the same row) doesn't issue redundant FFI hops.
+     */
+    suspend fun markReadUpTo(messageId: String) {
+        val trimmed = messageId.takeIf { it.isNotBlank() } ?: return
+        if (trimmed == lastReadMessageId) return
+        val account = conversationAccountRef ?: return
+        lastReadMessageId = trimmed
+        runCatching {
+            appState.marmotIo { markTimelineMessageRead(account, group.groupIdHex, trimmed) }
+        }.onFailure {
+            lastReadMessageId = null
+            Log.w("DMConversation", "mark read failed for ${group.groupIdHex.take(8)} message=${trimmed.take(8)}", it)
+        }
+    }
+
+    /**
+     * Returns the timeline index of the FIRST received message that hasn't
+     * been read yet, given the chat-list-projection's [unreadCount].
+     * Returns -1 when there's nothing unread, the timeline is empty, or
+     * the unread count exceeds the loaded window (caller falls back to the
+     * bottom in that case).
+     */
+    fun firstUnreadTimelineIndex(unreadCount: Int): Int {
+        if (unreadCount <= 0 || timeline.isEmpty()) return -1
+        var seen = 0
+        for (index in timeline.indices.reversed()) {
+            if (timeline[index].record.direction == "received") {
+                seen += 1
+                if (seen == unreadCount) return index
+            }
+        }
+        // The loaded window doesn't contain enough received messages to
+        // satisfy the unread count; signal "use the bottom" rather than the
+        // top, since the read state will still advance as the user scrolls.
+        return -1
     }
 
     private fun pruneConfirmedOptimisticMessages() {
