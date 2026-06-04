@@ -745,14 +745,20 @@ class ConversationController(
      * confirmed-id swap path as [send]; on failure it returns to Failed.
      */
     suspend fun retryFailedSend(item: TimelineMessage) {
-        if (item.status != MessageStatus.Failed) return
-        val account = conversationAccountRef ?: return
         val key = item.id
-        val tempId = item.record.messageIdHex
-        val text = item.record.plaintext.takeIf { it.isNotBlank() } ?: return
-        val replyTarget = MessageProjector.replyTargetMessageId(item.record)
-        val refreshedRecord = item.record.copy()
-        val order = item.timelineOrder ?: nextOptimisticTimelineOrder()
+        // Re-check live state. The captured item.status may be stale if the
+        // user double-taps before recomposition: both taps would see Failed
+        // on the captured argument and both would queue FFI sends. By reading
+        // from optimisticMessages and bailing unless still Failed, the second
+        // tap finds Pending (set by the first tap below) and exits.
+        val current = optimisticMessages[key] ?: return
+        if (current.status != MessageStatus.Failed) return
+        val account = conversationAccountRef ?: return
+        val tempId = current.record.messageIdHex
+        val text = current.record.plaintext.takeIf { it.isNotBlank() } ?: return
+        val replyTarget = MessageProjector.replyTargetMessageId(current.record)
+        val refreshedRecord = current.record.copy()
+        val order = current.timelineOrder ?: nextOptimisticTimelineOrder()
         discardedDuringRetry.remove(key)
         optimisticMessages[key] = TimelineMessage(
             key,
