@@ -147,6 +147,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -1152,6 +1153,38 @@ private fun NewChatSheet(
 /** Within this many items of the trailing edge counts as "at bottom". */
 private const val ConversationNearBottomItemSlack = 3
 
+@Composable
+private fun UnreadMessagesDivider(count: Int) {
+    val text = pluralStringResource(R.plurals.unread_messages_count, count, count)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .padding(horizontal = 12.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp),
+                )
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+    }
+}
+
 /**
  * Shared definition of "user is at (or near) the newest message". Used both
  * by the auto-scroll LaunchedEffect (issue #59) and the jump-to-newest FAB
@@ -1284,6 +1317,20 @@ private fun ConversationScreen(
     val latestTimelineItemId = controller.timeline.lastOrNull()?.id
     val olderHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
     val bottomTimelineIndex = controller.timeline.size + 1 + olderHeaderCount
+    // Capture the unread boundary at chat open. Stays fixed for the lifetime
+    // of this composable (per chat.id) so the "N unread messages" divider
+    // doesn't keep moving as the user scrolls and marks messages as read.
+    val entryUnreadCount = remember(chat.id) { chat.unreadCount.toInt().coerceAtLeast(0) }
+    var entryFirstUnreadMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(chat.id, controller.timeline.size) {
+        if (entryFirstUnreadMessageId == null && entryUnreadCount > 0) {
+            val firstUnreadIndex = controller.firstUnreadTimelineIndex(entryUnreadCount)
+            if (firstUnreadIndex >= 0) {
+                entryFirstUnreadMessageId = controller.timeline[firstUnreadIndex].record.messageIdHex
+                    .takeIf { it.isNotBlank() }
+            }
+        }
+    }
     LaunchedEffect(latestTimelineItemId, imeBottom) {
         if (controller.timeline.isNotEmpty()) {
             if (!initialTimelineAnchored) {
@@ -1467,6 +1514,9 @@ private fun ConversationScreen(
                             }
                         }
                         items(controller.timeline, key = { it.id }) { item ->
+                            if (entryUnreadCount > 0 && item.record.messageIdHex == entryFirstUnreadMessageId) {
+                                UnreadMessagesDivider(count = entryUnreadCount)
+                            }
                             MessageBubble(
                                 item = item,
                                 controller = controller,
