@@ -144,11 +144,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.core.os.ConfigurationCompat
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -196,8 +199,12 @@ import dev.ipf.darkmatter.state.OutgoingMessageIndicator
 import dev.ipf.darkmatter.state.RelayListKind
 import dev.ipf.darkmatter.state.TimelineMessage
 import dev.ipf.darkmatter.state.countUnreadIncoming
+import dev.ipf.darkmatter.state.formatExactTimestamp
 import dev.ipf.darkmatter.state.isAcceptableRelayUrl
+import dev.ipf.darkmatter.state.labelFor
+import dev.ipf.darkmatter.state.MessageStatusLabels
 import dev.ipf.darkmatter.state.nextReadAnchor
+import dev.ipf.darkmatter.state.shortHex
 import dev.ipf.darkmatter.state.outgoingIndicator
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -226,6 +233,7 @@ import dev.ipf.marmotkit.UserProfileMetadataFfi
 import dev.ipf.marmotkit.MarmotKitException
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -2153,10 +2161,16 @@ private fun MessageBubble(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     var emojiPickerOpen by remember(record.messageIdHex) { mutableStateOf(false) }
+    var infoSheetOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     val quickReactionEmojis = RecentEmojiList.quickChoices(recentReactionEmojis)
     fun beginReply() {
         controller.replyingTo = record
         menuOpen = false
+    }
+
+    fun openInfoSheet() {
+        menuOpen = false
+        infoSheetOpen = true
     }
 
     fun reactWithEmoji(emoji: String) {
@@ -2307,6 +2321,7 @@ private fun MessageBubble(
                                 },
                                 onReply = ::beginReply,
                                 onCopyText = ::copyMessageText,
+                                onInfo = ::openInfoSheet,
                                 onDelete = {
                                     menuOpen = false
                                     // launchMutation so the MLS commit + Nostr publish
@@ -2327,6 +2342,19 @@ private fun MessageBubble(
                         onEmojiPicked = { emoji ->
                             emojiPickerOpen = false
                             reactWithEmoji(emoji)
+                        },
+                    )
+                }
+                if (infoSheetOpen) {
+                    MessageInfoSheet(
+                        item = item,
+                        mine = mine,
+                        senderDisplayName = appState.displayName(record.sender),
+                        senderNpub = appState.npub(record.sender),
+                        onDismissRequest = { infoSheetOpen = false },
+                        onCopy = { value ->
+                            clipboard.setText(AnnotatedString(value))
+                            appState.present(R.string.copied)
                         },
                     )
                 }
@@ -2357,6 +2385,7 @@ private fun MessageActionMenu(
     onOpenEmojiPicker: () -> Unit,
     onReply: () -> Unit,
     onCopyText: () -> Unit,
+    onInfo: () -> Unit,
     onDelete: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
@@ -2401,6 +2430,11 @@ private fun MessageActionMenu(
                     icon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp)) },
                     onClick = onCopyText,
                 )
+                MessageActionButton(
+                    label = stringResource(R.string.message_info),
+                    icon = { Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    onClick = onInfo,
+                )
                 if (canDelete) {
                     MessageActionButton(
                         label = stringResource(R.string.delete),
@@ -2409,6 +2443,155 @@ private fun MessageActionMenu(
                     )
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageInfoSheet(
+    item: TimelineMessage,
+    mine: Boolean,
+    senderDisplayName: String,
+    senderNpub: String,
+    onDismissRequest: () -> Unit,
+    onCopy: (String) -> Unit,
+) {
+    val record = item.record
+    val configuration = LocalConfiguration.current
+    val locale = remember(configuration) {
+        ConfigurationCompat.getLocales(configuration).get(0) ?: Locale.getDefault()
+    }
+    val zone = remember { ZoneId.systemDefault() }
+    val statusLabels = MessageStatusLabels(
+        pending = stringResource(R.string.message_status_pending),
+        sent = stringResource(R.string.message_status_sent),
+        received = stringResource(R.string.message_status_received),
+        failed = stringResource(R.string.message_status_failed),
+        streaming = stringResource(R.string.message_status_streaming),
+    )
+    val statusText = labelFor(item.status, statusLabels)
+    // Label derives from status, not `mine`, so an outgoing Failed bubble
+    // doesn't read "Sent" while the Status row says "Failed". For outgoing
+    // pending/failed the row reflects local composition time.
+    val timestampLabel = when (item.status) {
+        MessageStatus.Sent -> stringResource(R.string.message_info_sent_at)
+        MessageStatus.Received, MessageStatus.Streaming -> stringResource(R.string.message_info_received_at)
+        MessageStatus.Pending, MessageStatus.Failed -> stringResource(R.string.message_info_created_at)
+    }
+    // For incoming, prefer the *local* arrival time — sender's claimed
+    // `recordedAt` can be spoofed. Surface `recordedAt` as a second row only
+    // when it diverges from receivedAt by more than a few seconds (anything
+    // less is clock-skew noise).
+    val primarySeconds = if (!mine && record.receivedAt > 0uL) record.receivedAt else record.recordedAt
+    val formattedTimestamp = formatExactTimestamp(primarySeconds, zone, locale)
+    val showOriginal = !mine &&
+        record.receivedAt > 0uL &&
+        record.recordedAt > 0uL &&
+        absDelta(record.recordedAt, record.receivedAt) > 5uL
+    val formattedOriginalTimestamp = if (showOriginal) {
+        formatExactTimestamp(record.recordedAt, zone, locale)
+    } else ""
+    val npubShort = shortHex(senderNpub, head = 12, tail = 6)
+    val messageIdShort = shortHex(record.messageIdHex)
+    val copyActionLabel = stringResource(R.string.copy_text)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                stringResource(R.string.message_info),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (formattedTimestamp.isNotBlank()) {
+                MessageInfoRow(
+                    label = timestampLabel,
+                    value = formattedTimestamp,
+                )
+            }
+            if (formattedOriginalTimestamp.isNotBlank()) {
+                MessageInfoRow(
+                    label = stringResource(R.string.message_info_original_timestamp),
+                    value = formattedOriginalTimestamp,
+                )
+            }
+            // "From" is meaningful only for incoming messages; hide for own
+            // messages where it would read tautologically "From: <my name>".
+            if (!mine && senderNpub.isNotBlank()) {
+                MessageInfoRow(
+                    label = stringResource(R.string.message_info_sender),
+                    value = if (senderDisplayName.isNotBlank()) "$senderDisplayName · $npubShort" else npubShort,
+                    onCopy = { onCopy(senderNpub) },
+                    copyActionLabel = copyActionLabel,
+                )
+            }
+            if (record.messageIdHex.isNotBlank()) {
+                MessageInfoRow(
+                    label = stringResource(R.string.message_info_message_id),
+                    value = messageIdShort,
+                    onCopy = { onCopy(record.messageIdHex) },
+                    copyActionLabel = copyActionLabel,
+                )
+            }
+            MessageInfoRow(
+                label = stringResource(R.string.message_info_status),
+                value = statusText,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+private fun absDelta(a: ULong, b: ULong): ULong = if (a > b) a - b else b - a
+
+@Composable
+private fun MessageInfoRow(
+    label: String,
+    value: String,
+    onCopy: (() -> Unit)? = null,
+    copyActionLabel: String? = null,
+) {
+    val rowModifier = if (onCopy != null) {
+        Modifier
+            .fillMaxWidth()
+            .clickable(
+                onClickLabel = copyActionLabel,
+                role = Role.Button,
+                onClick = onCopy,
+            )
+    } else {
+        Modifier.fillMaxWidth()
+    }
+    Row(
+        modifier = rowModifier.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        if (onCopy != null) {
+            Icon(
+                Icons.Default.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
