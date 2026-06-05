@@ -63,10 +63,21 @@ class DiskByteCache(
             residentBytes -= existing.size
             runCatching { existing.file.delete() }
         }
+        // Atomic write: write to a sibling `.tmp` file then rename onto the
+        // final path. A power loss or kill mid-`writeBytes` would otherwise
+        // leave a truncated `.bin` that `rehydrateIndex` indexes with the
+        // wrong size; subsequent `readBytes()` returns truncated bytes that
+        // a decoder treats as corrupt.
         val file = File(cacheDir, hashed)
+        val tmp = File(cacheDir, "$hashed$TMP_SUFFIX")
         try {
-            file.writeBytes(bytes)
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(file)) {
+                runCatching { tmp.delete() }
+                return
+            }
         } catch (_: IOException) {
+            runCatching { tmp.delete() }
             // Disk full / permission error. L1 still holds the bytes; this
             // entry just won't survive restart. Silent fail is acceptable.
             return
@@ -82,9 +93,14 @@ class DiskByteCache(
         index.values.forEach { runCatching { it.file.delete() } }
         index.clear()
         residentBytes = 0L
-        // Catch any orphans that aren't in the index (e.g., a prior crash
-        // mid-put). Sign-out wants no plaintext bytes lingering.
-        cacheDir.listFiles()?.forEach { runCatching { it.delete() } }
+        // Catch any orphans that aren't in the index — e.g. a prior crash
+        // mid-put left a `.tmp`, or an entry whose index row was lost.
+        // Scoped to OUR file-naming convention (`.bin` + `.tmp`) so a
+        // future co-tenant in the same dir survives sign-out.
+        cacheDir.listFiles()
+            ?.asSequence()
+            ?.filter { it.isFile && (it.name.endsWith(SUFFIX) || it.name.endsWith(TMP_SUFFIX)) }
+            ?.forEach { runCatching { it.delete() } }
     }
 
     fun size(): Int = synchronized(this) { index.size }
@@ -136,6 +152,7 @@ class DiskByteCache(
 
     private companion object {
         const val SUFFIX = ".bin"
+        const val TMP_SUFFIX = ".tmp"
         val HEX = charArrayOf(
             '0', '1', '2', '3', '4', '5', '6', '7',
             '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',

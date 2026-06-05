@@ -142,6 +142,32 @@ class DiskByteCacheTest {
     }
 
     @Test
+    fun clear_skipsForeignFilesInDir() {
+        // Defensive: if a future co-tenant ever drops files in cacheDir,
+        // clear() must not wipe them. Only our own `.bin` / `.tmp` files.
+        val cache = DiskByteCache(dir, maxBytes = 1024)
+        cache.put("a", ByteArray(30))
+        val foreign = File(dir, "not-mine.txt").also { it.writeText("hello") }
+        cache.clear()
+        // Our entry is gone…
+        assertNull(cache.get("a"))
+        assertEquals(0, cache.size())
+        // …but the foreign file survives.
+        assertTrue("foreign file should survive", foreign.exists())
+        assertEquals("hello", foreign.readText())
+    }
+
+    @Test
+    fun put_writesAtomically_noPartialFile() {
+        // Sanity check that the .tmp → rename dance leaves no `.tmp` files
+        // behind on successful writes.
+        val cache = DiskByteCache(dir, maxBytes = 1024)
+        cache.put("k", ByteArray(40))
+        val tmpFiles = dir.listFiles()?.filter { it.name.endsWith(".tmp") }.orEmpty()
+        assertTrue("no .tmp file should linger after successful put", tmpFiles.isEmpty())
+    }
+
+    @Test
     fun differentKeys_collideToDifferentFiles() {
         // Defense against hash collision oversight — two keys must map to
         // two distinct files. (sha256 makes real collisions improbable; this
