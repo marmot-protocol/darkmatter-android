@@ -106,6 +106,29 @@ private fun String.relayHostCandidate(): String? {
 class DarkMatterAppState(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences("darkmatter", Context.MODE_PRIVATE)
+
+    /**
+     * App-lifetime cache of decrypted attachment bytes, keyed by the globally
+     * unique `messageIdHex`. Lives here (not on the per-conversation
+     * controller) so re-opening a chat doesn't re-download media already
+     * fetched this session. Bounded in bytes; see [dev.ipf.darkmatter.media.ByteSizeLruCache].
+     */
+    internal val mediaPlaintextCache = dev.ipf.darkmatter.media.ByteSizeLruCache<String, ByteArray>(
+        maxBytes = MEDIA_PLAINTEXT_CACHE_MAX_BYTES,
+        sizeOf = { it.size },
+    )
+
+    /**
+     * App-lifetime cache of *decoded* attachment thumbnails (sampled bitmaps),
+     * keyed identically to [mediaPlaintextCache]. Lets a bubble render its
+     * image on the first frame — no decode spinner — for anything already
+     * fetched/sent this session. Bounded by approximate pixel bytes.
+     */
+    internal val mediaThumbnailCache = dev.ipf.darkmatter.media.ByteSizeLruCache<String, android.graphics.Bitmap>(
+        maxBytes = MEDIA_THUMBNAIL_CACHE_MAX_BYTES,
+        sizeOf = { it.allocationByteCount },
+    )
+
     private var client: MarmotClient? = null
     private val localNotificationPresenter = LocalNotificationPresenter(appContext)
 
@@ -122,6 +145,11 @@ class DarkMatterAppState(context: Context) {
         private set
 
     var themeMode by mutableStateOf(AppThemeMode.fromPreference(preferences.getString(THEME_MODE_KEY, null)))
+        private set
+
+    var mediaAutoDownloadPolicy by mutableStateOf(
+        MediaAutoDownloadPolicy.fromPreference(preferences.getString(MEDIA_AUTO_DOWNLOAD_KEY, null)),
+    )
         private set
 
     var languageTag by mutableStateOf(preferences.getString(LANGUAGE_TAG_KEY, null).orEmpty())
@@ -364,6 +392,13 @@ class DarkMatterAppState(context: Context) {
         // emoji, etc.) MUST persist across this transition. The only correct
         // place to call DraftStore.clearAllForAccount is a real
         // identity-delete flow, which doesn't exist yet.
+        //
+        // Decrypted media is the exception: it's a process-wide in-memory cache
+        // (not per-account persistence), so account A's plaintext images must
+        // not linger in memory after switching to account B. Re-opening a chat
+        // simply re-downloads — no durable state is lost.
+        mediaPlaintextCache.clear()
+        mediaThumbnailCache.clear()
         val next = accounts.firstOrNull { it.label != activeAccountRef }?.label
         activeAccountRef = next
         preferences.edit().apply {
@@ -478,6 +513,29 @@ class DarkMatterAppState(context: Context) {
     fun updateThemeMode(mode: AppThemeMode) {
         themeMode = mode
         preferences.edit().putString(THEME_MODE_KEY, mode.preferenceValue).apply()
+    }
+
+    fun updateMediaAutoDownloadPolicy(policy: MediaAutoDownloadPolicy) {
+        mediaAutoDownloadPolicy = policy
+        preferences.edit().putString(MEDIA_AUTO_DOWNLOAD_KEY, policy.preferenceValue).apply()
+    }
+
+    /**
+     * Whether an incoming attachment should be fetched/decrypted automatically
+     * given the current [mediaAutoDownloadPolicy] and network metering.
+     */
+    fun shouldAutoDownloadMedia(): Boolean {
+        return when (mediaAutoDownloadPolicy) {
+            MediaAutoDownloadPolicy.Always -> true
+            MediaAutoDownloadPolicy.Never -> false
+            MediaAutoDownloadPolicy.WifiOnly -> !isActiveNetworkMetered()
+        }
+    }
+
+    private fun isActiveNetworkMetered(): Boolean {
+        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            ?: return true // Unknown → treat as metered (conservative).
+        return cm.isActiveNetworkMetered
     }
 
     fun updateLanguageTag(tag: String) {
@@ -872,6 +930,13 @@ class DarkMatterAppState(context: Context) {
         private const val ACTIVE_ACCOUNT_KEY = "active_account"
         private const val DEVELOPER_MODE_KEY = "developer_mode"
         private const val THEME_MODE_KEY = "theme_mode"
+        private const val MEDIA_AUTO_DOWNLOAD_KEY = "media_auto_download"
+        // 24 MiB cap on decrypted attachment bytes resident in memory —
+        // roughly ten 1920px JPEGs. Persists across conversation re-entry.
+        private const val MEDIA_PLAINTEXT_CACHE_MAX_BYTES: Long = 24L * 1024L * 1024L
+        // ~48 MiB of decoded thumbnails (sampled to <=1280px). Enough to keep
+        // visible bubbles spinner-free; bounded so it can't grow unbounded.
+        private const val MEDIA_THUMBNAIL_CACHE_MAX_BYTES: Long = 48L * 1024L * 1024L
         private const val LANGUAGE_TAG_KEY = "language_tag"
         private const val PROFILE_REFRESH_RETRY_COOLDOWN_MILLIS = 60_000L
         private const val MAX_RETAINED_CONVERSATION_STATES = 32
