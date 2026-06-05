@@ -1,8 +1,10 @@
 package dev.ipf.darkmatter.state
 
+import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,6 +17,15 @@ class MessageInfoFormatTest {
         // FFI "no timestamp" arrives as 0; the sheet hides the row rather
         // than rendering a 1970 epoch date.
         assertEquals("", formatExactTimestamp(0uL, UTC, US))
+    }
+
+    @Test
+    fun formatTimestamp_emptyForULongAboveInstantMax() {
+        // Above Instant.MAX would throw DateTimeException at runtime; the
+        // guard returns the same empty-string sentinel as the unset case.
+        val justPastMax = Instant.MAX.epochSecond.toULong() + 1uL
+        assertEquals("", formatExactTimestamp(justPastMax, UTC, US))
+        assertEquals("", formatExactTimestamp(ULong.MAX_VALUE, UTC, US))
     }
 
     @Test
@@ -87,6 +98,62 @@ class MessageInfoFormatTest {
     @Test
     fun shortHex_customHeadAndTail() {
         assertEquals("ab…ef", shortHex("abcdef", head = 2, tail = 2))
+    }
+
+    // ---- labelFor -----------------------------------------------------------
+
+    // ---- absDelta -----------------------------------------------------------
+
+    @Test
+    fun absDelta_zeroWhenEqual() {
+        assertEquals(0uL, absDelta(100uL, 100uL))
+        assertEquals(0uL, absDelta(0uL, 0uL))
+    }
+
+    @Test
+    fun absDelta_symmetric() {
+        // a-b and b-a must agree — order-independence is the contract.
+        assertEquals(absDelta(100uL, 90uL), absDelta(90uL, 100uL))
+    }
+
+    @Test
+    fun absDelta_doesNotUnderflow() {
+        // ULong subtraction would otherwise wrap to a huge positive number.
+        assertEquals(7uL, absDelta(3uL, 10uL))
+    }
+
+    // ---- shouldShowOriginalTimestamp ---------------------------------------
+
+    @Test
+    fun shouldShowOriginal_falseWhenEitherUnset() {
+        // Caller falls back to the other field when one side is the FFI
+        // "unset" sentinel; showing a second row would be misleading.
+        assertFalse(shouldShowOriginalTimestamp(recordedAtSeconds = 0uL, receivedAtSeconds = 1_000uL))
+        assertFalse(shouldShowOriginalTimestamp(recordedAtSeconds = 1_000uL, receivedAtSeconds = 0uL))
+        assertFalse(shouldShowOriginalTimestamp(recordedAtSeconds = 0uL, receivedAtSeconds = 0uL))
+    }
+
+    @Test
+    fun shouldShowOriginal_falseWhenWithinDefaultSkewTolerance() {
+        // Inside 5s — clock-skew noise, not a real disagreement.
+        assertFalse(shouldShowOriginalTimestamp(recordedAtSeconds = 1_000uL, receivedAtSeconds = 1_000uL))
+        assertFalse(shouldShowOriginalTimestamp(recordedAtSeconds = 1_000uL, receivedAtSeconds = 1_005uL))
+        assertFalse(shouldShowOriginalTimestamp(recordedAtSeconds = 1_005uL, receivedAtSeconds = 1_000uL))
+    }
+
+    @Test
+    fun shouldShowOriginal_trueJustAboveThreshold() {
+        // 6s apart — strictly greater than the default 5s threshold.
+        assertTrue(shouldShowOriginalTimestamp(recordedAtSeconds = 1_000uL, receivedAtSeconds = 1_006uL))
+        assertTrue(shouldShowOriginalTimestamp(recordedAtSeconds = 1_006uL, receivedAtSeconds = 1_000uL))
+    }
+
+    @Test
+    fun shouldShowOriginal_honorsCustomThreshold() {
+        // With a 0s threshold, *any* divergence triggers the row.
+        assertTrue(shouldShowOriginalTimestamp(1_000uL, 1_001uL, thresholdSeconds = 0uL))
+        // Exactly-equal still suppresses the row (>, not >=).
+        assertFalse(shouldShowOriginalTimestamp(1_000uL, 1_000uL, thresholdSeconds = 0uL))
     }
 
     // ---- labelFor -----------------------------------------------------------

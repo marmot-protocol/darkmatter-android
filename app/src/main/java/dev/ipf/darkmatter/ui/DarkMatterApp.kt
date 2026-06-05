@@ -205,6 +205,7 @@ import dev.ipf.darkmatter.state.labelFor
 import dev.ipf.darkmatter.state.MessageStatusLabels
 import dev.ipf.darkmatter.state.nextReadAnchor
 import dev.ipf.darkmatter.state.shortHex
+import dev.ipf.darkmatter.state.shouldShowOriginalTimestamp
 import dev.ipf.darkmatter.state.outgoingIndicator
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -2485,10 +2486,7 @@ private fun MessageInfoSheet(
     // less is clock-skew noise).
     val primarySeconds = if (!mine && record.receivedAt > 0uL) record.receivedAt else record.recordedAt
     val formattedTimestamp = formatExactTimestamp(primarySeconds, zone, locale)
-    val showOriginal = !mine &&
-        record.receivedAt > 0uL &&
-        record.recordedAt > 0uL &&
-        absDelta(record.recordedAt, record.receivedAt) > 5uL
+    val showOriginal = !mine && shouldShowOriginalTimestamp(record.recordedAt, record.receivedAt)
     val formattedOriginalTimestamp = if (showOriginal) {
         formatExactTimestamp(record.recordedAt, zone, locale)
     } else ""
@@ -2549,8 +2547,6 @@ private fun MessageInfoSheet(
         }
     }
 }
-
-private fun absDelta(a: ULong, b: ULong): ULong = if (a > b) a - b else b - a
 
 @Composable
 private fun MessageInfoRow(
