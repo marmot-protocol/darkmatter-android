@@ -395,12 +395,31 @@ class DarkMatterAppState(context: Context) {
     }
 
     fun setActiveAccount(label: String) {
+        // Switching accounts (from the account picker) is a session boundary
+        // identical to sign-out for media-cache purposes: account A's
+        // decrypted bytes must not linger in process memory or on disk after
+        // account B is active. Re-opening a chat under B simply re-downloads.
+        // Skip the wipe when the label is unchanged (no-op tap on the
+        // already-active account) so caches survive a redundant tap.
+        if (label != activeAccountRef) clearMediaCaches()
         activeAccountRef = label
         preferences.edit().putString(ACTIVE_ACCOUNT_KEY, label).apply()
         accounts.firstOrNull { it.label == label }?.accountIdHex?.let { warmProfile(it) }
         notificationScope.launch {
             refreshLocalNotificationSettings()
         }
+    }
+
+    /**
+     * Wipe the decrypted-media caches at a session boundary (sign-out or
+     * account switch). L1 (in-memory) clears synchronously so account A's
+     * plaintext is unreachable immediately; L2 (disk) is scheduled to IO
+     * since many file deletes shouldn't stall the UI thread.
+     */
+    private fun clearMediaCaches() {
+        mediaPlaintextCache.clear()
+        mediaThumbnailCache.clear()
+        notificationScope.launch(Dispatchers.IO) { diskMediaCache.clear() }
     }
 
     fun signOutActiveAccount() {
@@ -415,13 +434,9 @@ class DarkMatterAppState(context: Context) {
         // (not per-account persistence), so account A's plaintext images must
         // not linger in memory after switching to account B. Re-opening a chat
         // simply re-downloads — no durable state is lost.
-        mediaPlaintextCache.clear()
-        mediaThumbnailCache.clear()
-        // Disk wipe is potentially many file deletes — push to IO so we
-        // don't stall the sign-out tap on slow storage. Account A's
-        // plaintext is unreachable the instant L1 clears; the on-disk
-        // bytes are scheduled for removal moments later.
-        notificationScope.launch(Dispatchers.IO) { diskMediaCache.clear() }
+        // Both sign-out and account-switch wipe decrypted-media caches; the
+        // helper centralises the L1-sync + L2-on-IO pattern.
+        clearMediaCaches()
         val next = accounts.firstOrNull { it.label != activeAccountRef }?.label
         activeAccountRef = next
         preferences.edit().apply {
