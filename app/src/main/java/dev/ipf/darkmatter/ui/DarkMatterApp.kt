@@ -5112,7 +5112,11 @@ private val publishedAtFormatter: DateTimeFormatter =
 
 private fun formatPublishedAt(unixSeconds: ULong, unknown: String, format: String): String {
     if (unixSeconds == 0uL) return unknown
-    val instant = Instant.ofEpochSecond(unixSeconds.toLong())
+    // ULong > Long.MAX_VALUE wraps to a negative epoch; Instant then rejects
+    // anything below Instant.MIN. Garbage from a malicious relay shouldn't
+    // crash the KeyPackage screen — fall back to "unknown" instead.
+    if (unixSeconds > Long.MAX_VALUE.toULong()) return unknown
+    val instant = runCatching { Instant.ofEpochSecond(unixSeconds.toLong()) }.getOrNull() ?: return unknown
     return String.format(format, publishedAtFormatter.format(instant))
 }
 
