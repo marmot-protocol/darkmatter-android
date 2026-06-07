@@ -50,9 +50,11 @@ class LocalNotificationPresenter(private val context: Context) {
             notificationDebug { "skip key=${update.notificationKey.take(16)} reason=permission" }
             return false
         }
-        // Channels are created exactly once via AppState.bootstrap() and
-        // ensureNotificationRuntimeStarted(); recreating them on every show()
-        // crosses the NotificationManagerService Binder unnecessarily.
+        // Channels are created during AppState bootstrap / runtime start
+        // (AppState.bootstrap() and ensureNotificationRuntimeStarted() both
+        // call ensureChannels()); we deliberately don't recreate them on
+        // every show() to avoid the per-notification Binder IPC into
+        // NotificationManagerService.
 
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
