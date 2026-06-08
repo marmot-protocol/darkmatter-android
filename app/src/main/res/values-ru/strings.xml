@@ -49,6 +49,7 @@
     <string name="leave">Покинуть</string>
     <string name="couldnt_load_conversation">Не удалось загрузить беседу</string>
     <string name="no_messages_yet">Пока нет сообщений</string>
+    <string name="you_are_no_longer_a_member">Вы больше не участник этой группы.</string>
     <string name="chat_row_draft_prefix">Черновик: </string>
     <string name="jump_to_newest">К новым</string>
     <string name="discard_failed_message">Удалить неотправленное сообщение</string>
@@ -57,6 +58,7 @@
     <string name="accept">Принять</string>
     <string name="profile">Профиль</string>
     <string name="dismiss">Закрыть</string>
+    <string name="edit">Изменить</string>
     <string name="save_group">Сохранить группу</string>
     <string name="saving_group">Сохранение группы...</string>
     <string name="no_description">Нет описания</string>
@@ -278,7 +280,7 @@
     <string name="toast_background_connection_disabled">Фоновое соединение отключено</string>
     <string name="toast_chat_started">Чат начался</string>
     <string name="toast_couldnt_start_chat">Не удалось начать чат</string>
-    <string name="toast_profile_published">Профиль опубликован</string>
+<string name="toast_profile_published">Профиль опубликован</string>
     <string name="toast_profile_published_detail">Ваши метаданные kind:0 доступны на реле %1$d.</string>
     <string name="toast_couldnt_publish_profile">Не удалось опубликовать профиль</string>
     <string name="toast_send_failed">Отправить не удалось</string>

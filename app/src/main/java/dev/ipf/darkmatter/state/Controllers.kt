@@ -39,6 +39,7 @@ import dev.ipf.marmotkit.ChatListSubscription
 import dev.ipf.marmotkit.ChatListSubscriptionUpdateFfi
 import dev.ipf.marmotkit.ChatListUpdateTriggerFfi
 import dev.ipf.marmotkit.ChatsSubscription
+import dev.ipf.marmotkit.GroupDetailsFfi
 import dev.ipf.marmotkit.GroupStateSubscription
 import dev.ipf.marmotkit.TimelineMessageQueryFfi
 import dev.ipf.marmotkit.TimelineMessageChangeFfi
@@ -523,6 +524,10 @@ class ConversationController(
         private set
     var members by mutableStateOf<List<AppGroupMemberRecordFfi>>(initialMemberSnapshot?.members.orEmpty())
         private set
+    // Use cached members immediately to avoid a blank composer gap while the
+    // first refresh verifies the roster.
+    var membersLoaded by mutableStateOf(initialMemberSnapshot?.members?.isNotEmpty() == true)
+        private set
     var timeline by mutableStateOf<List<TimelineMessage>>(emptyList())
         private set
     var reactions by mutableStateOf<Map<String, List<ReactionTally>>>(emptyMap())
@@ -635,6 +640,12 @@ class ConversationController(
     val isSelfAdmin: Boolean
         get() = GroupProjector.isAdminRef(group, appState.activeAccount?.accountIdHex)
 
+    val isSelfMember: Boolean
+        get() = members.any { GroupProjector.isActiveAccountMember(it, appState.activeAccount?.accountIdHex) }
+
+    val canSendMessages: Boolean
+        get() = membersLoaded && isSelfMember
+
     val canLeaveGroup: Boolean
         get() = GroupProjector.canLeaveGroup(group, appState.activeAccount?.accountIdHex)
 
@@ -727,6 +738,12 @@ class ConversationController(
             // error.
             throw cancel
         } catch (throwable: Throwable) {
+            if (throwable.isUseAfterEviction()) {
+                markActiveAccountRemovedFromMembers(account)
+                isLoading = false
+                error = null
+                return
+            }
             isLoading = false
             error = throwable.message ?: throwable.javaClass.simpleName
         } finally {
@@ -742,6 +759,7 @@ class ConversationController(
         val trimmed = text.trim()
         val account = conversationAccountRef ?: return
         if (trimmed.isEmpty()) return
+        if (!canSendMessages) return
 
         val replyTarget = replyingTo?.messageIdHex?.takeIf { it.isNotBlank() }
         val tempId = UUID.randomUUID().toString()
@@ -817,7 +835,7 @@ class ConversationController(
         caption: String?,
     ) {
         val account = conversationAccountRef ?: return
-        if (jpegBytes.isEmpty()) return
+        if (!canSendMessages || jpegBytes.isEmpty()) return
 
         val tempId = UUID.randomUUID().toString()
         val key = "msg:$tempId"
@@ -992,6 +1010,7 @@ class ConversationController(
 
     suspend fun toggleReaction(emoji: String, message: AppMessageRecordFfi) {
         val account = appState.activeAccountRef ?: return
+        if (!canSendMessages) return
         val target = message.messageIdHex.takeIf { it.isNotBlank() } ?: return
         val alreadyMine = reactions[target]?.any { it.emoji == emoji && it.mine } == true
         val optimisticId = UUID.randomUUID().toString()
@@ -1016,6 +1035,7 @@ class ConversationController(
 
     suspend fun deleteMessage(message: AppMessageRecordFfi) {
         val account = appState.activeAccountRef ?: return
+        if (!canSendMessages) return
         val target = message.messageIdHex.takeIf { it.isNotBlank() } ?: return
         deletedMessageIds = deletedMessageIds + target
         try {
@@ -1387,11 +1407,16 @@ class ConversationController(
 
     suspend fun removeMember(member: AppGroupMemberRecordFfi): Boolean = withMutationLockResult(false) {
         val account = appState.activeAccountRef ?: return@withMutationLockResult false
-        val target = GroupProjector.memberRef(member)
+        // remove_members signs a roster update for a Nostr pubkey, so use the
+        // stable member id. memberRef may be a local account label.
+        val target = member.memberIdHex
         lastMutationError = null
         runCatching {
             appState.marmotIo { removeMembers(account, group.groupIdHex, listOf(target)) }
-            refreshMembers()
+            // The group-state subscription should eventually converge from the
+            // published MLS commit. Update this controller immediately so the
+            // admin does not need an account switch to see the removed row leave.
+            removeMemberLocally(account, target)
             appState.present(R.string.toast_member_removed)
             true
         }.onFailure {
@@ -1993,14 +2018,68 @@ class ConversationController(
     private suspend fun refreshMembers() {
         val account = appState.activeAccountRef ?: return
         runCatching {
-            val loaded = appState.marmotIo { groupMembers(account, group.groupIdHex) }
-            members = loaded
-            appState.cacheGroupMemberSnapshot(account, group.groupIdHex, loaded)
-            appState.requestProfiles(members.map { it.memberIdHex })
+            // Force OpenMLS replay before trusting cached group details. For an
+            // evicted account this is where Rust currently reports
+            // GroupStateError::UseAfterEviction, which we map to read-only UI.
+            appState.marmotIo { groupMlsState(account, group.groupIdHex) }
+            val details = appState.marmotIo { groupDetails(account, group.groupIdHex) }
+            applyGroupDetails(account, details)
         }.onFailure {
             if (it is CancellationException) throw it
+            if (it.isUseAfterEviction()) {
+                markActiveAccountRemovedFromMembers(account)
+                return
+            }
             Log.w("DMConversation", "refresh members failed for ${group.groupIdHex.take(8)}", it)
         }
+    }
+
+    private fun markActiveAccountRemovedFromMembers(account: String) {
+        val activeAccountIdHex = appState.activeAccount?.accountIdHex ?: return
+        val updatedMembers = members.filterNot {
+            GroupProjector.isActiveAccountMember(it, activeAccountIdHex)
+        }
+        members = updatedMembers
+        membersLoaded = true
+        group = group.copy(
+            admins = group.admins.filterNot { it.equals(activeAccountIdHex, ignoreCase = true) },
+        )
+        appState.cacheGroupMemberSnapshot(account, group.groupIdHex, updatedMembers)
+    }
+
+    private fun removeMemberLocally(account: String, target: String) {
+        val updatedMembers = members.filterNot { it.memberIdHex.equals(target, ignoreCase = true) }
+        members = updatedMembers
+        membersLoaded = true
+        group = group.copy(
+            admins = group.admins.filterNot { it.equals(target, ignoreCase = true) },
+        )
+        appState.cacheGroupMemberSnapshot(account, group.groupIdHex, updatedMembers)
+    }
+
+    private fun Throwable.isUseAfterEviction(): Boolean {
+        // Stopgap until Marmot exposes a typed UniFFI error/code for
+        // GroupStateError::UseAfterEviction. Keep this in sync with the Rust
+        // OpenMLS group-state error variant name.
+        val text = generateSequence(this) { it.cause }
+            .joinToString(separator = "\n") { error ->
+                listOfNotNull(error.message, error.javaClass.simpleName).joinToString(" ")
+            }
+        return "UseAfterEviction" in text || ("GroupStateError" in text && "eviction" in text.lowercase())
+    }
+
+    private fun applyGroupDetails(account: String, details: GroupDetailsFfi) {
+        group = details.group
+        members = details.members.map {
+            AppGroupMemberRecordFfi(
+                memberIdHex = it.memberIdHex,
+                account = it.account,
+                local = it.local,
+            )
+        }
+        membersLoaded = true
+        appState.cacheGroupMemberSnapshot(account, group.groupIdHex, members)
+        appState.requestProfiles(members.map { it.memberIdHex })
     }
 
     private suspend fun watchAgentTextStream(account: String, streamId: String) {

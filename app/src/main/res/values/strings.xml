@@ -49,6 +49,7 @@
     <string name="leave">Leave</string>
     <string name="couldnt_load_conversation">Couldn\'t load conversation</string>
     <string name="no_messages_yet">No messages yet</string>
+    <string name="you_are_no_longer_a_member">You are no longer a member of this group.</string>
     <string name="chat_row_draft_prefix">Draft: </string>
     <string name="jump_to_newest">Jump to newest</string>
     <string name="discard_failed_message">Discard failed message</string>
@@ -57,6 +58,7 @@
     <string name="accept">Accept</string>
     <string name="profile">Profile</string>
     <string name="dismiss">Dismiss</string>
+    <string name="edit">Edit</string>
     <string name="save_group">Save Group</string>
     <string name="saving_group">Saving group...</string>
     <string name="no_description">No description</string>

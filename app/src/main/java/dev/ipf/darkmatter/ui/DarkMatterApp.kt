@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -74,6 +75,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
@@ -2135,7 +2137,7 @@ private fun ConversationScreen(
         }
     }
 
-    BackHandler(enabled = !showDetails) {
+    BackHandler {
         onBack()
     }
 
@@ -2204,6 +2206,16 @@ private fun ConversationScreen(
                 }
             }
     }
+    if (showDetails) {
+        GroupDetailsScreen(
+            appState = appState,
+            controller = controller,
+            onBack = { showDetails = false },
+            onLeft = onBack,
+        )
+        return
+    }
+
     val openDetailsDescription = stringResource(R.string.details)
     Scaffold(
         topBar = {
@@ -2255,56 +2267,62 @@ private fun ConversationScreen(
                                 appState.launchMutation { controller.setArchived(!controller.group.archived) }
                             },
                         )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.leave)) },
-                            leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
-                            enabled = !controller.mutationInFlight,
-                            onClick = {
-                                menuOpen = false
-                                confirmLeaveFromTopBar = true
-                            },
-                        )
+                        if (controller.isSelfMember) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.leave)) },
+                                leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                                enabled = !controller.mutationInFlight,
+                                onClick = {
+                                    menuOpen = false
+                                    confirmLeaveFromTopBar = true
+                                },
+                            )
+                        }
                     }
                 },
             )
         },
         bottomBar = {
-            if (controller.error == null && !controller.group.pendingConfirmation) {
-                val groupIdHex = controller.group.groupIdHex
-                ComposerBar(
-                    replyingTo = controller.replyingTo,
-                    messageTextCopy = messageTextCopy,
-                    onCancelReply = { controller.replyingTo = null },
-                    onSend = { appState.launchMutation { controller.send(it) } },
-                    initialDraft = appState.draftFor(groupIdHex).orEmpty(),
-                    onDraftChange = { appState.setDraft(groupIdHex, it) },
-                    draftKey = groupIdHex,
-                    onAfterSend = {
-                        // Always pull the user down to see their just-sent
-                        // bubble, even if they were reading older history.
-                        // Matches standard chat-app behavior.
-                        scope.launch {
-                            val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-                            listState.animateScrollToItem(lastIndex)
-                        }
-                    },
-                    onPickFromGallery = {
-                        imagePickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                    onCaptureFromCamera = {
-                        val granted = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.CAMERA,
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (granted) {
-                            launchCameraCapture()
-                        } else {
-                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
-                    },
-                )
+            when {
+                controller.error != null || controller.group.pendingConfirmation -> Unit
+                controller.canSendMessages -> {
+                    val groupIdHex = controller.group.groupIdHex
+                    ComposerBar(
+                        replyingTo = controller.replyingTo,
+                        messageTextCopy = messageTextCopy,
+                        onCancelReply = { controller.replyingTo = null },
+                        onSend = { appState.launchMutation { controller.send(it) } },
+                        initialDraft = appState.draftFor(groupIdHex).orEmpty(),
+                        onDraftChange = { appState.setDraft(groupIdHex, it) },
+                        draftKey = groupIdHex,
+                        onAfterSend = {
+                            // Always pull the user down to see their just-sent
+                            // bubble, even if they were reading older history.
+                            // Matches standard chat-app behavior.
+                            scope.launch {
+                                val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                                listState.animateScrollToItem(lastIndex)
+                            }
+                        },
+                        onPickFromGallery = {
+                            imagePickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onCaptureFromCamera = {
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.CAMERA,
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                launchCameraCapture()
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                    )
+                }
+                controller.membersLoaded && !controller.isSelfMember -> RemovedMemberComposerNotice()
             }
         },
     ) { padding ->
@@ -2415,15 +2433,6 @@ private fun ConversationScreen(
         }
     }
 
-    if (showDetails) {
-        GroupDetailsSheet(
-            appState = appState,
-            controller = controller,
-            onDismiss = { showDetails = false },
-            onLeft = onBack,
-        )
-    }
-
     if (confirmLeaveFromTopBar) {
         ConfirmDialog(
             title = stringResource(R.string.confirm_leave_title),
@@ -2507,10 +2516,10 @@ private fun PendingInviteContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GroupDetailsSheet(
+private fun GroupDetailsScreen(
     appState: DarkMatterAppState,
     controller: ConversationController,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onLeft: () -> Unit,
 ) {
     var name by remember(controller.group.groupIdHex, controller.group.name) { mutableStateOf(controller.group.name) }
@@ -2518,6 +2527,9 @@ private fun GroupDetailsSheet(
     var pendingMember by remember { mutableStateOf("") }
     var pendingMemberError by remember { mutableStateOf<String?>(null) }
     var showMemberScanner by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showEditProfile by remember { mutableStateOf(false) }
+    var showAddMember by remember { mutableStateOf(false) }
     var mlsState by remember(controller.group.groupIdHex) { mutableStateOf<AppGroupMlsStateFfi?>(null) }
     var mlsLoading by remember(controller.group.groupIdHex) { mutableStateOf(false) }
     // Scoped to the visible group; the controller mutation continues on appState
@@ -2526,7 +2538,6 @@ private fun GroupDetailsSheet(
     var pendingInvites by remember(controller.group.groupIdHex) { mutableStateOf<List<String>>(emptyList()) }
     var pendingConfirm by remember { mutableStateOf<DetailsConfirm?>(null) }
     val scope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val groupTitleCopy = rememberGroupTitleCopy()
     val oneValidMemberReferenceError = stringResource(R.string.error_one_valid_member_reference)
     val qrNotValidNpubOrPublicKeyError = stringResource(R.string.error_qr_not_valid_npub_or_public_key)
@@ -2574,108 +2585,133 @@ private fun GroupDetailsSheet(
         refreshMlsDetails()
     }
 
-    LaunchedEffect(controller.members.map { it.memberIdHex }) {
+    LaunchedEffect(controller.members.map { it.memberIdHex }, pendingInvites) {
         val memberIds = controller.members.map { it.memberIdHex.lowercase() }.toSet()
-        pendingInvites = pendingInvites.filterNot { it.lowercase() in memberIds }
+        val filtered = pendingInvites.filter { invite ->
+            val accountIdHex = appState.accountIdHex(invite)?.lowercase()
+            accountIdHex == null || accountIdHex !in memberIds
+        }
+        if (filtered != pendingInvites) pendingInvites = filtered
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    BackHandler { onBack() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.actions))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (controller.isSelfMember && controller.isSelfAdmin) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit)) },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                enabled = activeMutation == null && !controller.mutationInFlight,
+                                onClick = {
+                                    menuOpen = false
+                                    name = controller.group.name
+                                    description = controller.group.description
+                                    showEditProfile = true
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(
+                                        when {
+                                            activeMutation?.action == GroupMutationAction.Archive && controller.group.archived -> R.string.restoring_chat
+                                            activeMutation?.action == GroupMutationAction.Archive -> R.string.archiving_chat
+                                            controller.group.archived -> R.string.unarchive_chat
+                                            else -> R.string.archive_chat
+                                        },
+                                    ),
+                                )
+                            },
+                            leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
+                            enabled = activeMutation == null && !controller.mutationInFlight,
+                            onClick = {
+                                menuOpen = false
+                                runGroupMutation(
+                                    action = GroupMutationAction.Archive,
+                                    mutation = { controller.setArchived(!controller.group.archived) },
+                                )
+                            },
+                        )
+                        if (controller.isSelfMember) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(if (activeMutation?.action == GroupMutationAction.Leave) R.string.leaving_chat else R.string.leave_chat)) },
+                                leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                                enabled = controller.canLeaveGroup && activeMutation == null && !controller.mutationInFlight,
+                                onClick = {
+                                    menuOpen = false
+                                    pendingConfirm = DetailsConfirm.Leave
+                                },
+                            )
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
         Column(
             Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(padding)
+                .padding(horizontal = 20.dp)
+                .padding(top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Avatar(title = controller.title(groupTitleCopy), seed = controller.group.groupIdHex, size = 56.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(controller.title(groupTitleCopy), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        controller.subtitle(
-                            justYou = stringResource(R.string.just_you),
-                            oneMember = stringResource(R.string.one_member),
-                            membersFormat = stringResource(R.string.members_count),
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            SectionCard(title = stringResource(R.string.profile)) {
-                if (controller.isSelfAdmin) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text(stringResource(R.string.group_name)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = { Text(stringResource(R.string.description)) },
-                        minLines = 2,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = {
-                            runGroupMutation(
-                                action = GroupMutationAction.SaveProfile,
-                                mutation = { controller.updateGroupProfile(name, description) },
-                            )
-                        },
-                        enabled = activeMutation == null && !controller.mutationInFlight,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (activeMutation?.action == GroupMutationAction.SaveProfile) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Check, contentDescription = null)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(if (activeMutation?.action == GroupMutationAction.SaveProfile) R.string.saving_group else R.string.save_group))
-                    }
-                } else {
-                    Text(controller.group.description.ifBlank { stringResource(R.string.no_description) }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            GroupDetailsHeader(
+                title = controller.title(groupTitleCopy),
+                subtitle = controller.subtitle(
+                    justYou = stringResource(R.string.just_you),
+                    oneMember = stringResource(R.string.one_member),
+                    membersFormat = stringResource(R.string.members_count),
+                ),
+                description = controller.group.description,
+                groupIdHex = controller.group.groupIdHex,
+                archived = controller.group.archived,
+            )
 
             controller.lastMutationError?.let { message ->
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Default.ErrorOutline, contentDescription = null)
-                        Text(
-                            stringResource(R.string.latest_group_error, message),
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        IconButton(onClick = { controller.clearLastMutationError() }) {
-                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.dismiss))
+                GroupMutationErrorBanner(
+                    message = message,
+                    onDismiss = { controller.clearLastMutationError() },
+                )
+            }
+
+            SectionCardWithAction(
+                title = "${stringResource(R.string.members)} · ${controller.members.size}",
+                action = {
+                    if (controller.isSelfMember && controller.isSelfAdmin) {
+                        TextButton(
+                            onClick = {
+                                pendingMemberError = null
+                                showAddMember = true
+                            },
+                            enabled = activeMutation == null && !controller.mutationInFlight,
+                        ) {
+                            if (activeMutation?.action == GroupMutationAction.InviteMember) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.add_member))
                         }
                     }
-                }
-            }
-
-            SectionCard(title = stringResource(R.string.info)) {
-                DiagnosticRow(stringResource(R.string.group_id), IdentityFormatter.short(controller.group.groupIdHex))
-                DiagnosticRow(stringResource(R.string.nostr_group), IdentityFormatter.short(controller.group.nostrGroupIdHex))
-                DiagnosticRow(stringResource(R.string.relays), controller.group.relays.size.toString())
-                controller.group.relays.forEach { relay ->
-                    Text(relay, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-
-            SectionCard(title = stringResource(R.string.members)) {
+                },
+            ) {
                 controller.members.forEach { member ->
                     GroupMemberRow(
                         member = member,
@@ -2700,109 +2736,32 @@ private fun GroupDetailsSheet(
                             pendingConfirm = DetailsConfirm.RemoveMember(member)
                         },
                     )
-                }
-                if (controller.isSelfAdmin) {
-                    OutlinedTextField(
-                        value = pendingMember,
-                        onValueChange = {
-                            pendingMember = it
-                            pendingMemberError = null
-                        },
-                        label = { Text(stringResource(R.string.npub_or_public_key)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        isError = pendingMemberError != null,
-                        supportingText = pendingMemberError?.let { message ->
-                            { Text(message) }
-                        },
-                        trailingIcon = {
-                            IconButton(onClick = { showMemberScanner = true }) {
-                                Icon(Icons.Default.QrCodeScanner, contentDescription = stringResource(R.string.scan_member_qr_code))
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-                    )
-                    Button(
-                        onClick = {
-                            val ref = RecipientReference.normalize(pendingMember) ?: run {
-                                pendingMemberError = oneValidMemberReferenceError
-                                return@Button
-                            }
-                            pendingMember = ""
-                            pendingMemberError = null
-                            runGroupMutation(
-                                action = GroupMutationAction.InviteMember,
-                                mutation = { controller.inviteMembers(listOf(ref)) },
-                                target = ref,
-                                onSuccess = { pendingInvites = (pendingInvites + ref).distinct() },
-                            )
-                        },
-                        enabled = pendingMember.isNotBlank() && activeMutation == null && !controller.mutationInFlight,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (activeMutation?.action == GroupMutationAction.InviteMember) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(if (activeMutation?.action == GroupMutationAction.InviteMember) R.string.adding_member else R.string.add_member))
+                    if (member != controller.members.last()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                     }
-                    pendingInvites.forEach { invite ->
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(stringResource(R.string.invite_pending, IdentityFormatter.short(invite))) },
-                            leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null) },
-                        )
+                }
+                if (pendingInvites.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        pendingInvites.forEach { invite ->
+                            AssistChip(
+                                onClick = {},
+                                label = { Text(stringResource(R.string.invite_pending, IdentityFormatter.short(invite))) },
+                                leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null) },
+                            )
+                        }
                     }
                 }
             }
 
-            SectionCard(title = stringResource(R.string.actions)) {
-                OutlinedButton(
-                    // Route through runGroupMutation so the MLS commit + toast
-                    // survive sheet dismissal — same fix as inviteMembers etc.
-                    onClick = {
-                        runGroupMutation(
-                            action = GroupMutationAction.Archive,
-                            mutation = { controller.setArchived(!controller.group.archived) },
-                        )
-                    },
-                    enabled = activeMutation == null && !controller.mutationInFlight,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (activeMutation?.action == GroupMutationAction.Archive) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Archive, contentDescription = null)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(
-                            when {
-                                activeMutation?.action == GroupMutationAction.Archive && controller.group.archived -> R.string.restoring_chat
-                                activeMutation?.action == GroupMutationAction.Archive -> R.string.archiving_chat
-                                controller.group.archived -> R.string.unarchive_chat
-                                else -> R.string.archive_chat
-                            },
-                        ),
-                    )
-                }
-                OutlinedButton(
-                    onClick = { pendingConfirm = DetailsConfirm.Leave },
-                    enabled = controller.canLeaveGroup && activeMutation == null && !controller.mutationInFlight,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (activeMutation?.action == GroupMutationAction.Leave) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Close, contentDescription = null)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(if (activeMutation?.action == GroupMutationAction.Leave) R.string.leaving_chat else R.string.leave_chat))
-                }
-                if (!controller.canLeaveGroup) {
-                    Text(stringResource(R.string.promote_admin_before_leaving), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SectionCard(title = stringResource(R.string.info)) {
+                DiagnosticRow(stringResource(R.string.group_id), IdentityFormatter.short(controller.group.groupIdHex))
+                DiagnosticRow(stringResource(R.string.nostr_group), IdentityFormatter.short(controller.group.nostrGroupIdHex))
+                DiagnosticRow(stringResource(R.string.relays), controller.group.relays.size.toString())
+                controller.group.relays.forEach { relay ->
+                    Text(relay, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
@@ -2839,6 +2798,112 @@ private fun GroupDetailsSheet(
         )
     }
 
+    if (showEditProfile) {
+        ModalBottomSheet(onDismissRequest = { showEditProfile = false }) {
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(stringResource(R.string.edit), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.group_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text(stringResource(R.string.description)) },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        runGroupMutation(
+                            action = GroupMutationAction.SaveProfile,
+                            mutation = { controller.updateGroupProfile(name, description) },
+                            onSuccess = { showEditProfile = false },
+                        )
+                    },
+                    enabled = activeMutation == null &&
+                        !controller.mutationInFlight &&
+                        (name != controller.group.name || description != controller.group.description),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (activeMutation?.action == GroupMutationAction.SaveProfile) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(if (activeMutation?.action == GroupMutationAction.SaveProfile) R.string.saving_group else R.string.save_group))
+                }
+            }
+        }
+    }
+
+    if (showAddMember) {
+        ModalBottomSheet(onDismissRequest = { showAddMember = false }) {
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(stringResource(R.string.add_member), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = pendingMember,
+                    onValueChange = {
+                        pendingMember = it
+                        pendingMemberError = null
+                    },
+                    label = { Text(stringResource(R.string.npub_or_public_key)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = pendingMemberError != null,
+                    supportingText = pendingMemberError?.let { message ->
+                        { Text(message) }
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { showMemberScanner = true }) {
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = stringResource(R.string.scan_member_qr_code))
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                )
+                Button(
+                    onClick = {
+                        val ref = RecipientReference.normalize(pendingMember) ?: run {
+                            pendingMemberError = oneValidMemberReferenceError
+                            return@Button
+                        }
+                        pendingMember = ""
+                        pendingMemberError = null
+                        runGroupMutation(
+                            action = GroupMutationAction.InviteMember,
+                            mutation = { controller.inviteMembers(listOf(ref)) },
+                            target = ref,
+                            onSuccess = {
+                                pendingInvites = (pendingInvites + ref).distinct()
+                                showAddMember = false
+                            },
+                        )
+                    },
+                    enabled = pendingMember.isNotBlank() && activeMutation == null && !controller.mutationInFlight,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (activeMutation?.action == GroupMutationAction.InviteMember) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(if (activeMutation?.action == GroupMutationAction.InviteMember) R.string.adding_member else R.string.add_member))
+                }
+            }
+        }
+    }
+
     pendingConfirm?.let { confirm ->
         when (confirm) {
             is DetailsConfirm.RemoveMember -> ConfirmDialog(
@@ -2871,13 +2936,117 @@ private fun GroupDetailsSheet(
                         action = GroupMutationAction.Leave,
                         mutation = { controller.leaveGroup() },
                         onSuccess = {
-                            onDismiss()
                             onLeft()
                         },
                     )
                 },
                 onDismiss = { pendingConfirm = null },
             )
+        }
+    }
+}
+
+@Composable
+private fun GroupDetailsHeader(
+    title: String,
+    subtitle: String,
+    description: String,
+    groupIdHex: String,
+    archived: Boolean,
+) {
+    Box(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Avatar(title = title, seed = groupIdHex, size = 88.dp)
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (description.isNotBlank()) {
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (archived) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(stringResource(R.string.archive_chat)) },
+                        leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupMutationErrorBanner(
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.ErrorOutline, contentDescription = null)
+            Text(
+                stringResource(R.string.latest_group_error, message),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.dismiss))
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupActionRow(
+    icon: @Composable () -> Unit,
+    title: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (enabled) 0.5f else 0.28f),
+        contentColor = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
+                icon()
+            }
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -2918,7 +3087,7 @@ private fun GroupMemberRow(
         member,
         appState.activeAccount?.accountIdHex,
     )
-    val canManage = controller.isSelfAdmin && !isSelfRow
+    val canManage = controller.isSelfMember && controller.isSelfAdmin && !isSelfRow
     val rowMutation = activeMutation?.takeIf { it.target == member.memberIdHex }
 
     Row(
@@ -2987,15 +3156,17 @@ private fun GroupMemberRow(
                             if (isAdmin) onDemote() else onPromote()
                         },
                     )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.remove_member)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                        enabled = !controller.mutationInFlight,
-                        onClick = {
-                            menuOpen = false
-                            onRemove()
-                        },
-                    )
+                    if (!isAdmin) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.remove_member)) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            enabled = !controller.mutationInFlight,
+                            onClick = {
+                                menuOpen = false
+                                onRemove()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -3633,6 +3804,27 @@ private fun OutgoingMessageStatusIcon(status: MessageStatus, tint: Color) {
             contentDescription = stringResource(R.string.send_failed),
             modifier = Modifier.size(14.dp),
             tint = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+@Composable
+private fun RemovedMemberComposerNotice(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+    ) {
+        Text(
+            text = stringResource(R.string.you_are_no_longer_a_member),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -5468,13 +5660,45 @@ private fun DiagnosticRow(label: String, value: String) {
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun SectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SectionCardWithAction(
+    title: String,
+    action: @Composable RowScope.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                action()
+            }
             content()
         }
     }

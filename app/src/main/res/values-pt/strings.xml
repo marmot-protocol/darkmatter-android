@@ -49,6 +49,7 @@
     <string name="leave">Sair</string>
     <string name="couldnt_load_conversation">Não foi possível carregar a conversa</string>
     <string name="no_messages_yet">Ainda não há mensagens</string>
+    <string name="you_are_no_longer_a_member">Você não é mais membro deste grupo.</string>
     <string name="chat_row_draft_prefix">Rascunho: </string>
     <string name="jump_to_newest">Ir para a mais recente</string>
     <string name="discard_failed_message">Descartar mensagem com falha</string>
@@ -57,6 +58,7 @@
     <string name="accept">Aceitar</string>
     <string name="profile">Perfil</string>
     <string name="dismiss">Fechar</string>
+    <string name="edit">Editar</string>
     <string name="save_group">Salvar grupo</string>
     <string name="saving_group">Salvando grupo...</string>
     <string name="no_description">Sem descrição</string>
@@ -278,7 +280,7 @@
     <string name="toast_background_connection_disabled">Conexão em segundo plano desativada</string>
     <string name="toast_chat_started">Bate-papo iniciado</string>
     <string name="toast_couldnt_start_chat">Não foi possível iniciar a conversa</string>
-    <string name="toast_profile_published">Perfil publicado</string>
+<string name="toast_profile_published">Perfil publicado</string>
     <string name="toast_profile_published_detail">Seus metadados kind:0 estão ativos em relés %1$d.</string>
     <string name="toast_couldnt_publish_profile">Não foi possível publicar o perfil</string>
     <string name="toast_send_failed">Falha no envio</string>

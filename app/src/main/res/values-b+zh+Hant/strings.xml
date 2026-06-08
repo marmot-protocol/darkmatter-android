@@ -49,6 +49,7 @@
     <string name="leave">離開</string>
     <string name="couldnt_load_conversation">無法載入對話</string>
     <string name="no_messages_yet">尚無訊息</string>
+    <string name="you_are_no_longer_a_member">你已不再是此群組的成員。</string>
     <string name="chat_row_draft_prefix">草稿：</string>
     <string name="jump_to_newest">跳至最新</string>
     <string name="discard_failed_message">捨棄發送失敗的訊息</string>
@@ -57,6 +58,7 @@
     <string name="accept">接受</string>
     <string name="profile">個人檔案</string>
     <string name="dismiss">關閉</string>
+    <string name="edit">編輯</string>
     <string name="save_group">保存群組</string>
     <string name="saving_group">正在儲存群組...</string>
     <string name="no_description">無描述</string>
@@ -278,7 +280,7 @@
     <string name="toast_background_connection_disabled">後台連線已停用</string>
     <string name="toast_chat_started">聊天开始</string>
     <string name="toast_couldnt_start_chat">無法開始聊天</string>
-    <string name="toast_profile_published">简介已发布</string>
+<string name="toast_profile_published">简介已发布</string>
     <string name="toast_profile_published_detail">您的 kind:0 元資料在 %1$d 中繼上即時存在。</string>
     <string name="toast_couldnt_publish_profile">無法發布個人檔案</string>
     <string name="toast_send_failed">發送失敗</string>

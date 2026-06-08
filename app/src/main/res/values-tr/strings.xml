@@ -49,6 +49,7 @@
     <string name="leave">Ayrıl</string>
     <string name="couldnt_load_conversation">Konuşma yüklenemedi</string>
     <string name="no_messages_yet">Henüz mesaj yok</string>
+    <string name="you_are_no_longer_a_member">Artık bu grubun üyesi değilsiniz.</string>
     <string name="chat_row_draft_prefix">Taslak: </string>
     <string name="jump_to_newest">En yeniye atla</string>
     <string name="discard_failed_message">Başarısız mesajı sil</string>
@@ -57,6 +58,7 @@
     <string name="accept">Kabul et</string>
     <string name="profile">Profil</string>
     <string name="dismiss">Kapat</string>
+    <string name="edit">Düzenle</string>
     <string name="save_group">Grubu Kaydet</string>
     <string name="saving_group">Grup kaydediliyor...</string>
     <string name="no_description">Açıklama yok</string>
@@ -278,7 +280,7 @@
     <string name="toast_background_connection_disabled">Arka plan bağlantısı devre dışı bırakıldı</string>
     <string name="toast_chat_started">Sohbet başlatıldı</string>
     <string name="toast_couldnt_start_chat">Sohbet başlatılamadı</string>
-    <string name="toast_profile_published">Profil yayınlandı</string>
+<string name="toast_profile_published">Profil yayınlandı</string>
     <string name="toast_profile_published_detail">kind:0 meta verileriniz %1$d aktarmalarında yayındadır.</string>
     <string name="toast_couldnt_publish_profile">Profil yayınlanamadı</string>
     <string name="toast_send_failed">Gönderim başarısız oldu</string>
