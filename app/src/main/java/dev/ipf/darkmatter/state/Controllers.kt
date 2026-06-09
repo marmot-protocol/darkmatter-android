@@ -813,6 +813,7 @@ class ConversationController(
             }
             publishTimelineFromIndexes()
         } catch (throwable: Throwable) {
+            throwable.rethrowIfCancellation()
             optimisticMessages["msg:$tempId"] = TimelineMessage(
                 "msg:$tempId",
                 optimistic,
@@ -1032,6 +1033,7 @@ class ConversationController(
                 appState.marmotIo { reactToMessage(account, group.groupIdHex, target, emoji) }
             }
         } catch (throwable: Throwable) {
+            throwable.rethrowIfCancellation()
             optimisticReactionChanges.remove(optimisticId)
             recomputeReactions()
             appState.present(R.string.toast_reaction_failed, AppText.Plain(throwable.message ?: throwable.javaClass.simpleName))
@@ -1046,6 +1048,7 @@ class ConversationController(
         try {
             appState.marmotIo { deleteMessage(account, group.groupIdHex, target) }
         } catch (throwable: Throwable) {
+            throwable.rethrowIfCancellation()
             deletedMessageIds = deletedMessageIds - target
             appState.present(R.string.toast_couldnt_delete_message, AppText.Plain(throwable.message ?: throwable.javaClass.simpleName))
         }
@@ -1449,7 +1452,11 @@ class ConversationController(
         runCatching {
             if (admin) {
                 appState.marmotIo { promoteAdmin(account, group.groupIdHex, target) }
-                group = group.copy(admins = (group.admins + target).distinct())
+                val updatedAdmins = group.admins.toMutableList()
+                if (updatedAdmins.none { it.equals(target, ignoreCase = true) }) {
+                    updatedAdmins += target
+                }
+                group = group.copy(admins = updatedAdmins)
                 appState.present(R.string.toast_admin_added)
             } else {
                 appState.marmotIo { demoteAdmin(account, group.groupIdHex, target) }
