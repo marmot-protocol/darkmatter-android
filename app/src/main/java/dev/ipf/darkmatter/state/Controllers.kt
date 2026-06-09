@@ -528,6 +528,7 @@ class ConversationController(
     // first refresh verifies the roster.
     var membersLoaded by mutableStateOf(initialMemberSnapshot?.members?.isNotEmpty() == true)
         private set
+    private var membersVerified by mutableStateOf(false)
     var timeline by mutableStateOf<List<TimelineMessage>>(emptyList())
         private set
     var reactions by mutableStateOf<Map<String, List<ReactionTally>>>(emptyMap())
@@ -571,6 +572,10 @@ class ConversationController(
 
     private fun mutationError(throwable: Throwable): String {
         return throwable.message ?: throwable.javaClass.simpleName
+    }
+
+    private fun Throwable.rethrowIfCancellation() {
+        if (this is CancellationException) throw this
     }
 
     private suspend inline fun <T> withMutationLockResult(defaultValue: T, block: () -> T): T {
@@ -644,7 +649,7 @@ class ConversationController(
         get() = members.any { GroupProjector.isActiveAccountMember(it, appState.activeAccount?.accountIdHex) }
 
     val canSendMessages: Boolean
-        get() = membersLoaded && isSelfMember
+        get() = membersVerified && isSelfMember
 
     val canLeaveGroup: Boolean
         get() = GroupProjector.canLeaveGroup(group, appState.activeAccount?.accountIdHex)
@@ -1290,8 +1295,8 @@ class ConversationController(
     }
 
     suspend fun leaveGroup(): Boolean = withMutationLockResult(false) {
-        val account = appState.activeAccountRef ?: return false
         lastMutationError = null
+        val account = appState.activeAccountRef ?: return false
         if (!canLeaveGroup) {
             appState.present(R.string.toast_make_another_admin_before_leaving, R.string.toast_group_needs_admin)
             return false
@@ -1352,8 +1357,8 @@ class ConversationController(
     }
 
     suspend fun setArchived(archived: Boolean): Boolean = withMutationLockResult(false) {
-        val account = appState.activeAccountRef ?: return@withMutationLockResult false
         lastMutationError = null
+        val account = appState.activeAccountRef ?: return@withMutationLockResult false
         runCatching {
             val updated = appState.marmotIo { setGroupArchived(account, group.groupIdHex, archived) }
             group = updated
@@ -1361,6 +1366,7 @@ class ConversationController(
             appState.present(if (archived) R.string.toast_chat_archived else R.string.toast_chat_restored)
             true
         }.onFailure {
+            it.rethrowIfCancellation()
             val message = mutationError(it)
             lastMutationError = message
             appState.present(R.string.toast_couldnt_update_chat, AppText.Plain(message))
@@ -1368,8 +1374,8 @@ class ConversationController(
     }
 
     suspend fun updateGroupProfile(name: String, description: String): Boolean = withMutationLockResult(false) {
-        val account = appState.activeAccountRef ?: return@withMutationLockResult false
         lastMutationError = null
+        val account = appState.activeAccountRef ?: return@withMutationLockResult false
         runCatching {
             appState.marmotIo {
                 updateGroupProfile(
@@ -1382,6 +1388,7 @@ class ConversationController(
             appState.present(R.string.toast_group_updated)
             true
         }.onFailure {
+            it.rethrowIfCancellation()
             val message = mutationError(it)
             lastMutationError = message
             appState.present(R.string.toast_couldnt_update_group, AppText.Plain(message))
@@ -1389,16 +1396,17 @@ class ConversationController(
     }
 
     suspend fun inviteMembers(memberRefs: List<String>): Boolean = withMutationLockResult(false) {
+        lastMutationError = null
         val account = appState.activeAccountRef ?: return@withMutationLockResult false
         val refs = memberRefs.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         if (refs.isEmpty()) return@withMutationLockResult false
-        lastMutationError = null
         runCatching {
             appState.marmotIo { inviteMembers(account, group.groupIdHex, refs) }
             refreshMembers()
             appState.present(R.string.toast_invite_sent)
             true
         }.onFailure {
+            it.rethrowIfCancellation()
             val message = mutationError(it)
             lastMutationError = message
             appState.present(R.string.toast_couldnt_add_members, AppText.Plain(message))
@@ -1406,11 +1414,11 @@ class ConversationController(
     }
 
     suspend fun removeMember(member: AppGroupMemberRecordFfi): Boolean = withMutationLockResult(false) {
+        lastMutationError = null
         val account = appState.activeAccountRef ?: return@withMutationLockResult false
         // remove_members signs a roster update for a Nostr pubkey, so use the
         // stable member id. memberRef may be a local account label.
         val target = member.memberIdHex
-        lastMutationError = null
         runCatching {
             appState.marmotIo { removeMembers(account, group.groupIdHex, listOf(target)) }
             // The group-state subscription should eventually converge from the
@@ -1420,6 +1428,7 @@ class ConversationController(
             appState.present(R.string.toast_member_removed)
             true
         }.onFailure {
+            it.rethrowIfCancellation()
             val message = mutationError(it)
             lastMutationError = message
             appState.present(R.string.toast_couldnt_remove_member, AppText.Plain(message))
@@ -1427,6 +1436,7 @@ class ConversationController(
     }
 
     suspend fun setMemberAdmin(member: AppGroupMemberRecordFfi, admin: Boolean): Boolean = withMutationLockResult(false) {
+        lastMutationError = null
         val account = appState.activeAccountRef ?: return@withMutationLockResult false
         // promote_admin / demote_admin sign the new admin list onto the MLS
         // group, so they require a Nostr pubkey hex — not a local-account
@@ -1436,7 +1446,6 @@ class ConversationController(
             appState.present(R.string.toast_keep_one_admin, R.string.toast_promote_before_removing_admin)
             return@withMutationLockResult false
         }
-        lastMutationError = null
         runCatching {
             if (admin) {
                 appState.marmotIo { promoteAdmin(account, group.groupIdHex, target) }
@@ -1454,6 +1463,7 @@ class ConversationController(
             refreshMembers()
             true
         }.onFailure {
+            it.rethrowIfCancellation()
             val message = mutationError(it)
             lastMutationError = message
             appState.present(R.string.toast_couldnt_update_admin, AppText.Plain(message))
@@ -2041,6 +2051,7 @@ class ConversationController(
         }
         members = updatedMembers
         membersLoaded = true
+        membersVerified = true
         group = group.copy(
             admins = group.admins.filterNot { it.equals(activeAccountIdHex, ignoreCase = true) },
         )
@@ -2051,6 +2062,7 @@ class ConversationController(
         val updatedMembers = members.filterNot { it.memberIdHex.equals(target, ignoreCase = true) }
         members = updatedMembers
         membersLoaded = true
+        membersVerified = true
         group = group.copy(
             admins = group.admins.filterNot { it.equals(target, ignoreCase = true) },
         )
@@ -2078,6 +2090,7 @@ class ConversationController(
             )
         }
         membersLoaded = true
+        membersVerified = true
         appState.cacheGroupMemberSnapshot(account, group.groupIdHex, members)
         appState.requestProfiles(members.map { it.memberIdHex })
     }

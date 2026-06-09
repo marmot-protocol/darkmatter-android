@@ -2748,6 +2748,7 @@ private fun GroupDetailsScreen(
                         pendingInvites.forEach { invite ->
                             AssistChip(
                                 onClick = {},
+                                enabled = false,
                                 label = { Text(stringResource(R.string.invite_pending, IdentityFormatter.short(invite))) },
                                 leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null) },
                             )
@@ -2877,13 +2878,14 @@ private fun GroupDetailsScreen(
                             pendingMemberError = oneValidMemberReferenceError
                             return@Button
                         }
-                        pendingMember = ""
                         pendingMemberError = null
                         runGroupMutation(
                             action = GroupMutationAction.InviteMember,
                             mutation = { controller.inviteMembers(listOf(ref)) },
                             target = ref,
                             onSuccess = {
+                                pendingMember = ""
+                                pendingMemberError = null
                                 pendingInvites = (pendingInvites + ref).distinct()
                                 showAddMember = false
                             },
@@ -2985,6 +2987,7 @@ private fun GroupDetailsHeader(
                 if (archived) {
                     AssistChip(
                         onClick = {},
+                        enabled = false,
                         label = { Text(stringResource(R.string.archive_chat)) },
                         leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
                     )
