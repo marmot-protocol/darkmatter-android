@@ -79,11 +79,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
@@ -95,6 +97,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.QrCode
@@ -1370,6 +1373,7 @@ private val UriListSaver: Saver<List<android.net.Uri>, String> =
 private fun MediaImageBubble(
     item: TimelineMessage,
     reference: MediaAttachmentReferenceFfi,
+    attachmentIndex: Int,
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
@@ -1378,23 +1382,25 @@ private fun MediaImageBubble(
     val key = record.messageIdHex
     // Seed from the decoded-thumbnail cache so an already-fetched or just-sent
     // image paints on the first frame — no decode spinner, no visible "reload".
-    var bitmap by remember(key) { mutableStateOf(controller.thumbnailFor(key, 0)?.asImageBitmap()) }
-    var failed by remember(key) { mutableStateOf(false) }
-    var viewerOpen by remember(key) { mutableStateOf(false) }
-    var reloadToken by remember(key) { mutableStateOf(0) }
+    var bitmap by remember(key, attachmentIndex) {
+        mutableStateOf(controller.thumbnailFor(key, attachmentIndex)?.asImageBitmap())
+    }
+    var failed by remember(key, attachmentIndex) { mutableStateOf(false) }
+    var viewerOpen by remember(key, attachmentIndex) { mutableStateOf(false) }
+    var reloadToken by remember(key, attachmentIndex) { mutableStateOf(0) }
     // Auto-download gating (#10): own messages always render (bytes are cached
     // from the send), incoming honor the policy. Keyed on the policy so
     // flipping the setting re-gates undownloaded bubbles.
-    var startDownload by remember(key, appState.mediaAutoDownloadPolicy) {
+    var startDownload by remember(key, attachmentIndex, appState.mediaAutoDownloadPolicy) {
         mutableStateOf(mine || appState.shouldAutoDownloadMedia())
     }
 
-    LaunchedEffect(key, startDownload, reloadToken) {
+    LaunchedEffect(key, attachmentIndex, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect // already have a decoded thumbnail
         if (!startDownload) return@LaunchedEffect
         failed = false
         try {
-            val data = controller.downloadAttachment(key, 0, reference)
+            val data = controller.downloadAttachment(key, attachmentIndex, reference)
             // Decode a sampled bitmap sized to the bubble — a full 1920px
             // image would be a ~14 MB ARGB_8888 bitmap per visible row.
             val decoded =
@@ -1402,7 +1408,7 @@ private fun MediaImageBubble(
                     MediaPipeline.decodeSampledBitmap(data, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
                 }
             if (decoded != null) {
-                controller.cacheThumbnail(key, 0, decoded)
+                controller.cacheThumbnail(key, attachmentIndex, decoded)
                 bitmap = decoded.asImageBitmap()
             } else {
                 failed = true
@@ -1472,7 +1478,7 @@ private fun MediaImageBubble(
             controller = controller,
             appState = appState,
             messageIdHex = key,
-            references = listOf(reference),
+            attachments = listOf(IndexedValue(attachmentIndex, reference)),
             startIndex = 0,
             onDismiss = { viewerOpen = false },
         )
@@ -1491,13 +1497,16 @@ private fun MediaImageBubble(
 @Composable
 private fun MediaImageGridBubble(
     item: TimelineMessage,
-    references: List<MediaAttachmentReferenceFfi>,
+    attachments: List<IndexedValue<MediaAttachmentReferenceFfi>>,
     controller: ConversationController,
     appState: DarkMatterAppState,
 ) {
     val record = item.record
-    val visible = references.take(4)
-    val overflow = (references.size - visible.size).coerceAtLeast(0)
+    val visible = attachments.take(4)
+    val overflow = (attachments.size - visible.size).coerceAtLeast(0)
+    // Pager position within the viewer (a position within `attachments`),
+    // not the protocol-level attachmentIndex. The viewer resolves the real
+    // attachmentIndex per page from the indexed-value entry.
     var viewerOpenAt by remember(record.messageIdHex) { mutableStateOf<Int?>(null) }
 
     Surface(
@@ -1514,13 +1523,13 @@ private fun MediaImageGridBubble(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    row.forEachIndexed { colIndex, reference ->
+                    row.forEachIndexed { colIndex, entry ->
                         val tileIndex = rowIndex * 2 + colIndex
                         val showOverflow = tileIndex == visible.lastIndex && overflow > 0
                         MediaImageGridTile(
                             messageIdHex = record.messageIdHex,
-                            attachmentIndex = tileIndex,
-                            reference = reference,
+                            attachmentIndex = entry.index,
+                            reference = entry.value,
                             controller = controller,
                             onTap = { viewerOpenAt = tileIndex },
                             overflowCount = if (showOverflow) overflow else 0,
@@ -1545,7 +1554,7 @@ private fun MediaImageGridBubble(
             controller = controller,
             appState = appState,
             messageIdHex = record.messageIdHex,
-            references = references,
+            attachments = attachments,
             startIndex = index,
             onDismiss = { viewerOpenAt = null },
         )
@@ -1645,6 +1654,158 @@ private fun MediaImageGridTile(
     }
 }
 
+/**
+ * Receive-side bubble for any attachment whose MIME isn't an image. Renders
+ * as a tappable pill: icon (chosen by MIME family), filename, size + status.
+ * Tapping fetches the bytes (cached after first tap), writes a temp file
+ * routed through the app's FileProvider, and fires `ACTION_VIEW` so the
+ * system picks an external app (PDF reader, etc.) to open it.
+ */
+@Composable
+private fun MediaFileBubble(
+    messageIdHex: String,
+    attachmentIndex: Int,
+    reference: MediaAttachmentReferenceFfi,
+    controller: ConversationController,
+    appState: DarkMatterAppState,
+    mine: Boolean,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pillKey = "$messageIdHex#$attachmentIndex"
+    var inFlight by remember(pillKey) { mutableStateOf(false) }
+    var failed by remember(pillKey) { mutableStateOf(false) }
+    val noOpenAppMessage = stringResource(R.string.media_no_app_to_open)
+    val saveFailedMessage = stringResource(R.string.media_save_failed)
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !inFlight) {
+                    failed = false
+                    inFlight = true
+                    scope.launch {
+                        val ok =
+                            runCatching {
+                                val data = controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
+                                openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
+                            }.getOrDefault(false)
+                        if (!ok) {
+                            failed = true
+                            // Surface the most likely cause: no app claims
+                            // this MIME. Download-failure shares the same
+                            // message — both endpoints mean "nothing
+                            // happened on tap"; a deeper breakdown isn't
+                            // actionable from a chat.
+                            appState.present(if (mine) saveFailedMessage else noOpenAppMessage)
+                        }
+                        inFlight = false
+                    }
+                },
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Icon(
+                imageVector = fileIconFor(reference.mediaType),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(28.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    MediaPipeline.safeDisplayName(reference.fileName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    reference.mediaType,
+                    style = MaterialTheme.typography.labelSmall,
+                    color =
+                        if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (inFlight) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Icon(
+                    imageVector =
+                        if (failed) Icons.Default.Refresh else Icons.Default.Download,
+                    contentDescription = stringResource(R.string.media_open),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun fileIconFor(mediaType: String): androidx.compose.ui.graphics.vector.ImageVector =
+    when {
+        mediaType.startsWith("audio/", ignoreCase = true) -> Icons.Default.Audiotrack
+        mediaType.startsWith("video/", ignoreCase = true) -> Icons.Default.Movie
+        mediaType.startsWith("image/", ignoreCase = true) -> Icons.Default.Image
+        else -> Icons.Default.Description
+    }
+
+private fun formatFileSize(bytes: Long): String {
+    if (bytes < 0L) return ""
+    if (bytes < 1024L) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format(java.util.Locale.US, "%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return String.format(java.util.Locale.US, "%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(java.util.Locale.US, "%.1f GB", gb)
+}
+
+/**
+ * Write [bytes] to a temp file in the cache directory and fire `ACTION_VIEW`
+ * for it via the app's FileProvider so an external app (PDF reader, etc.)
+ * can open it. Returns true if the system found a handler, false otherwise.
+ * The temp file is owned by the cache cleanup pass triggered on screen exit;
+ * we don't track it per-call because the handing-off intent may need it
+ * alive for an unbounded duration after this function returns.
+ */
+private fun openAttachmentExternally(
+    context: android.content.Context,
+    bytes: ByteArray,
+    fileName: String,
+    mediaType: String,
+): Boolean {
+    val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
+    val name = MediaPipeline.safeDisplayName(fileName)
+    val file = java.io.File.createTempFile("open_", "_$name", dir)
+    file.writeBytes(bytes)
+    val uri = fileProviderUri(context, file)
+    val mime = mediaType.ifBlank { "application/octet-stream" }
+    val intent =
+        android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    return runCatching {
+        // resolveActivity returns null when no app claims the MIME; bail before
+        // calling startActivity so we can surface a user-facing message.
+        if (intent.resolveActivity(context.packageManager) == null) return false
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+}
+
 /** Centered icon+label tap target used for the retry/download bubble states. */
 @Composable
 private fun MediaBubbleAction(
@@ -1678,11 +1839,31 @@ private fun MediaBubbleAction(
 
 @Composable
 private fun MediaPendingPlaceholder(
-    previewBytesList: List<ByteArray>,
+    pendingAttachments: List<PendingAttachment>,
     failed: Boolean,
 ) {
     val statusLabel = stringResource(if (failed) R.string.media_upload_failed else R.string.media_uploading)
     val statusColor = if (failed) MaterialTheme.colorScheme.error else Color.White
+
+    // Image-only sends keep the fixed-height image bubble. The moment a
+    // non-image attachment is part of the album the bubble shape switches to
+    // a stack of file-pill placeholders so the optimistic → confirmed swap
+    // matches the post-upload layout (image grid above, file pills below).
+    val allImages = pendingAttachments.isNotEmpty() && pendingAttachments.all { isImagePendingAttachment(it) }
+    if (!allImages) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            pendingAttachments.forEach { attachment ->
+                PendingFilePill(
+                    fileName = attachment.fileName,
+                    mediaType = attachment.mediaType,
+                    sizeBytes = attachment.plaintextBytes.size.toLong(),
+                    failed = failed,
+                    statusLabel = statusLabel,
+                )
+            }
+        }
+        return
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1690,10 +1871,10 @@ private fun MediaPendingPlaceholder(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            if (previewBytesList.size <= 1) {
+            if (pendingAttachments.size <= 1) {
                 // Single-image: keep the existing fixed-height bubble so the
                 // optimistic→projected swap doesn't reflow the timeline.
-                val preview = rememberSampledBitmap(previewBytesList.firstOrNull())
+                val preview = rememberSampledBitmap(pendingAttachments.firstOrNull()?.plaintextBytes)
                 Box(
                     Modifier.fillMaxWidth().height(MediaBubbleHeight),
                     contentAlignment = Alignment.Center,
@@ -1719,8 +1900,8 @@ private fun MediaPendingPlaceholder(
                 // uses, so the optimistic → confirmed transition is a visual
                 // no-op. Each tile decodes from local bytes (no network), and
                 // a single status overlay sits across the whole bubble.
-                val visible = previewBytesList.take(4)
-                val overflow = (previewBytesList.size - visible.size).coerceAtLeast(0)
+                val visible = pendingAttachments.take(4)
+                val overflow = (pendingAttachments.size - visible.size).coerceAtLeast(0)
                 Box(Modifier.fillMaxWidth()) {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1731,11 +1912,11 @@ private fun MediaPendingPlaceholder(
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                row.forEachIndexed { colIndex, bytes ->
+                                row.forEachIndexed { colIndex, attachment ->
                                     val tileIndex = rowIndex * 2 + colIndex
                                     val showOverflow = tileIndex == visible.lastIndex && overflow > 0
                                     PendingGridTile(
-                                        bytes = bytes,
+                                        bytes = attachment.plaintextBytes,
                                         overflowCount = if (showOverflow) overflow else 0,
                                         modifier = Modifier.weight(1f).aspectRatio(1f),
                                     )
@@ -1755,6 +1936,64 @@ private fun MediaPendingPlaceholder(
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
+            }
+        }
+    }
+}
+
+private fun isImagePendingAttachment(attachment: PendingAttachment): Boolean = attachment.mediaType.startsWith("image/", ignoreCase = true)
+
+@Composable
+private fun PendingFilePill(
+    fileName: String,
+    mediaType: String,
+    sizeBytes: Long,
+    failed: Boolean,
+    statusLabel: String,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Icon(
+                imageVector = fileIconFor(mediaType),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(28.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    MediaPipeline.safeDisplayName(fileName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "${formatFileSize(sizeBytes)} · $statusLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    color =
+                        if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (failed) {
+                Icon(
+                    Icons.Default.BrokenImage,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
+                )
+            } else {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -1855,11 +2094,11 @@ private fun FullScreenImageViewer(
     controller: ConversationController,
     appState: DarkMatterAppState,
     messageIdHex: String,
-    references: List<MediaAttachmentReferenceFfi>,
+    attachments: List<IndexedValue<MediaAttachmentReferenceFfi>>,
     startIndex: Int,
     onDismiss: () -> Unit,
 ) {
-    if (references.isEmpty()) {
+    if (attachments.isEmpty()) {
         // Defensive — callers shouldn't open an empty viewer, but guard so the
         // pager doesn't NPE on a vanished album.
         onDismiss()
@@ -1872,10 +2111,12 @@ private fun FullScreenImageViewer(
     val saveFailedMessage = stringResource(R.string.media_save_failed)
     val pagerState =
         rememberPagerState(
-            initialPage = startIndex.coerceIn(0, references.lastIndex),
-            pageCount = { references.size },
+            initialPage = startIndex.coerceIn(0, attachments.lastIndex),
+            pageCount = { attachments.size },
         )
-    val currentReference = references[pagerState.currentPage]
+    val currentEntry = attachments[pagerState.currentPage]
+    val currentReference = currentEntry.value
+    val currentAttachmentIndex = currentEntry.index
     // Zoom state is hoisted to the viewer scope (not per-page) so the pager
     // can read it to gate horizontal swipe. Without this gate, the page's
     // `detectTransformGestures` claims every horizontal drag and the pager
@@ -1905,11 +2146,12 @@ private fun FullScreenImageViewer(
                 // the horizontal drag. At scale 1× the pager wins.
                 userScrollEnabled = scale <= 1f,
             ) { page ->
+                val pageEntry = attachments[page]
                 ViewerPage(
                     controller = controller,
                     messageIdHex = messageIdHex,
-                    attachmentIndex = page,
-                    reference = references[page],
+                    attachmentIndex = pageEntry.index,
+                    reference = pageEntry.value,
                     scale = if (page == pagerState.currentPage) scale else 1f,
                     offset = if (page == pagerState.currentPage) offset else Offset.Zero,
                     onScaleChange = { if (page == pagerState.currentPage) scale = it },
@@ -1929,9 +2171,9 @@ private fun FullScreenImageViewer(
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close), tint = Color.White)
                 }
-                if (references.size > 1) {
+                if (attachments.size > 1) {
                     Text(
-                        text = "${pagerState.currentPage + 1} / ${references.size}",
+                        text = "${pagerState.currentPage + 1} / ${attachments.size}",
                         color = Color.White,
                         style = MaterialTheme.typography.labelLarge,
                     )
@@ -1940,11 +2182,11 @@ private fun FullScreenImageViewer(
                     IconButton(
                         onClick = {
                             val ref = currentReference
-                            val pageIndex = pagerState.currentPage
+                            val attachmentIndex = currentAttachmentIndex
                             scope.launch {
                                 val data =
                                     runCatching {
-                                        controller.downloadAttachment(messageIdHex, pageIndex, ref)
+                                        controller.downloadAttachment(messageIdHex, attachmentIndex, ref)
                                     }.getOrNull()
                                 val ok =
                                     data != null &&
@@ -1960,10 +2202,10 @@ private fun FullScreenImageViewer(
                     IconButton(
                         onClick = {
                             val ref = currentReference
-                            val pageIndex = pagerState.currentPage
+                            val attachmentIndex = currentAttachmentIndex
                             scope.launch {
                                 runCatching {
-                                    controller.downloadAttachment(messageIdHex, pageIndex, ref)
+                                    controller.downloadAttachment(messageIdHex, attachmentIndex, ref)
                                 }.getOrNull()?.let { shareImage(context, it, ref.fileName, ref.mediaType) }
                             }
                         },
@@ -2584,9 +2826,9 @@ private fun ConversationScreen(
         ) { granted -> if (granted) launchCameraCapture() }
 
     // Decode/compress each URI off the main thread, then hand the album to
-    // the controller as a single `sendImageAttachments(list, caption)` call.
-    // One kind:9 carries N imeta tags; the caption is shared across the
-    // whole album. If any source fails to decode the rest still send (best
+    // the controller as a single `sendAttachments(list, caption)` call. One
+    // kind:9 carries N imeta tags; the caption is shared across the whole
+    // album. If any source fails to decode the rest still send (best
     // effort), but if NONE decode we bail without surfacing an empty send.
     fun sendPickedMedia(
         uris: List<android.net.Uri>,
@@ -2604,7 +2846,7 @@ private fun ConversationScreen(
                         val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
                         val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
                         PendingAttachment(
-                            jpegBytes = jpeg,
+                            plaintextBytes = jpeg,
                             mediaType = MediaPipeline.RECOMPRESSED_MIME,
                             fileName = fileName,
                         )
@@ -2614,9 +2856,64 @@ private fun ConversationScreen(
                 appState.present(R.string.toast_couldnt_decode_image)
                 if (attachments.isEmpty()) return@launchMutation
             }
-            controller.sendImageAttachments(attachments, trimmedCaption)
+            controller.sendAttachments(attachments, trimmedCaption)
         }
     }
+
+    // Read each picked document URI as raw bytes (no recompression — PDFs,
+    // archives, audio etc. travel through the same kind:9 album path as
+    // images via `sendAttachments`). MIME comes from the content resolver;
+    // filename from `OpenableColumns.DISPLAY_NAME`. Per-attachment failures
+    // skip silently — if NONE survive we bail without an empty send. The
+    // shared 32 MiB retained-bytes cap means very large picks may evict
+    // earlier sends from the in-flight cache; surface that here as the size
+    // counter rather than a silent drop.
+    fun sendPickedDocuments(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        appState.launchMutation {
+            val attachments =
+                withContext(Dispatchers.IO) {
+                    uris.mapNotNull { uri ->
+                        val bytes =
+                            runCatching {
+                                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                            }.getOrNull() ?: return@mapNotNull null
+                        if (bytes.isEmpty()) return@mapNotNull null
+                        val resolvedMime =
+                            context.contentResolver
+                                .getType(uri)
+                                .orEmpty()
+                                .takeIf { it.isNotBlank() }
+                                ?: "application/octet-stream"
+                        val name = queryDisplayName(context.contentResolver, uri) ?: "file"
+                        PendingAttachment(
+                            plaintextBytes = bytes,
+                            mediaType = resolvedMime,
+                            fileName = name,
+                        )
+                    }
+                }
+            if (attachments.isEmpty()) {
+                appState.present(R.string.toast_couldnt_decode_image)
+                return@launchMutation
+            }
+            controller.sendAttachments(attachments, caption = null)
+        }
+    }
+
+    // Documents take a separate launcher because `OpenMultipleDocuments`
+    // accepts any MIME — the image picker can't surface PDFs, archives, etc.
+    // Picked URIs go straight to `sendPickedDocuments` without recompression;
+    // the bytes ride the same `sendAttachments(list, caption)` path since
+    // the FFI is MIME-agnostic.
+    val documentPickerLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenMultipleDocuments(),
+        ) { uris ->
+            if (uris.isNotEmpty()) {
+                sendPickedDocuments(uris.take(MEDIA_PICKER_MAX_ITEMS))
+            }
+        }
 
     // Wipe decrypted share/camera temp files and retained outgoing JPEG bytes
     // when leaving the conversation so plaintext media doesn't linger.
@@ -2850,6 +3147,12 @@ private fun ConversationScreen(
                             } else {
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             }
+                        },
+                        onPickDocument = {
+                            // `*/*` lets the system file picker surface every
+                            // installed provider (Drive, Downloads, Files…)
+                            // without restricting by MIME. Bytes upload as-is.
+                            documentPickerLauncher.launch(arrayOf("*/*"))
                         },
                     )
                 }
@@ -3959,9 +4262,26 @@ private fun MessageBubble(
                                 controller.mediaReferences[record.messageIdHex]
                                     ?: MediaReferenceParser.parseAllImetaTags(record.tags)
                             }
-                        val imageReferences =
+                        // Split media into image refs (rendered as a bubble or
+                        // 2-col grid) and file refs (a list of pills). Mixed
+                        // albums render both: images on top, file pills below.
+                        // `IndexedValue` preserves the real protocol-level
+                        // attachmentIndex from the full `mediaReferences`
+                        // list so per-tile cache lookups never collide across
+                        // image and file subsets.
+                        val imageAttachments =
                             remember(mediaReferences) {
-                                mediaReferences.filter { MediaReferenceParser.isImageMedia(it) }
+                                mediaReferences
+                                    .withIndex()
+                                    .filter { (_, ref) -> MediaReferenceParser.isImageMedia(ref) }
+                                    .toList()
+                            }
+                        val fileAttachments =
+                            remember(mediaReferences) {
+                                mediaReferences
+                                    .withIndex()
+                                    .filter { (_, ref) -> !MediaReferenceParser.isImageMedia(ref) }
+                                    .toList()
                             }
                         val mediaPendingName =
                             remember(record.tags) {
@@ -3970,11 +4290,13 @@ private fun MessageBubble(
                                     ?.values
                                     ?.getOrNull(1)
                             }
-                        if (!deleted && !invalidated && imageReferences.isNotEmpty()) {
-                            if (imageReferences.size == 1) {
+                        if (!deleted && !invalidated && imageAttachments.isNotEmpty()) {
+                            if (imageAttachments.size == 1) {
+                                val entry = imageAttachments.first()
                                 MediaImageBubble(
                                     item = item,
-                                    reference = imageReferences.first(),
+                                    reference = entry.value,
+                                    attachmentIndex = entry.index,
                                     controller = controller,
                                     appState = appState,
                                     mine = mine,
@@ -3982,14 +4304,28 @@ private fun MessageBubble(
                             } else {
                                 MediaImageGridBubble(
                                     item = item,
-                                    references = imageReferences,
+                                    attachments = imageAttachments,
                                     controller = controller,
                                     appState = appState,
                                 )
                             }
-                        } else if (!deleted && !invalidated && mediaPendingName != null) {
+                        }
+                        if (!deleted && !invalidated && fileAttachments.isNotEmpty()) {
+                            fileAttachments.forEach { entry ->
+                                MediaFileBubble(
+                                    messageIdHex = record.messageIdHex,
+                                    attachmentIndex = entry.index,
+                                    reference = entry.value,
+                                    controller = controller,
+                                    appState = appState,
+                                    mine = mine,
+                                )
+                            }
+                        }
+                        val anyConfirmedMedia = imageAttachments.isNotEmpty() || fileAttachments.isNotEmpty()
+                        if (!deleted && !invalidated && !anyConfirmedMedia && mediaPendingName != null) {
                             MediaPendingPlaceholder(
-                                previewBytesList = controller.pendingMediaBytesList(record.messageIdHex),
+                                pendingAttachments = controller.pendingAttachmentsList(record.messageIdHex),
                                 failed = item.status == MessageStatus.Failed,
                             )
                         }
@@ -4010,8 +4346,8 @@ private fun MessageBubble(
                                 // Deleted/invalidated tombstones show only the
                                 // tombstone copy, never an inline image/caption.
                                 deleted || invalidated -> displayedBody
-                                mediaPendingName != null -> null
-                                imageReferences.isNotEmpty() -> record.plaintext.takeIf { it.isNotBlank() }
+                                mediaPendingName != null && !anyConfirmedMedia -> null
+                                anyConfirmedMedia -> record.plaintext.takeIf { it.isNotBlank() }
                                 else -> displayedBody
                             }
                         if (bodyTextToRender != null) {
@@ -4649,6 +4985,7 @@ private fun ComposerBar(
     onAfterSend: () -> Unit = {},
     onPickFromGallery: (() -> Unit)? = null,
     onCaptureFromCamera: (() -> Unit)? = null,
+    onPickDocument: (() -> Unit)? = null,
 ) {
     var attachMenuOpen by remember { mutableStateOf(false) }
     // Keyed on draftKey so switching to a different chat re-hydrates the text
@@ -4685,7 +5022,7 @@ private fun ComposerBar(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (onPickFromGallery != null || onCaptureFromCamera != null) {
+            if (onPickFromGallery != null || onCaptureFromCamera != null || onPickDocument != null) {
                 Box {
                     IconButton(
                         onClick = { attachMenuOpen = true },
@@ -4718,6 +5055,16 @@ private fun ComposerBar(
                                 onClick = {
                                     attachMenuOpen = false
                                     onPickFromGallery()
+                                },
+                            )
+                        }
+                        if (onPickDocument != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.attach_document)) },
+                                leadingIcon = { Icon(Icons.Default.Description, contentDescription = null) },
+                                onClick = {
+                                    attachMenuOpen = false
+                                    onPickDocument()
                                 },
                             )
                         }

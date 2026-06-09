@@ -363,9 +363,14 @@ private data class OptimisticReactionChange(
     val add: Boolean,
 )
 
-/** One compressed-and-named image queued for upload as part of an album. */
+/**
+ * One named attachment queued for upload as part of an album. The bytes are
+ * pre-processed plaintext (e.g. downscaled JPEG for images, raw bytes for
+ * documents) — the upload path encrypts these as-is, so callers must apply
+ * any MIME-specific transforms (recompression, etc.) before constructing this.
+ */
 data class PendingAttachment(
-    val jpegBytes: ByteArray,
+    val plaintextBytes: ByteArray,
     val mediaType: String,
     val fileName: String,
 ) {
@@ -377,11 +382,11 @@ data class PendingAttachment(
         if (other !is PendingAttachment) return false
         if (mediaType != other.mediaType) return false
         if (fileName != other.fileName) return false
-        return jpegBytes.contentEquals(other.jpegBytes)
+        return plaintextBytes.contentEquals(other.plaintextBytes)
     }
 
     override fun hashCode(): Int {
-        var result = jpegBytes.contentHashCode()
+        var result = plaintextBytes.contentHashCode()
         result = 31 * result + mediaType.hashCode()
         result = 31 * result + fileName.hashCode()
         return result
@@ -964,22 +969,25 @@ class ConversationController(
     }
 
     /**
-     * Send one or more JPEG attachments as a single kind:9 album.
+     * Send one or more attachments as a single kind:9 album. MIME-agnostic:
+     * images, documents (PDF/zip/etc.), audio, video — anything the picker
+     * surfaces — funnel through this same path. Callers are responsible for
+     * any MIME-specific pre-processing (image downscale via
+     * [MediaPipeline.readDownscaledJpeg]; documents pass through as-is)
+     * because the FFI encrypts the bytes exactly as supplied.
      *
      * All attachments upload via one `uploadMedia(list)` FFI call and publish
      * via one `sendMediaAttachments(list, caption)`; the receiving group sees
-     * a single message carrying N imeta tags. Callers downscale before this
-     * point ([MediaPipeline.readDownscaledJpeg]) because the FFI takes each
-     * payload whole in memory. A single-attachment call is the degenerate
-     * case (list of one) and routes through the same path.
+     * a single message carrying N imeta tags. A single-attachment call is
+     * the degenerate case (list of one) and routes through the same path.
      */
-    suspend fun sendImageAttachments(
+    suspend fun sendAttachments(
         attachments: List<PendingAttachment>,
         caption: String?,
     ) {
         val account = conversationAccountRef ?: return
         if (!canSendMessages || attachments.isEmpty()) return
-        if (attachments.any { it.jpegBytes.isEmpty() }) return
+        if (attachments.any { it.plaintextBytes.isEmpty() }) return
 
         val tempId = UUID.randomUUID().toString()
         val key = "msg:$tempId"
@@ -1072,7 +1080,7 @@ class ConversationController(
                                         MediaUploadAttachmentRequestFfi(
                                             fileName = attachment.fileName,
                                             mediaType = attachment.mediaType,
-                                            plaintext = attachment.jpegBytes,
+                                            plaintext = attachment.plaintextBytes,
                                             dim = null,
                                             thumbhash = null,
                                         )
@@ -1125,11 +1133,11 @@ class ConversationController(
             if (confirmedId.isNotEmpty()) {
                 retained.attachments.forEachIndexed { index, attachment ->
                     val confirmedKey = mediaCacheKey(account, confirmedId, index)
-                    appState.mediaPlaintextCache.put(confirmedKey, attachment.jpegBytes)
+                    appState.mediaPlaintextCache.put(confirmedKey, attachment.plaintextBytes)
                     MediaPipeline
-                        .decodeSampledBitmap(attachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
+                        .decodeSampledBitmap(attachment.plaintextBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
                         ?.let { appState.mediaThumbnailCache.put(confirmedKey, it) }
-                    val bytesToPersist = attachment.jpegBytes
+                    val bytesToPersist = attachment.plaintextBytes
                     appState.launchMutation {
                         withContext(Dispatchers.IO) { appState.diskMediaCache.put(confirmedKey, bytesToPersist) }
                     }
@@ -1246,7 +1254,7 @@ class ConversationController(
     private val retainedMediaUploads =
         ByteSizeLruCache<String, RetainedMediaUpload>(
             maxBytes = MEDIA_RETAINED_MAX_BYTES,
-            sizeOf = { upload -> upload.attachments.sumOf { it.jpegBytes.size } },
+            sizeOf = { upload -> upload.attachments.sumOf { it.plaintextBytes.size } },
         )
 
     /**
@@ -1356,11 +1364,11 @@ class ConversationController(
         // hit immediately on reconcile.
         retained.attachments.forEachIndexed { index, attachment ->
             val cacheKey = mediaCacheKey(account, projectedMessageIdHex, index)
-            appState.mediaPlaintextCache.put(cacheKey, attachment.jpegBytes)
+            appState.mediaPlaintextCache.put(cacheKey, attachment.plaintextBytes)
             MediaPipeline
-                .decodeSampledBitmap(attachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
+                .decodeSampledBitmap(attachment.plaintextBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
                 ?.let { appState.mediaThumbnailCache.put(cacheKey, it) }
-            val bytesToPersist = attachment.jpegBytes
+            val bytesToPersist = attachment.plaintextBytes
             appState.launchMutation {
                 withContext(Dispatchers.IO) { appState.diskMediaCache.put(cacheKey, bytesToPersist) }
             }
@@ -1368,29 +1376,17 @@ class ConversationController(
     }
 
     /**
-     * Bytes of the first pending attachment — used by callers that only want
-     * a single preview. For the optimistic upload bubble in the timeline,
-     * use [pendingMediaBytesList] so the pending UI matches the post-upload
-     * grid layout instead of showing only the first tile.
+     * Every pending attachment in the optimistic album, ordered by attachment
+     * index. Empty when no upload is queued under the temp id. Used by the
+     * upload placeholder so the sender sees the same grid/file-pill shape
+     * during upload as the post-upload bubble — the placeholder needs the
+     * filename + MIME alongside the bytes so non-image attachments render
+     * with their original name instead of a generic preview.
      */
-    fun pendingMediaBytes(messageIdHex: String): ByteArray? =
+    fun pendingAttachmentsList(messageIdHex: String): List<PendingAttachment> =
         retainedMediaUploads
             .get("msg:$messageIdHex")
             ?.attachments
-            ?.firstOrNull()
-            ?.jpegBytes
-
-    /**
-     * Bytes for every pending attachment in the optimistic album, ordered by
-     * attachment index. Empty when no upload is queued under the temp id.
-     * Used by the upload placeholder so the sender sees the full grid render
-     * during upload — same shape as the post-upload bubble.
-     */
-    fun pendingMediaBytesList(messageIdHex: String): List<ByteArray> =
-        retainedMediaUploads
-            .get("msg:$messageIdHex")
-            ?.attachments
-            ?.map { it.jpegBytes }
             .orEmpty()
 
     /**
