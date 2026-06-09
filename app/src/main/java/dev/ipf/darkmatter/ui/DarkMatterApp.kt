@@ -1518,6 +1518,7 @@ private fun MediaImageGridBubble(
     attachments: List<IndexedValue<MediaAttachmentReferenceFfi>>,
     controller: ConversationController,
     appState: DarkMatterAppState,
+    mine: Boolean,
 ) {
     val record = item.record
     val visible = attachments.take(4)
@@ -1549,6 +1550,8 @@ private fun MediaImageGridBubble(
                             attachmentIndex = entry.index,
                             reference = entry.value,
                             controller = controller,
+                            appState = appState,
+                            mine = mine,
                             onTap = { viewerOpenAt = tileIndex },
                             overflowCount = if (showOverflow) overflow else 0,
                             modifier =
@@ -1591,6 +1594,8 @@ private fun MediaImageGridTile(
     attachmentIndex: Int,
     reference: MediaAttachmentReferenceFfi,
     controller: ConversationController,
+    appState: DarkMatterAppState,
+    mine: Boolean,
     onTap: () -> Unit,
     overflowCount: Int,
     modifier: Modifier = Modifier,
@@ -1605,9 +1610,17 @@ private fun MediaImageGridTile(
     }
     var failed by remember(tileKey) { mutableStateOf(false) }
     var reloadToken by remember(tileKey) { mutableStateOf(0) }
+    // Mirror the single-image bubble's auto-download gate (#10) so the
+    // policy applies to album tiles too. Outgoing tiles (`mine`) always
+    // download because the bytes are seeded from the send. Re-keyed on
+    // the policy so flipping the setting re-gates undownloaded tiles.
+    var startDownload by remember(tileKey, appState.mediaAutoDownloadPolicy) {
+        mutableStateOf(mine || appState.shouldAutoDownloadMedia())
+    }
 
-    LaunchedEffect(tileKey, reloadToken) {
+    LaunchedEffect(tileKey, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect
+        if (!startDownload) return@LaunchedEffect
         failed = false
         try {
             val data = controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
@@ -1629,7 +1642,21 @@ private fun MediaImageGridTile(
     }
 
     Box(
-        modifier = modifier.clickable(onClick = onTap),
+        modifier =
+            modifier.clickable(
+                // Two modes:
+                //   - Bytes ready (`bitmap != null`): tap opens the viewer.
+                //   - Auto-download gated: tap flips startDownload, so the
+                //     first tap fetches and the next tap (once decoded)
+                //     opens the viewer. Same UX as the single-image bubble.
+                onClick = {
+                    if (bitmap != null) {
+                        onTap()
+                    } else if (!startDownload) {
+                        startDownload = true
+                    }
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         val current = bitmap
@@ -1651,6 +1678,13 @@ private fun MediaImageGridTile(
                         contentDescription = stringResource(R.string.media_tap_to_retry),
                     )
                 }
+            !startDownload ->
+                Icon(
+                    Icons.Default.Download,
+                    contentDescription = stringResource(R.string.media_tap_to_download),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(28.dp),
+                )
             else ->
                 CircularProgressIndicator(
                     modifier = Modifier.size(24.dp),
@@ -4460,6 +4494,7 @@ private fun MessageBubble(
                                     attachments = imageAttachments,
                                     controller = controller,
                                     appState = appState,
+                                    mine = mine,
                                 )
                             }
                         }
