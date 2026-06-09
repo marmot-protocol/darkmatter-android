@@ -1392,22 +1392,28 @@ private fun MediaImageBubble(
 ) {
     val record = item.record
     val key = record.messageIdHex
+    // Include `sourceEpoch` in every memoization key so an initial render
+    // against the imeta-fallback reference (sourceEpoch = 0) is invalidated
+    // the moment the typed reference arrives from `listMedia`. Without this,
+    // a bubble that failed to decrypt at epoch 0 would stay stuck failed
+    // forever — the failure latch survives across recomposes.
+    val epoch = reference.sourceEpoch
     // Seed from the decoded-thumbnail cache so an already-fetched or just-sent
     // image paints on the first frame — no decode spinner, no visible "reload".
-    var bitmap by remember(key, attachmentIndex) {
+    var bitmap by remember(key, attachmentIndex, epoch) {
         mutableStateOf(controller.thumbnailFor(key, attachmentIndex)?.asImageBitmap())
     }
-    var failed by remember(key, attachmentIndex) { mutableStateOf(false) }
-    var viewerOpen by remember(key, attachmentIndex) { mutableStateOf(false) }
-    var reloadToken by remember(key, attachmentIndex) { mutableStateOf(0) }
+    var failed by remember(key, attachmentIndex, epoch) { mutableStateOf(false) }
+    var viewerOpen by remember(key, attachmentIndex, epoch) { mutableStateOf(false) }
+    var reloadToken by remember(key, attachmentIndex, epoch) { mutableStateOf(0) }
     // Auto-download gating (#10): own messages always render (bytes are cached
     // from the send), incoming honor the policy. Keyed on the policy so
     // flipping the setting re-gates undownloaded bubbles.
-    var startDownload by remember(key, attachmentIndex, appState.mediaAutoDownloadPolicy) {
+    var startDownload by remember(key, attachmentIndex, epoch, appState.mediaAutoDownloadPolicy) {
         mutableStateOf(mine || appState.shouldAutoDownloadMedia())
     }
 
-    LaunchedEffect(key, attachmentIndex, startDownload, reloadToken) {
+    LaunchedEffect(key, attachmentIndex, epoch, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect // already have a decoded thumbnail
         if (!startDownload) return@LaunchedEffect
         failed = false
@@ -1589,7 +1595,11 @@ private fun MediaImageGridTile(
     overflowCount: Int,
     modifier: Modifier = Modifier,
 ) {
-    val tileKey = "$messageIdHex#$attachmentIndex"
+    // `sourceEpoch` is baked into the tile key so an initial render against
+    // the imeta-fallback reference (epoch = 0) is recomposed once the typed
+    // reference lands. Otherwise a failed-at-epoch-0 tile sticks across
+    // every later mediaReferences update.
+    val tileKey = "$messageIdHex#$attachmentIndex#${reference.sourceEpoch}"
     var bitmap by remember(tileKey) {
         mutableStateOf(controller.thumbnailFor(messageIdHex, attachmentIndex)?.asImageBitmap())
     }
@@ -2278,7 +2288,10 @@ private fun ViewerPage(
     onScaleChange: (Float) -> Unit,
     onOffsetChange: (Offset) -> Unit,
 ) {
-    val pageKey = "$messageIdHex#$attachmentIndex"
+    // `sourceEpoch` is folded into the page key so a viewer that failed
+    // its first decrypt at epoch 0 (typed reference not yet loaded) re-keys
+    // and retries when the real reference arrives.
+    val pageKey = "$messageIdHex#$attachmentIndex#${reference.sourceEpoch}"
     var androidBitmap by remember(pageKey) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var viewerFailed by remember(pageKey) { mutableStateOf(false) }
     var viewerReloadToken by remember(pageKey) { mutableStateOf(0) }

@@ -846,8 +846,24 @@ class ConversationController(
                             }
                         // New messages may include media; refresh the cached
                         // references so the bubble's download path finds the
-                        // correct `sourceEpoch`. Cheap local SQLite query.
-                        refreshMediaReferences()
+                        // correct `sourceEpoch`. The `listMedia(group, null)`
+                        // FFI scan is unbounded — gate it on "this update
+                        // actually touches media" so text-only / reaction-only
+                        // updates don't trigger a full-table scan every time
+                        // (a real cost in media-heavy groups). The Page
+                        // initial snapshot always refreshes (the cache is
+                        // empty on first load anyway).
+                        val touchedMedia =
+                            when (update) {
+                                is TimelineSubscriptionUpdateFfi.Page -> pageContainsMedia(update.page)
+                                is TimelineSubscriptionUpdateFfi.Projection ->
+                                    if (update.update.update.groupIdHex == group.groupIdHex) {
+                                        changesContainMedia(update.update.update.changes)
+                                    } else {
+                                        false
+                                    }
+                            }
+                        if (touchedMedia) refreshMediaReferences()
                         // Scroll-driven mark-read in the UI layer handles the
                         // user-visible read pointer. The projection-update
                         // path no longer force-marks the absolute newest as
@@ -1821,6 +1837,14 @@ class ConversationController(
                 }
             hasLoadedOlderPages = true
             applyTimelinePage(page, replaceWindow = false, updatePagination = true)
+            // The cached `mediaReferences` map only carries entries for
+            // messages that have been listMedia-projected at some prior
+            // point. Older-page rows landing fresh here would otherwise
+            // fall back to the imeta-tag parser, which hard-codes
+            // `sourceEpoch = 0` and breaks decryption on every image. Gate
+            // on whether the page actually contains a media-bearing row so
+            // a text-only history pull doesn't trigger the unbounded scan.
+            if (pageContainsMedia(page)) refreshMediaReferences()
             page.messages.isNotEmpty()
         } catch (cancel: CancellationException) {
             throw cancel
@@ -1849,7 +1873,12 @@ class ConversationController(
                 )
             }
         hasLoadedOlderPages = false
-        return applyTimelinePage(page, replaceWindow = true, updatePagination = true)
+        val streamIds = applyTimelinePage(page, replaceWindow = true, updatePagination = true)
+        // Full-window replacement: re-seed the typed media cache too so any
+        // freshly-projected media in the new window resolves to its real
+        // `sourceEpoch` instead of the imeta-tag fallback of 0.
+        if (pageContainsMedia(page)) refreshMediaReferences()
+        return streamIds
     }
 
     fun replyPreview(
@@ -2393,6 +2422,23 @@ class ConversationController(
             Log.w("DMConversation", "refresh members failed for ${group.groupIdHex.take(8)}", it)
         }
     }
+
+    /**
+     * Whether [page] holds at least one record carrying a media attachment.
+     * Used to gate the hot-path call to [refreshMediaReferences] so a
+     * text-only / reaction-only timeline update doesn't trigger a full
+     * `listMedia(group, null)` SQLite scan on every projection batch.
+     */
+    private fun pageContainsMedia(page: TimelinePageFfi): Boolean = page.messages.any(::recordCarriesMedia)
+
+    private fun changesContainMedia(changes: List<TimelineMessageChangeFfi>): Boolean =
+        changes.any { change ->
+            change is TimelineMessageChangeFfi.Upsert && recordCarriesMedia(change.message)
+        }
+
+    /** Cheap structural check: a kind:9 record whose tag list includes an
+     *  `imeta` entry is a media-bearing message under encrypted-media-v1. */
+    private fun recordCarriesMedia(record: TimelineMessageRecordFfi): Boolean = record.kind == 9uL && record.tags.any { it.values.firstOrNull() == "imeta" }
 
     /**
      * Pull typed media references from Rust and cache them by `messageIdHex`.
