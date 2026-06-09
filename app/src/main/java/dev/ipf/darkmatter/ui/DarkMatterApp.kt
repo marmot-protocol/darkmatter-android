@@ -1,11 +1,13 @@
 package dev.ipf.darkmatter.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -117,7 +119,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
-import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -188,10 +189,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.core.content.ContextCompat
 import androidx.core.os.ConfigurationCompat
 import androidx.emoji2.emojipicker.EmojiPickerView
 import androidx.lifecycle.LifecycleOwner
+import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -265,9 +268,6 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import android.app.Activity
-import android.view.WindowManager
-import com.google.mlkit.vision.barcode.BarcodeScanner
 import kotlin.math.roundToInt
 
 private enum class MainSection {
@@ -5279,6 +5279,12 @@ private fun bindQrScannerCamera(
                 provider.unbindAll()
                 provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             }.onFailure {
+                // Failed before lifecycle binding could take over — the
+                // composable's onDispose has nothing to unbind, so release
+                // provider + scanner here instead of leaking them until the
+                // sheet dismisses.
+                runCatching { scannerRef.getAndSet(null)?.close() }
+                runCatching { providerRef.getAndSet(null)?.unbindAll() }
                 onError(it.message ?: it.javaClass.simpleName)
             }
         },
