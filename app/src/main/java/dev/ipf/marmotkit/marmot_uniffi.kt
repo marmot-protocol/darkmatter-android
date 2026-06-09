@@ -10355,13 +10355,13 @@ public object FfiConverterTypeMarkdownAutolinkKindFfi: FfiConverterRustBuffer<Ma
 sealed class MarkdownBlockFfi {
     
     data class Paragraph(
-        val `inlines`: List<MarkdownInlineFfi>) : MarkdownBlockFfi() {
+        val `inlines`: kotlin.collections.List<MarkdownInlineFfi>) : MarkdownBlockFfi() {
         companion object
     }
     
     data class Heading(
         val `level`: kotlin.UByte, 
-        val `inlines`: List<MarkdownInlineFfi>) : MarkdownBlockFfi() {
+        val `inlines`: kotlin.collections.List<MarkdownInlineFfi>) : MarkdownBlockFfi() {
         companion object
     }
     
@@ -10376,21 +10376,21 @@ sealed class MarkdownBlockFfi {
     }
     
     data class BlockQuote(
-        val `blocks`: List<MarkdownBlockFfi>) : MarkdownBlockFfi() {
+        val `blocks`: kotlin.collections.List<MarkdownBlockFfi>) : MarkdownBlockFfi() {
         companion object
     }
     
     data class List(
         val `kind`: MarkdownListKindFfi, 
         val `tight`: kotlin.Boolean, 
-        val `items`: List<MarkdownListItemFfi>) : MarkdownBlockFfi() {
+        val `items`: kotlin.collections.List<MarkdownListItemFfi>) : MarkdownBlockFfi() {
         companion object
     }
     
     data class Table(
-        val `alignments`: List<MarkdownAlignmentFfi>, 
-        val `header`: List<MarkdownTableCellFfi>, 
-        val `rows`: List<List<MarkdownTableCellFfi>>) : MarkdownBlockFfi() {
+        val `alignments`: kotlin.collections.List<MarkdownAlignmentFfi>,
+        val `header`: kotlin.collections.List<MarkdownTableCellFfi>,
+        val `rows`: kotlin.collections.List<kotlin.collections.List<MarkdownTableCellFfi>>) : MarkdownBlockFfi() {
         companion object
     }
     

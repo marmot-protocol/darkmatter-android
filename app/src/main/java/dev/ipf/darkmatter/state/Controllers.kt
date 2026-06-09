@@ -30,6 +30,7 @@ import dev.ipf.marmotkit.ChatListUpdateTriggerFfi
 import dev.ipf.marmotkit.ChatsSubscription
 import dev.ipf.marmotkit.GroupDetailsFfi
 import dev.ipf.marmotkit.GroupStateSubscription
+import dev.ipf.marmotkit.MarkdownDocumentFfi
 import dev.ipf.marmotkit.MediaAttachmentReferenceFfi
 import dev.ipf.marmotkit.MediaUploadAttachmentRequestFfi
 import dev.ipf.marmotkit.MediaUploadRequestFfi
@@ -117,6 +118,7 @@ internal fun chatListItemFromProjection(
                     groupIdHex = row.groupIdHex,
                     sender = preview.sender,
                     plaintext = preview.plaintext,
+                    contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
                     kind = preview.kind,
                     tags = emptyList(),
                     recordedAt = preview.timelineAt,
@@ -590,6 +592,14 @@ private fun TimelineUpdateTriggerFfi.recomputesReactions(): Boolean =
         TimelineUpdateTriggerFfi.AGENT_STREAM_FINISHED,
         TimelineUpdateTriggerFfi.DELIVERY_OR_SEND_STATE_CHANGED,
         TimelineUpdateTriggerFfi.RECEIPT_CHANGED,
+        // New triggers from the typed Hermes-agent / group-system surface.
+        // None of these mutate reaction tallies, so they fall in the false
+        // bucket — kept explicit so a future trigger that *does* change
+        // reactions fails the exhaustiveness check rather than silently
+        // missing a recompute.
+        TimelineUpdateTriggerFfi.AGENT_ACTIVITY,
+        TimelineUpdateTriggerFfi.AGENT_OPERATION,
+        TimelineUpdateTriggerFfi.GROUP_SYSTEM,
         -> false
     }
 
@@ -629,7 +639,7 @@ class ConversationController(
     // it). Without this, `downloadMedia` would be called with the imeta-tag
     // parser's `sourceEpoch = 0` fallback and the Rust core would error
     // with `missing encrypted media secret for epoch 0`.
-    var mediaReferences: Map<String, MediaAttachmentReferenceFfi> by mutableStateOf(emptyMap())
+    var mediaReferences: Map<String, List<MediaAttachmentReferenceFfi>> by mutableStateOf(emptyMap())
         private set
     private var membersVerified by mutableStateOf(false)
     var timeline by mutableStateOf<List<TimelineMessage>>(emptyList())
@@ -896,6 +906,7 @@ class ConversationController(
                 groupIdHex = group.groupIdHex,
                 sender = appState.activeAccount?.accountIdHex ?: "",
                 plaintext = trimmed,
+                contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
                 kind = 9uL,
                 tags =
                     replyTarget
@@ -991,6 +1002,7 @@ class ConversationController(
                 groupIdHex = group.groupIdHex,
                 sender = appState.activeAccount?.accountIdHex ?: "",
                 plaintext = body,
+                contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
                 kind = 9uL,
                 // One `_media_pending` tag per attachment. retryFailedSend
                 // detects ANY of these as a media-retry trigger and re-runs
@@ -1108,23 +1120,19 @@ class ConversationController(
             }
             // Seed the decrypted-bytes AND decoded-thumbnail caches under the
             // confirmed id so the sender's own bubble renders instantly — no
-            // Blossom round-trip and no decode spinner. The current cache key
-            // is `(account, messageId)`, so the seed only covers the FIRST
-            // attachment's bytes — multi-attachment seeds wait on the
-            // cache-key-by-index refactor that ships with the receive-side
-            // grid bubble. Single-attachment messages remain fully seeded.
+            // Blossom round-trip and no decode spinner. One cache entry per
+            // attachment under `(account, messageId, attachmentIndex)`.
             if (confirmedId.isNotEmpty()) {
-                val firstAttachment = retained.attachments.first()
-                val confirmedKey = mediaCacheKey(account, confirmedId)
-                appState.mediaPlaintextCache.put(confirmedKey, firstAttachment.jpegBytes)
-                MediaPipeline
-                    .decodeSampledBitmap(firstAttachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
-                    ?.let {
-                        appState.mediaThumbnailCache.put(confirmedKey, it)
+                retained.attachments.forEachIndexed { index, attachment ->
+                    val confirmedKey = mediaCacheKey(account, confirmedId, index)
+                    appState.mediaPlaintextCache.put(confirmedKey, attachment.jpegBytes)
+                    MediaPipeline
+                        .decodeSampledBitmap(attachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
+                        ?.let { appState.mediaThumbnailCache.put(confirmedKey, it) }
+                    val bytesToPersist = attachment.jpegBytes
+                    appState.launchMutation {
+                        withContext(Dispatchers.IO) { appState.diskMediaCache.put(confirmedKey, bytesToPersist) }
                     }
-                val bytesToPersist = firstAttachment.jpegBytes
-                appState.launchMutation {
-                    withContext(Dispatchers.IO) { appState.diskMediaCache.put(confirmedKey, bytesToPersist) }
                 }
             }
             retainedMediaUploads.remove(key)
@@ -1251,7 +1259,8 @@ class ConversationController(
     private fun mediaCacheKey(
         account: String,
         messageIdHex: String,
-    ): String = "$account|${group.groupIdHex}|$messageIdHex"
+        attachmentIndex: Int,
+    ): String = "$account|${group.groupIdHex}|$messageIdHex|$attachmentIndex"
 
     /**
      * Fetch and decrypt a Blossom-stored attachment. Backed by the app-level
@@ -1261,12 +1270,13 @@ class ConversationController(
      */
     suspend fun downloadAttachment(
         messageIdHex: String,
+        attachmentIndex: Int,
         reference: MediaAttachmentReferenceFfi,
     ): ByteArray {
         // Resolve the account first so the cache key is never unanchored
-        // ("|group|msg"), which a later sign-in could collide with.
+        // ("|group|msg|idx"), which a later sign-in could collide with.
         val account = conversationAccountRef ?: error("no active account")
-        val cacheKey = mediaCacheKey(account, messageIdHex)
+        val cacheKey = mediaCacheKey(account, messageIdHex, attachmentIndex)
         // L1: in-memory LRU (hottest cache, instant return).
         appState.mediaPlaintextCache.get(cacheKey)?.let { return it }
         // L2: disk LRU (survives process restart). Read off the main thread
@@ -1304,18 +1314,22 @@ class ConversationController(
 
     /** Decoded thumbnail for [messageIdHex] if one is cached (renders with no
      *  spinner). Null when unanchored or not yet decoded. */
-    fun thumbnailFor(messageIdHex: String): android.graphics.Bitmap? {
+    fun thumbnailFor(
+        messageIdHex: String,
+        attachmentIndex: Int,
+    ): android.graphics.Bitmap? {
         val account = conversationAccountRef ?: return null
-        return appState.mediaThumbnailCache.get(mediaCacheKey(account, messageIdHex))
+        return appState.mediaThumbnailCache.get(mediaCacheKey(account, messageIdHex, attachmentIndex))
     }
 
     /** Cache a decoded thumbnail so re-renders / re-entry skip the decode. */
     fun cacheThumbnail(
         messageIdHex: String,
+        attachmentIndex: Int,
         bitmap: android.graphics.Bitmap,
     ) {
         val account = conversationAccountRef ?: return
-        appState.mediaThumbnailCache.put(mediaCacheKey(account, messageIdHex), bitmap)
+        appState.mediaThumbnailCache.put(mediaCacheKey(account, messageIdHex, attachmentIndex), bitmap)
     }
 
     /**
@@ -1337,21 +1351,19 @@ class ConversationController(
     ) {
         val retained = retainedMediaUploads.get(optimisticKey) ?: return
         val account = conversationAccountRef ?: return
-        // Seed the FIRST attachment only — the current cache key is
-        // `(account, messageId)`, so subsequent attachments would collide.
-        // The receive-side grid bubble will extend the cache key with the
-        // attachment index, at which point we can seed all of them here.
-        val firstAttachment = retained.attachments.firstOrNull() ?: return
-        val cacheKey = mediaCacheKey(account, projectedMessageIdHex)
-        appState.mediaPlaintextCache.put(cacheKey, firstAttachment.jpegBytes)
-        MediaPipeline
-            .decodeSampledBitmap(firstAttachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
-            ?.let {
-                appState.mediaThumbnailCache.put(cacheKey, it)
+        // Seed every attachment under its own (messageId, attachmentIndex)
+        // key so the projected album bubble's per-tile cache lookups all
+        // hit immediately on reconcile.
+        retained.attachments.forEachIndexed { index, attachment ->
+            val cacheKey = mediaCacheKey(account, projectedMessageIdHex, index)
+            appState.mediaPlaintextCache.put(cacheKey, attachment.jpegBytes)
+            MediaPipeline
+                .decodeSampledBitmap(attachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
+                ?.let { appState.mediaThumbnailCache.put(cacheKey, it) }
+            val bytesToPersist = attachment.jpegBytes
+            appState.launchMutation {
+                withContext(Dispatchers.IO) { appState.diskMediaCache.put(cacheKey, bytesToPersist) }
             }
-        val bytesToPersist = firstAttachment.jpegBytes
-        appState.launchMutation {
-            withContext(Dispatchers.IO) { appState.diskMediaCache.put(cacheKey, bytesToPersist) }
         }
     }
 
@@ -2388,7 +2400,14 @@ class ConversationController(
         runCatching {
             appState.marmotIo { listMedia(account, group.groupIdHex, null) }
         }.onSuccess { records ->
-            mediaReferences = records.associate { it.messageIdHex to it.reference }
+            // Group by messageId (one message → N attachments); sort each
+            // bucket by attachmentIndex so the bubble renders in album order.
+            mediaReferences =
+                records
+                    .groupBy { it.messageIdHex }
+                    .mapValues { (_, group) ->
+                        group.sortedBy { it.attachmentIndex }.map { it.reference }
+                    }
         }.onFailure {
             if (it is CancellationException) throw it
             Log.w("DMConversation", "listMedia failed for ${group.groupIdHex.take(8)}", it)
@@ -2496,6 +2515,14 @@ class ConversationController(
                     is AgentStreamUpdateFfi.Failed -> {
                         updateStreamPreview(streamId, copy.streamFailed(update.message), MessageStatus.Failed)
                     }
+                    // Typed Hermes-agent variants (Progress / Record / Status)
+                    // arrived with the recent Rust regen. We don't surface
+                    // them in the streaming preview yet — drop silently so
+                    // the loop keeps consuming the next chunk.
+                    is AgentStreamUpdateFfi.Progress,
+                    is AgentStreamUpdateFfi.Record,
+                    is AgentStreamUpdateFfi.Status,
+                    -> Unit
                 }
             }
         } catch (throwable: Throwable) {
@@ -2529,6 +2556,7 @@ class ConversationController(
                     groupIdHex = group.groupIdHex,
                     sender = inferStreamSender(streamId),
                     plaintext = "",
+                    contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
                     kind = 1200uL,
                     tags = listOf(MessageProjector.streamTag(streamId)),
                     recordedAt = nowSeconds(),

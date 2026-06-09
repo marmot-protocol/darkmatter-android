@@ -59,15 +59,19 @@ object MediaReferenceParser {
      * Returns the first valid imeta-tag attachment reference in [tags], or
      * null when no imeta tag is present or no imeta tag passes validation.
      */
-    fun parseImetaTag(tags: List<MessageTagFfi>): MediaAttachmentReferenceFfi? {
-        for (tag in tags) {
+    fun parseImetaTag(tags: List<MessageTagFfi>): MediaAttachmentReferenceFfi? = parseAllImetaTags(tags).firstOrNull()
+
+    /**
+     * Parses every valid imeta tag in [tags] in order. Album messages from
+     * encrypted-media-v1 carry N imeta tags (one per attachment); the order
+     * is the album's display order. Invalid tags are skipped silently.
+     */
+    fun parseAllImetaTags(tags: List<MessageTagFfi>): List<MediaAttachmentReferenceFfi> =
+        tags.mapNotNull { tag ->
             val values = tag.values
-            if (values.firstOrNull() != TAG_NAME) continue
-            val ref = parseImetaValues(values.drop(1)) ?: continue
-            return ref
+            if (values.firstOrNull() != TAG_NAME) return@mapNotNull null
+            parseImetaValues(values.drop(1))
         }
-        return null
-    }
 
     /**
      * Parses the imeta tag's value list (after the `"imeta"` name) into a

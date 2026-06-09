@@ -1374,7 +1374,7 @@ private fun MediaImageBubble(
     val key = record.messageIdHex
     // Seed from the decoded-thumbnail cache so an already-fetched or just-sent
     // image paints on the first frame — no decode spinner, no visible "reload".
-    var bitmap by remember(key) { mutableStateOf(controller.thumbnailFor(key)?.asImageBitmap()) }
+    var bitmap by remember(key) { mutableStateOf(controller.thumbnailFor(key, 0)?.asImageBitmap()) }
     var failed by remember(key) { mutableStateOf(false) }
     var viewerOpen by remember(key) { mutableStateOf(false) }
     var reloadToken by remember(key) { mutableStateOf(0) }
@@ -1390,7 +1390,7 @@ private fun MediaImageBubble(
         if (!startDownload) return@LaunchedEffect
         failed = false
         try {
-            val data = controller.downloadAttachment(key, reference)
+            val data = controller.downloadAttachment(key, 0, reference)
             // Decode a sampled bitmap sized to the bubble — a full 1920px
             // image would be a ~14 MB ARGB_8888 bitmap per visible row.
             val decoded =
@@ -1398,7 +1398,7 @@ private fun MediaImageBubble(
                     MediaPipeline.decodeSampledBitmap(data, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
                 }
             if (decoded != null) {
-                controller.cacheThumbnail(key, decoded)
+                controller.cacheThumbnail(key, 0, decoded)
                 bitmap = decoded.asImageBitmap()
             } else {
                 failed = true
@@ -1607,7 +1607,7 @@ private fun FullScreenImageViewer(
     LaunchedEffect(messageIdHex, viewerReloadToken) {
         viewerFailed = false
         try {
-            val data = controller.downloadAttachment(messageIdHex, reference)
+            val data = controller.downloadAttachment(messageIdHex, 0, reference)
             // Bounded sampled decode. A 5000px remote image decoded full-size
             // is ~100 MB ARGB_8888 and OOMs mid-class devices; the viewer
             // ceiling caps that while keeping quality high enough on phones.
@@ -1745,7 +1745,7 @@ private fun FullScreenImageViewer(
                                 // than holding the bytes in Compose state.
                                 val data =
                                     runCatching {
-                                        controller.downloadAttachment(messageIdHex, reference)
+                                        controller.downloadAttachment(messageIdHex, 0, reference)
                                     }.getOrNull()
                                 val ok =
                                     data != null &&
@@ -1765,7 +1765,7 @@ private fun FullScreenImageViewer(
                         onClick = {
                             scope.launch {
                                 runCatching {
-                                    controller.downloadAttachment(messageIdHex, reference)
+                                    controller.downloadAttachment(messageIdHex, 0, reference)
                                 }.getOrNull()?.let { shareImage(context, it, reference.fileName, reference.mediaType) }
                             }
                         },
@@ -3594,11 +3594,15 @@ private fun MessageBubble(
                         // parser can't recover (no epoch field in the wire
                         // format). Fall back to the imeta parser for optimistic
                         // bridge records that haven't been projected yet.
-                        val mediaReference =
+                        val mediaReferences =
                             remember(record.tags, record.messageIdHex, controller.mediaReferences) {
                                 controller.mediaReferences[record.messageIdHex]
-                                    ?: MediaReferenceParser.parseImetaTag(record.tags)
+                                    ?: MediaReferenceParser.parseAllImetaTags(record.tags)
                             }
+                        // First reference still used by the (current) single-image
+                        // bubble; the grid bubble that consumes the full list
+                        // ships with the next commit.
+                        val mediaReference = mediaReferences.firstOrNull()
                         val mediaPendingName =
                             remember(record.tags) {
                                 record.tags
