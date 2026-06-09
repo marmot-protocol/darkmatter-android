@@ -116,6 +116,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -5113,10 +5115,19 @@ private fun CameraQrScanner(
     // lifecycle, so without an explicit unbind the camera keeps streaming
     // (and the OS in-use indicator stays lit) until the activity stops. The
     // BarcodeScanner is Closeable and leaks native resources otherwise.
+    //
+    // `disposedRef` is a separate teardown signal so a late
+    // ProcessCameraProvider.getInstance() callback (fired after the sheet
+    // dismissed) can bail and clean up instead of binding into refs we just
+    // nulled out. Using `null` to mean both "not yet set" and "torn down"
+    // would let `compareAndSet(null, …)` succeed after onDispose, leaking the
+    // camera again.
     val providerRef = remember { AtomicReference<ProcessCameraProvider?>(null) }
     val scannerRef = remember { AtomicReference<BarcodeScanner?>(null) }
+    val disposedRef = remember { AtomicBoolean(false) }
     DisposableEffect(Unit) {
         onDispose {
+            disposedRef.set(true)
             runCatching { providerRef.getAndSet(null)?.unbindAll() }
             runCatching { scannerRef.getAndSet(null)?.close() }
         }
@@ -5132,6 +5143,7 @@ private fun CameraQrScanner(
                     cameraUnavailable,
                     providerRef,
                     scannerRef,
+                    disposedRef,
                     onScan,
                     onError,
                 )
@@ -5148,6 +5160,18 @@ private tailrec fun Context.lifecycleOwner(): LifecycleOwner? =
         else -> null
     }
 
+// Compose's `LocalContext.current` is whatever the host wired in — often
+// the Activity directly, but themed/wrapped contexts (test surfaces, custom
+// theme wrappers) return a `ContextWrapper`. A direct `as? Activity` cast on
+// those silently yields null, which for a FLAG_SECURE setter is the worst
+// failure mode (looks like it works, doesn't). Walk the wrapper chain.
+private tailrec fun Context.activity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.activity()
+        else -> null
+    }
+
 /**
  * Marks the host activity's window as secure for the duration of this
  * composition. `FLAG_SECURE` blocks the OS Recents/overview thumbnail,
@@ -5161,7 +5185,7 @@ private tailrec fun Context.lifecycleOwner(): LifecycleOwner? =
 private fun WindowSecureFlag() {
     val context = LocalContext.current
     DisposableEffect(Unit) {
-        val window = (context as? Activity)?.window
+        val window = context.activity()?.window
         window?.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE,
@@ -5180,6 +5204,7 @@ private fun bindQrScannerCamera(
     cameraUnavailable: String,
     providerRef: AtomicReference<ProcessCameraProvider?>,
     scannerRef: AtomicReference<BarcodeScanner?>,
+    disposedRef: AtomicBoolean,
     onScan: (String) -> Unit,
     onError: (String) -> Unit,
 ) {
@@ -5192,10 +5217,11 @@ private fun bindQrScannerCamera(
                     onError(cameraUnavailable)
                     return@addListener
                 }
-            // Publish the provider so the caller's DisposableEffect can unbind on
-            // sheet dismissal. If the composable was already disposed before the
-            // future resolved, release immediately and bail.
-            if (!providerRef.compareAndSet(null, provider)) {
+            // If the sheet dismissed before this listener fired, the caller's
+            // onDispose already ran and nulled the refs. Without disposedRef,
+            // compareAndSet(null, provider) would succeed here and bind a
+            // camera that nothing will ever unbind. Bail and clean up locally.
+            if (disposedRef.get() || !providerRef.compareAndSet(null, provider)) {
                 runCatching { provider.unbindAll() }
                 return@addListener
             }
@@ -5210,7 +5236,7 @@ private fun bindQrScannerCamera(
                         .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
                         .build(),
                 )
-            if (!scannerRef.compareAndSet(null, scanner)) {
+            if (disposedRef.get() || !scannerRef.compareAndSet(null, scanner)) {
                 runCatching { scanner.close() }
                 runCatching { provider.unbindAll() }
                 providerRef.set(null)
@@ -5417,7 +5443,15 @@ private fun AddIdentitySheet(
     val scope = rememberCoroutineScope()
     val creatingIdentityDescription = stringResource(R.string.creating_identity)
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // ModalBottomSheet renders in its own window on Android, separate from
+    // the host activity window — `WindowSecureFlag()` (which flags the
+    // activity window) doesn't reach it. Set the sheet's own securePolicy
+    // so the nsec field inside is also protected from Recents/screenshot
+    // capture.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        properties = ModalBottomSheetProperties(securePolicy = SecureFlagPolicy.SecureOn),
+    ) {
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(stringResource(R.string.add_account), style = MaterialTheme.typography.titleLarge)
             Button(
