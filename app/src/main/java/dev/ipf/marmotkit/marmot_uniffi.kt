@@ -947,6 +947,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1175,6 +1177,8 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_fn_method_marmot_timeline_messages(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_marmot_uniffi_fn_method_marmot_unreact_from_message(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`targetMessageId`: RustBuffer.ByValue,
+    ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_update_group_avatar_url(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`dim`: RustBuffer.ByValue,`thumbhash`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_update_group_profile(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,
     ): Long
@@ -1506,6 +1510,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_unreact_from_message(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_update_group_avatar_url(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_update_group_profile(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_upload_media(
@@ -1821,6 +1827,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_unreact_from_message() != 11846.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_update_group_avatar_url() != 57913.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_update_group_profile() != 53035.toShort()) {
@@ -4041,6 +4050,13 @@ public interface MarmotInterface {
      */
     suspend fun `unreactFromMessage`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `targetMessageId`: kotlin.String): SendSummaryFfi
     
+    /**
+     * Set (or clear, with `url = None`) the group's URL-based avatar
+     * (`marmot.group.avatar-url.v1`). The URL is validated (https-only, no
+     * localhost/private hosts) and normalized before it is committed.
+     */
+    suspend fun `updateGroupAvatarUrl`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `url`: kotlin.String?, `dim`: kotlin.String?, `thumbhash`: kotlin.String?): SendSummaryFfi
+    
     suspend fun `updateGroupProfile`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `name`: kotlin.String?, `description`: kotlin.String?): SendSummaryFfi
     
     /**
@@ -5946,6 +5962,32 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
     }
 
     
+    /**
+     * Set (or clear, with `url = None`) the group's URL-based avatar
+     * (`marmot.group.avatar-url.v1`). The URL is validated (https-only, no
+     * localhost/private hosts) and normalized before it is committed.
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `updateGroupAvatarUrl`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `url`: kotlin.String?, `dim`: kotlin.String?, `thumbhash`: kotlin.String?) : SendSummaryFfi {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_update_group_avatar_url(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),FfiConverterOptionalString.lower(`url`),FfiConverterOptionalString.lower(`dim`),FfiConverterOptionalString.lower(`thumbhash`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeSendSummaryFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
+
+    
     @Throws(MarmotKitException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `updateGroupProfile`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `name`: kotlin.String?, `description`: kotlin.String?) : SendSummaryFfi {
@@ -7159,6 +7201,13 @@ data class AppGroupRecordFfi (
     var `admins`: List<kotlin.String>, 
     var `relays`: List<kotlin.String>, 
     var `nostrGroupIdHex`: kotlin.String, 
+    /**
+     * URL-based group avatar (`marmot.group.avatar-url.v1`), `None` when absent.
+     * When set it takes precedence over a Blossom image avatar.
+     */
+    var `avatarUrl`: kotlin.String?, 
+    var `avatarDim`: kotlin.String?, 
+    var `avatarThumbhash`: kotlin.String?, 
     var `archived`: kotlin.Boolean, 
     var `pendingConfirmation`: kotlin.Boolean, 
     var `welcomerAccountIdHex`: kotlin.String?, 
@@ -7181,6 +7230,9 @@ public object FfiConverterTypeAppGroupRecordFfi: FfiConverterRustBuffer<AppGroup
             FfiConverterSequenceString.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -7196,6 +7248,9 @@ public object FfiConverterTypeAppGroupRecordFfi: FfiConverterRustBuffer<AppGroup
             FfiConverterSequenceString.allocationSize(value.`admins`) +
             FfiConverterSequenceString.allocationSize(value.`relays`) +
             FfiConverterString.allocationSize(value.`nostrGroupIdHex`) +
+            FfiConverterOptionalString.allocationSize(value.`avatarUrl`) +
+            FfiConverterOptionalString.allocationSize(value.`avatarDim`) +
+            FfiConverterOptionalString.allocationSize(value.`avatarThumbhash`) +
             FfiConverterBoolean.allocationSize(value.`archived`) +
             FfiConverterBoolean.allocationSize(value.`pendingConfirmation`) +
             FfiConverterOptionalString.allocationSize(value.`welcomerAccountIdHex`) +
@@ -7210,6 +7265,9 @@ public object FfiConverterTypeAppGroupRecordFfi: FfiConverterRustBuffer<AppGroup
             FfiConverterSequenceString.write(value.`admins`, buf)
             FfiConverterSequenceString.write(value.`relays`, buf)
             FfiConverterString.write(value.`nostrGroupIdHex`, buf)
+            FfiConverterOptionalString.write(value.`avatarUrl`, buf)
+            FfiConverterOptionalString.write(value.`avatarDim`, buf)
+            FfiConverterOptionalString.write(value.`avatarThumbhash`, buf)
             FfiConverterBoolean.write(value.`archived`, buf)
             FfiConverterBoolean.write(value.`pendingConfirmation`, buf)
             FfiConverterOptionalString.write(value.`welcomerAccountIdHex`, buf)
@@ -9114,7 +9172,14 @@ data class TimelineMessageRecordFfi (
     var `agentTextStreamJson`: kotlin.String?, 
     var `reactions`: TimelineReactionSummaryFfi, 
     var `deleted`: kotlin.Boolean, 
-    var `deletedByMessageIdHex`: kotlin.String?
+    var `deletedByMessageIdHex`: kotlin.String?, 
+    /**
+     * Set when convergence invalidated this message (it landed on a losing
+     * branch). The message is kept as a "did not reach the group" tombstone
+     * instead of disappearing; the value is the engine invalidation reason
+     * (e.g. `LosingBranch`). `None` for delivered messages.
+     */
+    var `invalidationStatus`: kotlin.String?
 ) {
     
     companion object
@@ -9143,6 +9208,7 @@ public object FfiConverterTypeTimelineMessageRecordFfi: FfiConverterRustBuffer<T
             FfiConverterTypeTimelineReactionSummaryFfi.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -9163,7 +9229,8 @@ public object FfiConverterTypeTimelineMessageRecordFfi: FfiConverterRustBuffer<T
             FfiConverterOptionalString.allocationSize(value.`agentTextStreamJson`) +
             FfiConverterTypeTimelineReactionSummaryFfi.allocationSize(value.`reactions`) +
             FfiConverterBoolean.allocationSize(value.`deleted`) +
-            FfiConverterOptionalString.allocationSize(value.`deletedByMessageIdHex`)
+            FfiConverterOptionalString.allocationSize(value.`deletedByMessageIdHex`) +
+            FfiConverterOptionalString.allocationSize(value.`invalidationStatus`)
     )
 
     override fun write(value: TimelineMessageRecordFfi, buf: ByteBuffer) {
@@ -9184,6 +9251,7 @@ public object FfiConverterTypeTimelineMessageRecordFfi: FfiConverterRustBuffer<T
             FfiConverterTypeTimelineReactionSummaryFfi.write(value.`reactions`, buf)
             FfiConverterBoolean.write(value.`deleted`, buf)
             FfiConverterOptionalString.write(value.`deletedByMessageIdHex`, buf)
+            FfiConverterOptionalString.write(value.`invalidationStatus`, buf)
     }
 }
 
