@@ -26,9 +26,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -2048,34 +2050,58 @@ private fun ViewerPage(
                                     onOffsetChange(Offset.Zero)
                                 })
                             }.pointerInput(pageKey) {
-                                detectTransformGestures { _, pan, zoom, _ ->
-                                    val nextScale = (scale * zoom).coerceIn(1f, 5f)
-                                    onScaleChange(nextScale)
-                                    if (nextScale > 1f) {
-                                        val viewportW = size.width.toFloat()
-                                        val viewportH = size.height.toFloat()
-                                        val imageAspect = current.width.toFloat() / current.height.toFloat()
-                                        val viewportAspect = viewportW / viewportH
-                                        val baseWidth: Float
-                                        val baseHeight: Float
-                                        if (imageAspect > viewportAspect) {
-                                            baseWidth = viewportW
-                                            baseHeight = viewportW / imageAspect
-                                        } else {
-                                            baseHeight = viewportH
-                                            baseWidth = viewportH * imageAspect
+                                // Hand-rolled gesture loop instead of
+                                // `detectTransformGestures` because the latter
+                                // consumes single-pointer drags unconditionally,
+                                // which steals horizontal swipes from the
+                                // HorizontalPager parent. Here:
+                                //   - Pinch (≥2 pointers): consume → zoom + pan.
+                                //   - Single-pointer at scale > 1: consume → pan.
+                                //   - Single-pointer at scale 1×: DO NOT consume →
+                                //     pager handles the swipe between attachments.
+                                awaitEachGesture {
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val pressedCount =
+                                            event.changes.count { it.pressed }
+                                        if (pressedCount == 0) break
+                                        val zoom = event.calculateZoom()
+                                        val pan = event.calculatePan()
+                                        val handleAsTransform =
+                                            pressedCount >= 2 || scale > 1f
+                                        if (!handleAsTransform) {
+                                            // Let the pager have it.
+                                            continue
                                         }
-                                        val maxX = ((baseWidth * nextScale) - viewportW).coerceAtLeast(0f) / 2f
-                                        val maxY = ((baseHeight * nextScale) - viewportH).coerceAtLeast(0f) / 2f
-                                        onOffsetChange(
-                                            Offset(
-                                                (offset.x + pan.x).coerceIn(-maxX, maxX),
-                                                (offset.y + pan.y).coerceIn(-maxY, maxY),
-                                            ),
-                                        )
-                                    } else {
-                                        onOffsetChange(Offset.Zero)
-                                    }
+                                        val nextScale = (scale * zoom).coerceIn(1f, 5f)
+                                        if (nextScale != scale) onScaleChange(nextScale)
+                                        if (nextScale > 1f) {
+                                            val viewportW = size.width.toFloat()
+                                            val viewportH = size.height.toFloat()
+                                            val imageAspect = current.width.toFloat() / current.height.toFloat()
+                                            val viewportAspect = viewportW / viewportH
+                                            val baseWidth: Float
+                                            val baseHeight: Float
+                                            if (imageAspect > viewportAspect) {
+                                                baseWidth = viewportW
+                                                baseHeight = viewportW / imageAspect
+                                            } else {
+                                                baseHeight = viewportH
+                                                baseWidth = viewportH * imageAspect
+                                            }
+                                            val maxX = ((baseWidth * nextScale) - viewportW).coerceAtLeast(0f) / 2f
+                                            val maxY = ((baseHeight * nextScale) - viewportH).coerceAtLeast(0f) / 2f
+                                            onOffsetChange(
+                                                Offset(
+                                                    (offset.x + pan.x).coerceIn(-maxX, maxX),
+                                                    (offset.y + pan.y).coerceIn(-maxY, maxY),
+                                                ),
+                                            )
+                                        } else if (offset != Offset.Zero) {
+                                            onOffsetChange(Offset.Zero)
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    } while (true)
                                 }
                             }.graphicsLayer(
                                 scaleX = scale,
