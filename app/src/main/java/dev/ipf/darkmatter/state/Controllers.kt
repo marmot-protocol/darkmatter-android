@@ -1004,6 +1004,15 @@ class ConversationController(
         val account = conversationAccountRef ?: return
         if (!canSendMessages || attachments.isEmpty()) return
         if (attachments.any { it.plaintextBytes.isEmpty() }) return
+        // Reject albums whose summed plaintext exceeds the retained-uploads
+        // LRU cap BEFORE inserting an optimistic bubble. The cache's
+        // evict-until-under-cap pass would otherwise drop the just-inserted
+        // entry on its own oversize, and the user would see the bubble
+        // immediately flip to "reattach to retry" with no retainable bytes.
+        if (albumExceedsRetainedCap(attachments)) {
+            appState.present(R.string.media_album_too_large)
+            return
+        }
 
         val tempId = UUID.randomUUID().toString()
         val key = "msg:$tempId"
@@ -2669,15 +2678,31 @@ class ConversationController(
             a.agentTextStreamJson == b.agentTextStreamJson &&
             a.reactions == b.reactions
 
-    private companion object {
-        // 32 MiB cap on retained compressed bytes for in-flight/failed
-        // uploads. A few failed images stay retryable without letting an
-        // undiscarded backlog accrete unbounded heap.
+    companion object {
+        /**
+         * 32 MiB cap on retained compressed bytes for in-flight/failed
+         * uploads. A few failed images stay retryable without letting an
+         * undiscarded backlog accrete unbounded heap. Exposed so the UI
+         * picker can bound the album payload against the SAME ceiling
+         * (otherwise an oversize album would self-evict its retained
+         * bytes on insertion and turn into a "reattach to retry" loop).
+         */
         const val MEDIA_RETAINED_MAX_BYTES: Long = 32L * 1024L * 1024L
+
+        /** True iff the cumulative plaintext bytes across [attachments]
+         *  would exceed the retained-bytes cap. Pure for unit-testing. */
+        fun albumExceedsRetainedCap(attachments: List<PendingAttachment>): Boolean {
+            var total = 0L
+            for (a in attachments) {
+                total += a.plaintextBytes.size.toLong()
+                if (total > MEDIA_RETAINED_MAX_BYTES) return true
+            }
+            return false
+        }
 
         // 32-byte (64 hex char) message id as Rust expects on the FFI
         // boundary. Used to filter optimistic UUID-format ids out of FFI
         // calls that would otherwise throw InvalidHex.
-        val HEX_MESSAGE_ID: Regex = Regex("^[0-9a-fA-F]{64}$")
+        internal val HEX_MESSAGE_ID: Regex = Regex("^[0-9a-fA-F]{64}$")
     }
 }

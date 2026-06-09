@@ -33,6 +33,37 @@ object MediaPipeline {
     /** MIME on the wire always matches the recompressed payload, not the source. */
     const val RECOMPRESSED_MIME: String = "image/jpeg"
 
+    /**
+     * Read at most [cap] bytes from [stream] into a freshly-allocated buffer
+     * and return them. Returns null if the stream would exceed the cap —
+     * caller decides whether to surface that as "file too large".
+     *
+     * Used by the document picker (`OpenMultipleDocuments` accepts any MIME
+     * and any size — a 500 MB pick would otherwise allocate the full payload
+     * via `InputStream.readBytes()` and crash the process before the
+     * retained-uploads LRU has anything to evict).
+     *
+     * Doesn't close [stream] — the caller owns the lifecycle via `use { }`.
+     */
+    fun readBoundedBytes(
+        stream: java.io.InputStream,
+        cap: Int,
+    ): ByteArray? {
+        require(cap >= 0) { "cap must be non-negative" }
+        val buffer = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8 * 1024)
+        var total = 0L
+        while (true) {
+            val read = stream.read(chunk)
+            if (read < 0) break
+            total += read
+            // Strictly greater so a file exactly the cap size still goes through.
+            if (total > cap) return null
+            buffer.write(chunk, 0, read)
+        }
+        return buffer.toByteArray()
+    }
+
     /** Max longer-edge (px) for in-bubble thumbnail decodes (shared by the
      *  UI bubble and the send-path thumbnail seed). */
     const val THUMBNAIL_MAX_EDGE_PX: Int = 1280

@@ -1345,13 +1345,15 @@ private const val MEDIA_PICKER_MAX_ITEMS = 10
 // LRU cap so a single oversize pick can't OOM the picker pass before the
 // retained store gets a chance to evict. Anything larger is dropped with a
 // toast — the user can re-pick a smaller file or split the upload.
-private const val MEDIA_ATTACHMENT_MAX_BYTES = 32L * 1024L * 1024L
+private const val MEDIA_ATTACHMENT_MAX_BYTES = ConversationController.MEDIA_RETAINED_MAX_BYTES
 
-// Total bytes cap across one album send. 64 MiB allows a healthy mix
-// (e.g. 10 images at the recompressed cap plus one document near the
-// single-file ceiling) without the album-as-one-event pinning more heap
-// than the retained store can evict.
-private const val MEDIA_ALBUM_MAX_TOTAL_BYTES = 64L * 1024L * 1024L
+// Total bytes cap across one album send. Bound to the retained-uploads LRU
+// cap (NOT independently doubled): exceeding that cap on insert would cause
+// `ByteSizeLruCache` to evict the just-inserted RetainedMediaUpload during
+// its own `put()` pass, breaking retry. Keep the picker ceiling honest with
+// the actual heap budget rather than letting the user pick more than the
+// controller can ever hold.
+private const val MEDIA_ALBUM_MAX_TOTAL_BYTES = ConversationController.MEDIA_RETAINED_MAX_BYTES
 
 /** Fixed height of an in-timeline image bubble — constant across load states
  *  so async decode never reflows the list (would break the open-time anchor). */
@@ -1392,11 +1394,14 @@ private fun MediaImageBubble(
 ) {
     val record = item.record
     val key = record.messageIdHex
-    // Include `sourceEpoch` in every memoization key so an initial render
-    // against the imeta-fallback reference (sourceEpoch = 0) is invalidated
-    // the moment the typed reference arrives from `listMedia`. Without this,
-    // a bubble that failed to decrypt at epoch 0 would stay stuck failed
-    // forever — the failure latch survives across recomposes.
+    // Decode-state keys split into two buckets:
+    //   - Bytes-level state (bitmap, failed, reloadToken): keyed on
+    //     `sourceEpoch` so a typed-reference upgrade from imeta-fallback
+    //     (epoch = 0) to the real listMedia value clears a stuck failure.
+    //   - User-interaction state (viewerOpen, startDownload): NOT keyed on
+    //     epoch, because we never want a background typed-ref upgrade to
+    //     close a viewer the user just opened, or re-gate a download the
+    //     user just consented to.
     val epoch = reference.sourceEpoch
     // Seed from the decoded-thumbnail cache so an already-fetched or just-sent
     // image paints on the first frame — no decode spinner, no visible "reload".
@@ -1404,12 +1409,12 @@ private fun MediaImageBubble(
         mutableStateOf(controller.thumbnailFor(key, attachmentIndex)?.asImageBitmap())
     }
     var failed by remember(key, attachmentIndex, epoch) { mutableStateOf(false) }
-    var viewerOpen by remember(key, attachmentIndex, epoch) { mutableStateOf(false) }
+    var viewerOpen by remember(key, attachmentIndex) { mutableStateOf(false) }
     var reloadToken by remember(key, attachmentIndex, epoch) { mutableStateOf(0) }
     // Auto-download gating (#10): own messages always render (bytes are cached
     // from the send), incoming honor the policy. Keyed on the policy so
     // flipping the setting re-gates undownloaded bubbles.
-    var startDownload by remember(key, attachmentIndex, epoch, appState.mediaAutoDownloadPolicy) {
+    var startDownload by remember(key, attachmentIndex, appState.mediaAutoDownloadPolicy) {
         mutableStateOf(mine || appState.shouldAutoDownloadMedia())
     }
 
@@ -1600,25 +1605,28 @@ private fun MediaImageGridTile(
     overflowCount: Int,
     modifier: Modifier = Modifier,
 ) {
-    // `sourceEpoch` is baked into the tile key so an initial render against
-    // the imeta-fallback reference (epoch = 0) is recomposed once the typed
-    // reference lands. Otherwise a failed-at-epoch-0 tile sticks across
-    // every later mediaReferences update.
-    val tileKey = "$messageIdHex#$attachmentIndex#${reference.sourceEpoch}"
-    var bitmap by remember(tileKey) {
+    // Two-bucket key model (mirrors `MediaImageBubble`):
+    //   - `decodeKey` includes `sourceEpoch`, scoped to bytes-level state
+    //     so a typed-reference upgrade clears a failed-at-epoch-0 tile.
+    //   - `tileSlot` omits the epoch, scoped to user-choice state
+    //     (startDownload) so a background ref upgrade can't re-gate a tile
+    //     the user already consented to fetch.
+    val decodeKey = "$messageIdHex#$attachmentIndex#${reference.sourceEpoch}"
+    val tileSlot = "$messageIdHex#$attachmentIndex"
+    var bitmap by remember(decodeKey) {
         mutableStateOf(controller.thumbnailFor(messageIdHex, attachmentIndex)?.asImageBitmap())
     }
-    var failed by remember(tileKey) { mutableStateOf(false) }
-    var reloadToken by remember(tileKey) { mutableStateOf(0) }
+    var failed by remember(decodeKey) { mutableStateOf(false) }
+    var reloadToken by remember(decodeKey) { mutableStateOf(0) }
     // Mirror the single-image bubble's auto-download gate (#10) so the
     // policy applies to album tiles too. Outgoing tiles (`mine`) always
     // download because the bytes are seeded from the send. Re-keyed on
     // the policy so flipping the setting re-gates undownloaded tiles.
-    var startDownload by remember(tileKey, appState.mediaAutoDownloadPolicy) {
+    var startDownload by remember(tileSlot, appState.mediaAutoDownloadPolicy) {
         mutableStateOf(mine || appState.shouldAutoDownloadMedia())
     }
 
-    LaunchedEffect(tileKey, startDownload, reloadToken) {
+    LaunchedEffect(decodeKey, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect
         if (!startDownload) return@LaunchedEffect
         failed = false
@@ -1846,24 +1854,32 @@ private enum class OpenAttachmentResult { Opened, NoHandler, Error }
  * `ActivityNotFoundException` from `startActivity` is the authoritative
  * "nothing handles this MIME" signal.
  *
+ * Suspends because the temp-file write can be a multi-megabyte hop —
+ * documents and videos picked from the document bubble are read whole
+ * into a `ByteArray` and need to land on disk before the intent fires.
+ * Doing that on the main dispatcher would jank the UI for the whole
+ * write; the `Dispatchers.IO` jump moves it off the main thread.
+ *
  * The temp file is owned by the cache cleanup pass triggered on screen
  * exit; we don't track it per-call because the handing-off intent may
  * need it alive for an unbounded duration after this function returns.
  */
-private fun openAttachmentExternally(
+private suspend fun openAttachmentExternally(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
     mediaType: String,
 ): OpenAttachmentResult {
     val uri =
-        runCatching {
-            val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
-            val name = MediaPipeline.safeDisplayName(fileName)
-            val file = java.io.File.createTempFile("open_", "_$name", dir)
-            file.writeBytes(bytes)
-            fileProviderUri(context, file)
-        }.getOrNull() ?: return OpenAttachmentResult.Error
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
+                val name = MediaPipeline.safeDisplayName(fileName)
+                val file = java.io.File.createTempFile("open_", "_$name", dir)
+                file.writeBytes(bytes)
+                fileProviderUri(context, file)
+            }.getOrNull()
+        } ?: return OpenAttachmentResult.Error
     val mime = mediaType.ifBlank { "application/octet-stream" }
     val intent =
         android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
@@ -2501,25 +2517,37 @@ private fun saveImageToGallery(
     }
 }
 
-/** Share [bytes] via a FileProvider Uri using the system share sheet. */
-private fun shareImage(
+/**
+ * Share [bytes] via a FileProvider Uri using the system share sheet.
+ *
+ * Suspends because the temp-file write is multi-megabyte for any non-trivial
+ * attachment; doing it on the main dispatcher would stall the UI for the
+ * write. The `startActivity` call has to run on Main, so the I/O is hopped
+ * to `Dispatchers.IO` and the chooser is fired back on Main.
+ */
+private suspend fun shareImage(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
     mediaType: String,
 ) {
-    try {
-        val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
-        // Unique temp keyed off a sanitized basename — avoids collisions and
-        // path traversal from a remote-supplied filename.
-        val file = java.io.File.createTempFile("share_", "_" + MediaPipeline.safeDisplayName(fileName), dir)
-        file.outputStream().use { it.write(bytes) }
-        val uri =
-            androidx.core.content.FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file,
-            )
+    val uri =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
+                // Unique temp keyed off a sanitized basename — avoids
+                // collisions and path traversal from a remote-supplied
+                // filename.
+                val file = java.io.File.createTempFile("share_", "_" + MediaPipeline.safeDisplayName(fileName), dir)
+                file.outputStream().use { it.write(bytes) }
+                androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file,
+                )
+            }.getOrNull()
+        } ?: return
+    runCatching {
         val intent =
             android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = mediaType.ifBlank { MediaPipeline.RECOMPRESSED_MIME }
@@ -2531,8 +2559,6 @@ private fun shareImage(
                 addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             },
         )
-    } catch (_: Throwable) {
-        // Best-effort; failure to share is non-fatal.
     }
 }
 
@@ -2776,30 +2802,6 @@ private fun queryContentSize(
     return -1L
 }
 
-/**
- * Read up to [cap] bytes from [stream] and return them; return null if the
- * stream would exceed the cap. The stream is consumed but not closed —
- * callers manage the lifecycle (typically a `use { … }` block). Closes the
- * accumulator on either path.
- */
-private fun readBoundedBytes(
-    stream: java.io.InputStream,
-    cap: Int,
-): ByteArray? {
-    val buffer = java.io.ByteArrayOutputStream()
-    val chunk = ByteArray(8 * 1024)
-    var total = 0L
-    while (true) {
-        val read = stream.read(chunk)
-        if (read < 0) break
-        total += read
-        // Strictly greater so a file exactly the cap size still goes through.
-        if (total > cap) return null
-        buffer.write(chunk, 0, read)
-    }
-    return buffer.toByteArray()
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConversationScreen(
@@ -3034,7 +3036,7 @@ private fun ConversationScreen(
                         val bytes =
                             runCatching {
                                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                                    readBoundedBytes(stream, perFileCap)
+                                    MediaPipeline.readBoundedBytes(stream, perFileCap)
                                 }
                             }.getOrNull()
                         if (bytes == null) {
