@@ -1325,6 +1325,10 @@ private fun NewChatSheet(
 /** Within this many items of the trailing edge counts as "at bottom". */
 private const val ConversationNearBottomItemSlack = 3
 
+// Maximum images per multi-pick — mirrors WhatsApp's album cap. The Android
+// Photo Picker enforces this on the system dialog side.
+private const val MEDIA_PICKER_MAX_ITEMS = 10
+
 /** Fixed height of an in-timeline image bubble — constant across load states
  *  so async decode never reflows the list (would break the open-time anchor). */
 private val MediaBubbleHeight = 240.dp
@@ -1334,6 +1338,23 @@ private val NullableUriSaver: Saver<android.net.Uri?, String> =
     Saver(
         save = { it?.toString() ?: "" },
         restore = { s -> s.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse) },
+    )
+
+// Persist a multi-pick selection across rotation / process death. Empty list
+// encodes "no preview shown" so the parent re-render skips the sheet on
+// restore. Uses '\n' as the separator — content URIs don't contain newlines.
+private val UriListSaver: Saver<List<android.net.Uri>, String> =
+    Saver(
+        save = { it.joinToString("\n") { uri -> uri.toString() } },
+        restore = { s ->
+            if (s.isEmpty()) {
+                emptyList()
+            } else {
+                s.split('\n').mapNotNull { token ->
+                    token.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse)
+                }
+            }
+        },
     )
 
 @Composable
@@ -1905,13 +1926,13 @@ private fun LocalImagePreview(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MediaPreviewSheet(
-    uri: android.net.Uri,
+    uris: List<android.net.Uri>,
     onDismiss: () -> Unit,
     onSend: (caption: String) -> Unit,
 ) {
     var caption by remember { mutableStateOf("") }
     // Local guard against a rapid double-tap firing onSend twice before the
-    // parent clears pendingMediaUri and the sheet leaves composition.
+    // parent clears pendingMediaUris and the sheet leaves composition.
     var sending by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1925,14 +1946,38 @@ private fun MediaPreviewSheet(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            LocalImagePreview(
-                uri = uri,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 320.dp)
-                        .clip(RoundedCornerShape(12.dp)),
-            )
+            if (uris.size == 1) {
+                LocalImagePreview(
+                    uri = uris.first(),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                )
+            } else {
+                // Album preview: a horizontally-scrollable strip of square
+                // thumbnails. WhatsApp/iMessage both use this strip-shape on
+                // the compose surface (vs the grid they use on the bubble).
+                LazyRow(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(uris.size, key = { uris[it].toString() }) { index ->
+                        LocalImagePreview(
+                            uri = uris[index],
+                            modifier =
+                                Modifier
+                                    .fillMaxHeight()
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp)),
+                        )
+                    }
+                }
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2116,11 +2161,14 @@ private fun ConversationScreen(
     var recentReactionEmojis by remember(context) {
         mutableStateOf(RecentEmojiPreferences.load(context))
     }
-    // Selected-but-not-yet-sent attachment: when non-null the preview/caption
-    // sheet is shown. Single image per send — the FFI publishes one imeta
-    // reference per kind-9, so album-as-one-message needs Rust support first.
-    var pendingMediaUri by rememberSaveable(stateSaver = NullableUriSaver) {
-        mutableStateOf<android.net.Uri?>(null)
+    // Selected-but-not-yet-sent attachments: when non-empty the preview /
+    // caption sheet is shown. Multi-pick goes through `PickMultipleVisualMedia`
+    // (up to 10 like WhatsApp). Each picked URI is sent as its own kind:9 for
+    // now (album-as-N-messages); the protocol-level album-as-one-message uses
+    // the same `sendMediaAttachments(list, caption)` FFI and is the next
+    // follow-up — that one requires `RetainedMediaUpload` to hold a list.
+    var pendingMediaUris by rememberSaveable(stateSaver = UriListSaver) {
+        mutableStateOf<List<android.net.Uri>>(emptyList())
     }
     // Survives process death while the camera app is foreground (the result
     // callback fires into a recreated activity, otherwise the capture is lost).
@@ -2129,14 +2177,16 @@ private fun ConversationScreen(
     }
     var cameraOutputFile by remember { mutableStateOf<java.io.File?>(null) }
 
-    // PickVisualMedia uses the system Photo Picker — no READ_MEDIA_IMAGES
+    // PickMultipleVisualMedia uses the system Photo Picker — no READ_MEDIA_IMAGES
     // permission needed (Android 13+ scopes the picker's own grant); on older
-    // devices it falls back to GET_CONTENT with the same UX.
+    // devices it falls back to GET_CONTENT with the same UX. The maxItems
+    // cap mirrors WhatsApp's album limit; pick a single image still works
+    // (returns a one-element list).
     val imagePickerLauncher =
         rememberLauncherForActivityResult(
-            ActivityResultContracts.PickVisualMedia(),
-        ) { uri ->
-            if (uri != null) pendingMediaUri = uri
+            ActivityResultContracts.PickMultipleVisualMedia(maxItems = MEDIA_PICKER_MAX_ITEMS),
+        ) { uris ->
+            if (uris.isNotEmpty()) pendingMediaUris = uris
         }
     val cameraLauncher =
         rememberLauncherForActivityResult(
@@ -2144,7 +2194,7 @@ private fun ConversationScreen(
         ) { success ->
             val captured = cameraOutputUri
             if (success && captured != null) {
-                pendingMediaUri = captured
+                pendingMediaUris = listOf(captured)
             } else {
                 cameraOutputFile?.delete() // cancelled — don't leak the empty temp
             }
@@ -2172,28 +2222,43 @@ private fun ConversationScreen(
             ActivityResultContracts.RequestPermission(),
         ) { granted -> if (granted) launchCameraCapture() }
 
-    // Decode/compress off the main thread, then hand the image to the controller.
+    // Decode/compress each URI off the main thread in parallel, then hand
+    // the album to the controller. Caption is applied to every send;
+    // matches WhatsApp's behaviour where one caption belongs to the whole
+    // album. For now we fan out one send call per image (controller's
+    // single-attachment path); the protocol-level album that ships all N
+    // in one `sendMediaAttachments(list, caption)` is the next refactor.
     fun sendPickedMedia(
-        uri: android.net.Uri,
+        uris: List<android.net.Uri>,
         caption: String,
     ) {
+        if (uris.isEmpty()) return
+        val trimmedCaption = caption.trim().takeIf { it.isNotBlank() }
         appState.launchMutation {
-            val jpeg =
+            val prepared =
                 withContext(Dispatchers.Default) {
-                    MediaPipeline.readDownscaledJpeg(context.contentResolver, uri)
+                    uris.map { uri ->
+                        val jpeg = MediaPipeline.readDownscaledJpeg(context.contentResolver, uri)
+                        val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
+                        val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
+                        Triple(uri, jpeg, fileName)
+                    }
                 }
-            if (jpeg == null) {
+            val decoded = prepared.filter { it.second != null }
+            if (decoded.size < prepared.size) {
+                // At least one image failed to decode — surface it once but
+                // still send the ones that did decode (matches the iOS
+                // share-sheet pattern of "best effort").
                 appState.present(R.string.toast_couldnt_decode_image)
-                return@launchMutation
             }
-            val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
-            val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
-            controller.sendImageAttachment(
-                jpeg,
-                MediaPipeline.RECOMPRESSED_MIME,
-                fileName,
-                caption.trim().takeIf { it.isNotBlank() },
-            )
+            decoded.forEach { (_, jpeg, fileName) ->
+                controller.sendImageAttachment(
+                    jpeg!!,
+                    MediaPipeline.RECOMPRESSED_MIME,
+                    fileName,
+                    trimmedCaption,
+                )
+            }
         }
     }
 
@@ -2556,13 +2621,14 @@ private fun ConversationScreen(
         )
     }
 
-    pendingMediaUri?.let { uri ->
+    if (pendingMediaUris.isNotEmpty()) {
+        val uris = pendingMediaUris
         MediaPreviewSheet(
-            uri = uri,
-            onDismiss = { pendingMediaUri = null },
+            uris = uris,
+            onDismiss = { pendingMediaUris = emptyList() },
             onSend = { caption ->
-                pendingMediaUri = null
-                sendPickedMedia(uri, caption)
+                pendingMediaUris = emptyList()
+                sendPickedMedia(uris, caption)
             },
         )
     }
