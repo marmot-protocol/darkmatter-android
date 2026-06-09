@@ -1668,7 +1668,6 @@ private fun MediaFileBubble(
     reference: MediaAttachmentReferenceFfi,
     controller: ConversationController,
     appState: DarkMatterAppState,
-    mine: Boolean,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1676,7 +1675,7 @@ private fun MediaFileBubble(
     var inFlight by remember(pillKey) { mutableStateOf(false) }
     var failed by remember(pillKey) { mutableStateOf(false) }
     val noOpenAppMessage = stringResource(R.string.media_no_app_to_open)
-    val saveFailedMessage = stringResource(R.string.media_save_failed)
+    val couldntOpenMessage = stringResource(R.string.media_couldnt_open)
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1688,19 +1687,21 @@ private fun MediaFileBubble(
                     failed = false
                     inFlight = true
                     scope.launch {
-                        val ok =
+                        val outcome =
                             runCatching {
                                 val data = controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
                                 openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
-                            }.getOrDefault(false)
-                        if (!ok) {
-                            failed = true
-                            // Surface the most likely cause: no app claims
-                            // this MIME. Download-failure shares the same
-                            // message — both endpoints mean "nothing
-                            // happened on tap"; a deeper breakdown isn't
-                            // actionable from a chat.
-                            appState.present(if (mine) saveFailedMessage else noOpenAppMessage)
+                            }.getOrDefault(OpenAttachmentResult.Error)
+                        when (outcome) {
+                            OpenAttachmentResult.Opened -> Unit
+                            OpenAttachmentResult.NoHandler -> {
+                                failed = true
+                                appState.present(noOpenAppMessage)
+                            }
+                            OpenAttachmentResult.Error -> {
+                                failed = true
+                                appState.present(couldntOpenMessage)
+                            }
                         }
                         inFlight = false
                     }
@@ -1771,25 +1772,42 @@ private fun formatFileSize(bytes: Long): String {
     return String.format(java.util.Locale.US, "%.1f GB", gb)
 }
 
+private enum class OpenAttachmentResult { Opened, NoHandler, Error }
+
 /**
  * Write [bytes] to a temp file in the cache directory and fire `ACTION_VIEW`
  * for it via the app's FileProvider so an external app (PDF reader, etc.)
- * can open it. Returns true if the system found a handler, false otherwise.
- * The temp file is owned by the cache cleanup pass triggered on screen exit;
- * we don't track it per-call because the handing-off intent may need it
- * alive for an unbounded duration after this function returns.
+ * can open it.
+ *
+ * Distinguishes "no app claims this MIME" ([OpenAttachmentResult.NoHandler])
+ * from "we couldn't even try" ([OpenAttachmentResult.Error]) so the caller
+ * can surface the right toast.
+ *
+ * `resolveActivity`/`queryIntentActivities` are intentionally NOT used to
+ * pre-flight the launch: under Android 11+ package visibility they return
+ * null for any handler whose package isn't declared in `<queries>`, even
+ * when the activity exists and `startActivity` would launch it. Catching
+ * `ActivityNotFoundException` from `startActivity` is the authoritative
+ * "nothing handles this MIME" signal.
+ *
+ * The temp file is owned by the cache cleanup pass triggered on screen
+ * exit; we don't track it per-call because the handing-off intent may
+ * need it alive for an unbounded duration after this function returns.
  */
 private fun openAttachmentExternally(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
     mediaType: String,
-): Boolean {
-    val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
-    val name = MediaPipeline.safeDisplayName(fileName)
-    val file = java.io.File.createTempFile("open_", "_$name", dir)
-    file.writeBytes(bytes)
-    val uri = fileProviderUri(context, file)
+): OpenAttachmentResult {
+    val uri =
+        runCatching {
+            val dir = java.io.File(context.cacheDir, "shared_media").apply { mkdirs() }
+            val name = MediaPipeline.safeDisplayName(fileName)
+            val file = java.io.File.createTempFile("open_", "_$name", dir)
+            file.writeBytes(bytes)
+            fileProviderUri(context, file)
+        }.getOrNull() ?: return OpenAttachmentResult.Error
     val mime = mediaType.ifBlank { "application/octet-stream" }
     val intent =
         android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
@@ -1797,13 +1815,17 @@ private fun openAttachmentExternally(
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-    return runCatching {
-        // resolveActivity returns null when no app claims the MIME; bail before
-        // calling startActivity so we can surface a user-facing message.
-        if (intent.resolveActivity(context.packageManager) == null) return false
+    return try {
         context.startActivity(intent)
-        true
-    }.getOrDefault(false)
+        OpenAttachmentResult.Opened
+    } catch (_: android.content.ActivityNotFoundException) {
+        OpenAttachmentResult.NoHandler
+    } catch (_: SecurityException) {
+        // FileProvider grant rejected, or target activity has no permission
+        // to access this URI for some reason. Surfacing this as a generic
+        // error is more useful than crashing.
+        OpenAttachmentResult.Error
+    }
 }
 
 /** Centered icon+label tap target used for the retry/download bubble states. */
@@ -4318,7 +4340,6 @@ private fun MessageBubble(
                                     reference = entry.value,
                                     controller = controller,
                                     appState = appState,
-                                    mine = mine,
                                 )
                             }
                         }
