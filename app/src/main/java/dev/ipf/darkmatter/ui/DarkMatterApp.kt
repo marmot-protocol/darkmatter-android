@@ -236,6 +236,7 @@ import dev.ipf.darkmatter.state.MediaAutoDownloadPolicy
 import dev.ipf.darkmatter.state.MessageStatus
 import dev.ipf.darkmatter.state.MessageStatusLabels
 import dev.ipf.darkmatter.state.OutgoingMessageIndicator
+import dev.ipf.darkmatter.state.PendingAttachment
 import dev.ipf.darkmatter.state.ReactionParticipant
 import dev.ipf.darkmatter.state.RelayListKind
 import dev.ipf.darkmatter.state.TimelineMessage
@@ -2229,12 +2230,11 @@ private fun ConversationScreen(
             ActivityResultContracts.RequestPermission(),
         ) { granted -> if (granted) launchCameraCapture() }
 
-    // Decode/compress each URI off the main thread in parallel, then hand
-    // the album to the controller. Caption is applied to every send;
-    // the convention for an album is one caption belonging to the whole
-    // album. For now we fan out one send call per image (controller's
-    // single-attachment path); the protocol-level album that ships all N
-    // in one `sendMediaAttachments(list, caption)` is the next refactor.
+    // Decode/compress each URI off the main thread, then hand the album to
+    // the controller as a single `sendImageAttachments(list, caption)` call.
+    // One kind:9 carries N imeta tags; the caption is shared across the
+    // whole album. If any source fails to decode the rest still send (best
+    // effort), but if NONE decode we bail without surfacing an empty send.
     fun sendPickedMedia(
         uris: List<android.net.Uri>,
         caption: String,
@@ -2242,30 +2242,26 @@ private fun ConversationScreen(
         if (uris.isEmpty()) return
         val trimmedCaption = caption.trim().takeIf { it.isNotBlank() }
         appState.launchMutation {
-            val prepared =
+            val attachments =
                 withContext(Dispatchers.Default) {
-                    uris.map { uri ->
-                        val jpeg = MediaPipeline.readDownscaledJpeg(context.contentResolver, uri)
+                    uris.mapNotNull { uri ->
+                        val jpeg =
+                            MediaPipeline.readDownscaledJpeg(context.contentResolver, uri)
+                                ?: return@mapNotNull null
                         val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
                         val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
-                        Triple(uri, jpeg, fileName)
+                        PendingAttachment(
+                            jpegBytes = jpeg,
+                            mediaType = MediaPipeline.RECOMPRESSED_MIME,
+                            fileName = fileName,
+                        )
                     }
                 }
-            val decoded = prepared.filter { it.second != null }
-            if (decoded.size < prepared.size) {
-                // At least one image failed to decode — surface it once but
-                // still send the ones that did decode (matches the iOS
-                // share-sheet pattern of "best effort").
+            if (attachments.size < uris.size) {
                 appState.present(R.string.toast_couldnt_decode_image)
+                if (attachments.isEmpty()) return@launchMutation
             }
-            decoded.forEach { (_, jpeg, fileName) ->
-                controller.sendImageAttachment(
-                    jpeg!!,
-                    MediaPipeline.RECOMPRESSED_MIME,
-                    fileName,
-                    trimmedCaption,
-                )
-            }
+            controller.sendImageAttachments(attachments, trimmedCaption)
         }
     }
 

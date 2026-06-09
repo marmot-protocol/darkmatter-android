@@ -361,16 +361,42 @@ private data class OptimisticReactionChange(
     val add: Boolean,
 )
 
-/** Compressed bytes + metadata retained for an in-flight/failed media send. */
-private class RetainedMediaUpload(
+/** One compressed-and-named image queued for upload as part of an album. */
+data class PendingAttachment(
     val jpegBytes: ByteArray,
     val mediaType: String,
     val fileName: String,
+) {
+    // Manual equality so two attachments with identical bytes content count as
+    // equal — the default data-class equality on ByteArray uses reference
+    // equality, which would surprise callers comparing pending attachments.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PendingAttachment) return false
+        if (mediaType != other.mediaType) return false
+        if (fileName != other.fileName) return false
+        return jpegBytes.contentEquals(other.jpegBytes)
+    }
+
+    override fun hashCode(): Int {
+        var result = jpegBytes.contentHashCode()
+        result = 31 * result + mediaType.hashCode()
+        result = 31 * result + fileName.hashCode()
+        return result
+    }
+}
+
+/**
+ * Compressed bytes + metadata retained for an in-flight/failed media send.
+ * The whole album is one unit: all attachments succeed/fail together, retry
+ * re-runs the whole upload, discard drops them all. `uploadedReferences`
+ * caches the per-attachment Blossom result so a publish-only failure retries
+ * the publish without re-uploading every blob.
+ */
+private class RetainedMediaUpload(
+    val attachments: List<PendingAttachment>,
     val caption: String?,
-    // Set once the Blossom upload succeeds. On a publish-only failure, retry
-    // reuses this reference instead of re-uploading the blob (which would
-    // orphan a duplicate on the Blossom server).
-    var uploadedReference: MediaAttachmentReferenceFfi? = null,
+    var uploadedReferences: List<MediaAttachmentReferenceFfi>? = null,
 )
 
 class ChatsController(
@@ -927,22 +953,22 @@ class ConversationController(
     }
 
     /**
-     * Encrypt+upload a JPEG to Blossom and then publish a kind-9 referencing
-     * it. Two-step (upload then publish) — see the Phase-1 decision matrix —
-     * so a publish-time failure doesn't force a re-upload, and the optimistic
-     * bubble can flip to Failed with the existing retry/discard surface.
+     * Send one or more JPEG attachments as a single kind:9 album.
      *
-     * Callers downscale before this point ([MediaPipeline.readDownscaledJpeg])
-     * because the FFI takes the whole payload in memory.
+     * All attachments upload via one `uploadMedia(list)` FFI call and publish
+     * via one `sendMediaAttachments(list, caption)`; the receiving group sees
+     * a single message carrying N imeta tags. Callers downscale before this
+     * point ([MediaPipeline.readDownscaledJpeg]) because the FFI takes each
+     * payload whole in memory. A single-attachment call is the degenerate
+     * case (list of one) and routes through the same path.
      */
-    suspend fun sendImageAttachment(
-        jpegBytes: ByteArray,
-        mediaType: String,
-        fileName: String,
+    suspend fun sendImageAttachments(
+        attachments: List<PendingAttachment>,
         caption: String?,
     ) {
         val account = conversationAccountRef ?: return
-        if (!canSendMessages || jpegBytes.isEmpty()) return
+        if (!canSendMessages || attachments.isEmpty()) return
+        if (attachments.any { it.jpegBytes.isEmpty() }) return
 
         val tempId = UUID.randomUUID().toString()
         val key = "msg:$tempId"
@@ -950,8 +976,14 @@ class ConversationController(
         val trimmedCaption = caption?.trim()?.takeIf { it.isNotBlank() }
         // Body: the caption if present, otherwise a legible placeholder while
         // the upload runs. The real message arriving after publish carries the
-        // imeta tag and supersedes this optimistic one.
-        val body = trimmedCaption ?: "📎 $fileName"
+        // imeta tags and supersedes this optimistic one.
+        val placeholderName =
+            if (attachments.size == 1) {
+                attachments.first().fileName
+            } else {
+                "${attachments.size} attachments"
+            }
+        val body = trimmedCaption ?: "📎 $placeholderName"
         val optimistic =
             AppMessageRecordFfi(
                 messageIdHex = tempId,
@@ -960,19 +992,21 @@ class ConversationController(
                 sender = appState.activeAccount?.accountIdHex ?: "",
                 plaintext = body,
                 kind = 9uL,
-                // Sentinel tag distinguishes a pending-media optimistic record from
-                // a normal text optimistic record. retryFailedSend uses it to route
-                // into the media re-upload path (bytes are held in
-                // [retainedMediaUploads] so retry doesn't need a re-attach).
-                tags = listOf(MessageTagFfi(listOf("_media_pending", fileName, mediaType))),
+                // One `_media_pending` tag per attachment. retryFailedSend
+                // detects ANY of these as a media-retry trigger and re-runs
+                // the whole album through performMediaUpload.
+                tags =
+                    attachments.map {
+                        MessageTagFfi(listOf("_media_pending", it.fileName, it.mediaType))
+                    },
                 recordedAt = now,
                 receivedAt = now,
             )
         val optimisticOrder = nextOptimisticTimelineOrder()
-        // Retain the compressed bytes so a failed upload can be retried in
-        // place, and so the sender's own bubble renders from memory after
-        // confirm instead of round-tripping Blossom.
-        retainedMediaUploads.put(key, RetainedMediaUpload(jpegBytes, mediaType, fileName, trimmedCaption))
+        // Retain the compressed bytes for the whole album so a failed upload
+        // can be retried in place. uploadedReferences caches the Blossom
+        // results so a publish-only failure doesn't re-upload every blob.
+        retainedMediaUploads.put(key, RetainedMediaUpload(attachments, trimmedCaption))
         optimisticMessages[key] =
             TimelineMessage(
                 key,
@@ -1011,34 +1045,40 @@ class ConversationController(
             }
         discardedDuringRetry.remove(key)
         try {
-            // Reuse the reference if a prior attempt already uploaded the blob
-            // (publish-only failure) — re-uploading would orphan a duplicate
-            // on the Blossom server.
-            val reference =
-                retained.uploadedReference ?: appState
+            // Reuse the references if a prior attempt already uploaded the
+            // blobs (publish-only failure) — re-uploading would orphan
+            // duplicates on the Blossom server.
+            val references =
+                retained.uploadedReferences ?: appState
                     .marmotIo {
                         uploadMedia(
                             account,
                             group.groupIdHex,
                             MediaUploadRequestFfi(
                                 attachments =
-                                    listOf(
+                                    retained.attachments.map { attachment ->
                                         MediaUploadAttachmentRequestFfi(
-                                            fileName = retained.fileName,
-                                            mediaType = retained.mediaType,
-                                            plaintext = retained.jpegBytes,
+                                            fileName = attachment.fileName,
+                                            mediaType = attachment.mediaType,
+                                            plaintext = attachment.jpegBytes,
                                             dim = null,
                                             thumbhash = null,
-                                        ),
-                                    ),
+                                        )
+                                    },
                                 caption = retained.caption,
                                 send = false,
                                 blossomServer = null,
                             ),
-                        ).attachments.firstOrNull()?.reference
-                            ?: error("media upload returned no attachments")
-                    }.also { retained.uploadedReference = it }
-            // Discard window #1: blob is uploaded but not yet published. If the
+                        ).attachments.map { it.reference }.also { uploaded ->
+                            if (uploaded.size != retained.attachments.size) {
+                                error(
+                                    "media upload returned ${uploaded.size} references " +
+                                        "for ${retained.attachments.size} attachments",
+                                )
+                            }
+                        }
+                    }.also { retained.uploadedReferences = it }
+            // Discard window #1: blobs uploaded but not yet published. If the
             // user discarded here, bail BEFORE sendMediaAttachments so we don't
             // publish a kind-9 they cancelled (unlike a published event, an
             // unreferenced Blossom blob is inert).
@@ -1051,7 +1091,7 @@ class ConversationController(
             }
             val summary =
                 appState.marmotIo {
-                    sendMediaAttachments(account, group.groupIdHex, listOf(reference), retained.caption)
+                    sendMediaAttachments(account, group.groupIdHex, references, retained.caption)
                 }
             val confirmedId = summary.messageIds.firstOrNull() ?: tempId
             optimisticMessages.remove(key)
@@ -1068,16 +1108,21 @@ class ConversationController(
             }
             // Seed the decrypted-bytes AND decoded-thumbnail caches under the
             // confirmed id so the sender's own bubble renders instantly — no
-            // Blossom round-trip and no decode spinner.
+            // Blossom round-trip and no decode spinner. The current cache key
+            // is `(account, messageId)`, so the seed only covers the FIRST
+            // attachment's bytes — multi-attachment seeds wait on the
+            // cache-key-by-index refactor that ships with the receive-side
+            // grid bubble. Single-attachment messages remain fully seeded.
             if (confirmedId.isNotEmpty()) {
+                val firstAttachment = retained.attachments.first()
                 val confirmedKey = mediaCacheKey(account, confirmedId)
-                appState.mediaPlaintextCache.put(confirmedKey, retained.jpegBytes)
-                MediaPipeline.decodeSampledBitmap(retained.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)?.let {
-                    appState.mediaThumbnailCache.put(confirmedKey, it)
-                }
-                // Also persist to L2 so own-sent images survive process
-                // restart, matching the receive-path's L2 behaviour.
-                val bytesToPersist = retained.jpegBytes
+                appState.mediaPlaintextCache.put(confirmedKey, firstAttachment.jpegBytes)
+                MediaPipeline
+                    .decodeSampledBitmap(firstAttachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
+                    ?.let {
+                        appState.mediaThumbnailCache.put(confirmedKey, it)
+                    }
+                val bytesToPersist = firstAttachment.jpegBytes
                 appState.launchMutation {
                     withContext(Dispatchers.IO) { appState.diskMediaCache.put(confirmedKey, bytesToPersist) }
                 }
@@ -1085,7 +1130,7 @@ class ConversationController(
             retainedMediaUploads.remove(key)
             // Bridge the gap until the published event echoes back via the
             // projection: insert a confirmed *image* optimistic carrying the
-            // imeta tag (built from the upload reference), keyed on confirmedId.
+            // imeta tags (one per uploaded reference), keyed on confirmedId.
             // Same key as the eventual projected item, so the bubble never
             // disappears/reappears, and it renders from the seeded thumbnail.
             // pruneConfirmedOptimisticMessages reconciles it on arrival.
@@ -1097,7 +1142,7 @@ class ConversationController(
                         // sent), not the "📎 filename" optimistic placeholder, so
                         // the bridge bubble is identical to the projected one.
                         plaintext = retained.caption.orEmpty(),
-                        tags = listOf(MediaReferenceParser.toImetaTag(reference)),
+                        tags = references.map { MediaReferenceParser.toImetaTag(it) },
                     )
                 messageById[confirmedId] = confirmedRecord
                 optimisticMessages["msg:$confirmedId"] =
@@ -1193,7 +1238,7 @@ class ConversationController(
     private val retainedMediaUploads =
         ByteSizeLruCache<String, RetainedMediaUpload>(
             maxBytes = MEDIA_RETAINED_MAX_BYTES,
-            sizeOf = { it.jpegBytes.size },
+            sizeOf = { upload -> upload.attachments.sumOf { it.jpegBytes.size } },
         )
 
     /**
@@ -1292,23 +1337,39 @@ class ConversationController(
     ) {
         val retained = retainedMediaUploads.get(optimisticKey) ?: return
         val account = conversationAccountRef ?: return
+        // Seed the FIRST attachment only — the current cache key is
+        // `(account, messageId)`, so subsequent attachments would collide.
+        // The receive-side grid bubble will extend the cache key with the
+        // attachment index, at which point we can seed all of them here.
+        val firstAttachment = retained.attachments.firstOrNull() ?: return
         val cacheKey = mediaCacheKey(account, projectedMessageIdHex)
-        appState.mediaPlaintextCache.put(cacheKey, retained.jpegBytes)
-        MediaPipeline.decodeSampledBitmap(retained.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)?.let {
-            appState.mediaThumbnailCache.put(cacheKey, it)
-        }
-        val bytesToPersist = retained.jpegBytes
+        appState.mediaPlaintextCache.put(cacheKey, firstAttachment.jpegBytes)
+        MediaPipeline
+            .decodeSampledBitmap(firstAttachment.jpegBytes, MediaPipeline.THUMBNAIL_MAX_EDGE_PX)
+            ?.let {
+                appState.mediaThumbnailCache.put(cacheKey, it)
+            }
+        val bytesToPersist = firstAttachment.jpegBytes
         appState.launchMutation {
             withContext(Dispatchers.IO) { appState.diskMediaCache.put(cacheKey, bytesToPersist) }
         }
     }
 
     /**
-     * Compressed bytes for an in-flight/failed optimistic media send, so the
-     * sender's bubble can preview the local image while it uploads. [messageIdHex]
-     * is the optimistic record's temp id; null once the send confirms.
+     * Bytes of the first pending attachment in the optimistic message's album,
+     * used by the sender's preview bubble during upload. [messageIdHex] is
+     * the optimistic record's temp id; null once the send confirms.
+     *
+     * Multi-attachment album previews wait on the receive-side grid-bubble
+     * refactor that extends the cache key with the attachment index — for
+     * now the bubble shows the first attachment as a single-image preview.
      */
-    fun pendingMediaBytes(messageIdHex: String): ByteArray? = retainedMediaUploads.get("msg:$messageIdHex")?.jpegBytes
+    fun pendingMediaBytes(messageIdHex: String): ByteArray? =
+        retainedMediaUploads
+            .get("msg:$messageIdHex")
+            ?.attachments
+            ?.firstOrNull()
+            ?.jpegBytes
 
     /**
      * Drop all retained outgoing JPEG bytes. Called when leaving the
