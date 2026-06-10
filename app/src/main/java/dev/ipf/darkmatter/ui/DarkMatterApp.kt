@@ -904,6 +904,7 @@ private fun ChatsScreen(
     onOpenGroup: (ChatListItem) -> Unit,
     onOpenProfile: () -> Unit,
 ) {
+    val groupTitleCopy = rememberGroupTitleCopy()
     var showNewChat by remember { mutableStateOf(false) }
     var newChatTitle by remember { mutableStateOf(R.string.new_chat) }
     var showScanner by remember { mutableStateOf(false) }
@@ -957,8 +958,8 @@ private fun ChatsScreen(
 
     val sourceList = if (showArchived) controller.archivedItems else controller.items
     val visibleItems =
-        remember(sourceList, searchQuery, filter) {
-            applyChatListSearchAndFilter(sourceList, searchQuery, filter)
+        remember(sourceList, searchQuery, filter, groupTitleCopy) {
+            applyChatListSearchAndFilter(sourceList, searchQuery, filter, appState, groupTitleCopy)
         }
     val archivedUnreadCount =
         remember(controller.archivedItems) {
@@ -1120,6 +1121,8 @@ private fun applyChatListSearchAndFilter(
     source: List<ChatListItem>,
     rawQuery: String,
     filter: ChatListFilter,
+    appState: DarkMatterAppState,
+    titleCopy: GroupTitleCopy,
 ): List<ChatListItem> {
     val byFilter =
         when (filter) {
@@ -1130,12 +1133,35 @@ private fun applyChatListSearchAndFilter(
     if (needle.isEmpty()) return byFilter
     val ciNeedle = needle.lowercase()
     return byFilter.filter { item ->
-        val title = (item.projectedTitle ?: item.group.name).lowercase()
+        // Match against the SAME title the user sees in the row, not the
+        // raw group.name. For DMs and other unnamed chats, group.name is
+        // blank and the visible title is projected from the other
+        // member's profile — without this projection the search misses
+        // direct messages by their displayed name.
+        val title = chatListItemDisplayTitle(item, appState, titleCopy).lowercase()
         if (title.contains(ciNeedle)) return@filter true
         val preview = item.projectedPreviewText().lowercase()
         preview.contains(ciNeedle)
     }
 }
+
+/**
+ * Display title shown for a chat-list row. Shared between `ChatRow` (the
+ * visible label) and `applyChatListSearchAndFilter` (the searchable
+ * label) so a typed query always matches what the user sees on screen.
+ */
+private fun chatListItemDisplayTitle(
+    item: ChatListItem,
+    appState: DarkMatterAppState,
+    copy: GroupTitleCopy,
+): String =
+    item.projectedTitle ?: GroupProjector.displayTitle(
+        group = item.group,
+        otherMemberAccount = item.otherMemberAccount,
+        memberCount = item.memberCount,
+        memberTitle = { appState.chatMemberTitle(it) },
+        copy = copy,
+    )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1337,11 +1363,24 @@ private fun ArchivedFolderRow(
     )
 }
 
-/** Chat row wrapped in a SwipeToDismissBox + long-press menu. The swipe is
- *  StartToEnd only (left-to-right in LTR; flips for RTL), and the action
- *  is Archive in the active list / Unarchive in the archived list. The
- *  swipe state is reset to Settled if the controller mutation fails so the
- *  row doesn't end up off-screen with no backing model change. */
+/**
+ * Chat row wrapped in a SwipeToDismissBox + long-press menu.
+ *
+ * Swipe direction is StartToEnd only (left-to-right in LTR; flips for
+ * RTL); the action is Archive in the active list / Unarchive in the
+ * archived list.
+ *
+ * `confirmValueChange` fires the archive toggle then returns `false` so
+ * the box never commits to a dismissed state — the row springs back to
+ * Settled and the source list reshuffle (asynchronously, when the
+ * controller mutation lands) is what removes the row from the
+ * LazyColumn. Returning `true` would commit `StartToEnd` to the
+ * underlying saveable state; that value persists per row key in the
+ * LazyColumn's saveable registry and would re-fire the dismissal path
+ * the next time the same row composes elsewhere (e.g. when the user
+ * enters the archived view), causing the archive action to replay and
+ * silently unarchive the chat.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeableChatRow(
@@ -1538,16 +1577,10 @@ private fun ChatRow(
     // derivedStateOf so the title is only recomputed when its snapshot reads
     // (item, the profile-presentation revision read inside chatMemberTitle)
     // actually change, instead of every chat-list recomposition pass.
-    val title by remember(item) {
-        derivedStateOf {
-            item.projectedTitle ?: GroupProjector.displayTitle(
-                group = item.group,
-                otherMemberAccount = item.otherMemberAccount,
-                memberCount = item.memberCount,
-                memberTitle = { appState.chatMemberTitle(it) },
-                copy = groupTitleCopy,
-            )
-        }
+    // Routed through the shared `chatListItemDisplayTitle` so the same
+    // projection drives the search filter.
+    val title by remember(item, groupTitleCopy) {
+        derivedStateOf { chatListItemDisplayTitle(item, appState, groupTitleCopy) }
     }
     val inviteAccount = GroupProjector.inviteAccount(item.group, item.otherMemberAccount)
     val avatarAccount =

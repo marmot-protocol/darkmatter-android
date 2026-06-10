@@ -607,6 +607,26 @@ class ChatsController(
             }
             if (GroupProjector.requiresSelfDemoteBeforeLeave(group, activeAccountIdHex, memberCount)) {
                 appState.marmotIo { selfDemoteAdmin(account, groupIdHex) }
+                // Mirror the conversation-controller path: drop the local
+                // admin entry so the cached record matches the engine's
+                // post-demote state even if the subsequent leaveGroup
+                // fails (the user is no longer an admin regardless of
+                // whether they end up leaving). Case-insensitive because
+                // admin-list hex casing can drift from the active
+                // account id, same as in [ConversationController.leaveGroup].
+                if (activeAccountIdHex != null) {
+                    groupRecordsById[groupIdHex]?.let { cached ->
+                        val patched =
+                            cached.copy(
+                                admins =
+                                    cached.admins.filterNot {
+                                        it.equals(activeAccountIdHex, ignoreCase = true)
+                                    },
+                            )
+                        groupRecordsById = groupRecordsById + (groupIdHex to patched)
+                        recompute()
+                    }
+                }
             }
             appState.marmotIo { leaveGroup(account, groupIdHex) }
             appState.present(R.string.toast_left_chat)
