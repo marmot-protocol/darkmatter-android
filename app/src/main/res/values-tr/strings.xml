@@ -23,6 +23,8 @@
     <string name="chat_list_search_open">Sohbet ara</string>
     <string name="chat_list_search_clear">Aramayı temizle</string>
     <string name="chat_list_search_voice">Sesli arama</string>
+    <string name="chat_list_voice_unavailable">Sesli arama bu cihazda kullanılamıyor</string>
+    <string name="toast_demoted_but_couldnt_leave">Artık yönetici değilsiniz, ancak gruptan ayrılınamadı</string>
     <string name="chat_list_search_hint">Sohbet ara</string>
     <string name="chat_list_filter_all">Tümü</string>
     <string name="chat_list_filter_unread">Okunmamış</string>

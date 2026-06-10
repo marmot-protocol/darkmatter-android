@@ -23,6 +23,8 @@
     <string name="chat_list_search_open">Search chats</string>
     <string name="chat_list_search_clear">Clear search</string>
     <string name="chat_list_search_voice">Voice search</string>
+    <string name="chat_list_voice_unavailable">Voice search isn\'t available on this device</string>
+    <string name="toast_demoted_but_couldnt_leave">You\'re no longer admin, but couldn\'t leave the group</string>
     <string name="chat_list_search_hint">Search chats</string>
     <string name="chat_list_filter_all">All</string>
     <string name="chat_list_filter_unread">Unread</string>

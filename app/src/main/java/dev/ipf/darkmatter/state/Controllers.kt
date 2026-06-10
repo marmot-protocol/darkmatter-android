@@ -595,6 +595,11 @@ class ChatsController(
         val account = accountRef ?: return false
         val group = groupRecordsById[groupIdHex] ?: return false
         val activeAccountIdHex = appState.activeAccount?.accountIdHex
+        // Tracks whether selfDemoteAdmin succeeded before the leaveGroup
+        // attempt. If leaveGroup then fails, we surface a partial-failure
+        // toast that names the inconsistency (user is demoted but still
+        // in the group) rather than the generic "couldn't leave" copy.
+        var demotedBeforeLeave = false
         return runCatching {
             val members = appState.marmotIo { groupMembers(account, groupIdHex) }
             val memberCount = members.size
@@ -607,6 +612,7 @@ class ChatsController(
             }
             if (GroupProjector.requiresSelfDemoteBeforeLeave(group, activeAccountIdHex, memberCount)) {
                 appState.marmotIo { selfDemoteAdmin(account, groupIdHex) }
+                demotedBeforeLeave = true
                 // Mirror the conversation-controller path: drop the local
                 // admin entry so the cached record matches the engine's
                 // post-demote state even if the subsequent leaveGroup
@@ -633,7 +639,16 @@ class ChatsController(
             true
         }.onFailure {
             if (it is CancellationException) throw it
-            appState.present(R.string.toast_couldnt_leave_chat, AppText.Plain(it.message ?: it.javaClass.simpleName))
+            val errorText = AppText.Plain(it.message ?: it.javaClass.simpleName)
+            if (demotedBeforeLeave) {
+                // User was demoted but we couldn't complete the leave.
+                // Tell them so they know to ask another admin to restore
+                // their role (or retry); the generic "couldn't leave"
+                // toast misses that they're now mid-state.
+                appState.present(R.string.toast_demoted_but_couldnt_leave, errorText)
+            } else {
+                appState.present(R.string.toast_couldnt_leave_chat, errorText)
+            }
         }.getOrDefault(false)
     }
 
@@ -656,8 +671,17 @@ class ChatsController(
             true
         }.onFailure {
             if (it is CancellationException) throw it
-            // Quiet failure — marking read is an idempotent affordance
-            // and surfacing a toast on every flake would be noisy.
+            // Quiet for the user (marking read is an idempotent
+            // affordance and surfacing a toast on every flake would be
+            // noisy) — but still log the failure so the trace surfaces
+            // in `adb logcat` when someone reports "mark read does
+            // nothing". `take(8)` on the group id keeps the privacy
+            // posture: no full ids in logs.
+            Log.w(
+                "DMChatsController",
+                "markAllRead failed for group=${item.group.groupIdHex.take(8)}",
+                it,
+            )
         }.getOrDefault(false)
     }
 

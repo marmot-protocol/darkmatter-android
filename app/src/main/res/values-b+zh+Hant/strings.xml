@@ -23,6 +23,8 @@
     <string name="chat_list_search_open">搜尋聊天</string>
     <string name="chat_list_search_clear">清除搜尋</string>
     <string name="chat_list_search_voice">語音搜尋</string>
+    <string name="chat_list_voice_unavailable">此裝置不支援語音搜尋</string>
+    <string name="toast_demoted_but_couldnt_leave">您不再是管理員,但無法離開群組</string>
     <string name="chat_list_search_hint">搜尋聊天</string>
     <string name="chat_list_filter_all">全部</string>
     <string name="chat_list_filter_unread">未讀</string>

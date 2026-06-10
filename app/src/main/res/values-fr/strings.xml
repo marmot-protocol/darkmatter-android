@@ -23,6 +23,8 @@
     <string name="chat_list_search_open">Rechercher des chats</string>
     <string name="chat_list_search_clear">Effacer la recherche</string>
     <string name="chat_list_search_voice">Recherche vocale</string>
+    <string name="chat_list_voice_unavailable">La recherche vocale n\'est pas disponible sur cet appareil</string>
+    <string name="toast_demoted_but_couldnt_leave">Vous n\'êtes plus administrateur, mais impossible de quitter le groupe</string>
     <string name="chat_list_search_hint">Rechercher des chats</string>
     <string name="chat_list_filter_all">Tous</string>
     <string name="chat_list_filter_unread">Non lus</string>

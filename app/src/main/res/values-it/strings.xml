@@ -23,6 +23,8 @@
     <string name="chat_list_search_open">Cerca chat</string>
     <string name="chat_list_search_clear">Cancella ricerca</string>
     <string name="chat_list_search_voice">Ricerca vocale</string>
+    <string name="chat_list_voice_unavailable">La ricerca vocale non è disponibile su questo dispositivo</string>
+    <string name="toast_demoted_but_couldnt_leave">Non sei più amministratore, ma impossibile uscire dal gruppo</string>
     <string name="chat_list_search_hint">Cerca chat</string>
     <string name="chat_list_filter_all">Tutti</string>
     <string name="chat_list_filter_unread">Non letti</string>

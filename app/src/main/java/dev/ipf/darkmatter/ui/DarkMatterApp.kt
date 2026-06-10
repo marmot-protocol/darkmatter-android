@@ -957,8 +957,16 @@ private fun ChatsScreen(
         }
 
     val sourceList = if (showArchived) controller.archivedItems else controller.items
+    // Subscribing read of the profile-cache revision so the filter
+    // re-runs when a DM peer's display name resolves — the title
+    // projection inside `applyChatListSearchAndFilter` reads
+    // `appState.chatMemberTitle(...)`, but that read happens from a
+    // `remember` block where Compose's snapshot system doesn't track
+    // state. Keying on `profileRev` re-fires the filter when the
+    // backing presentation cache invalidates.
+    val profileRev = appState.profileRevisionForCompose
     val visibleItems =
-        remember(sourceList, searchQuery, filter, groupTitleCopy) {
+        remember(sourceList, searchQuery, filter, groupTitleCopy, profileRev) {
             applyChatListSearchAndFilter(sourceList, searchQuery, filter, appState, groupTitleCopy)
         }
     val archivedUnreadCount =
@@ -985,7 +993,16 @@ private fun ChatsScreen(
                                 android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                                 android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                             )
-                    runCatching { voiceSearchLauncher.launch(intent) }
+                    // ActivityNotFoundException fires on devices without
+                    // any RecognizerIntent handler (rare on consumer
+                    // hardware; possible on AOSP forks or kiosk-mode
+                    // devices). Surface that as a toast instead of
+                    // swallowing — otherwise the mic tap is silent.
+                    try {
+                        voiceSearchLauncher.launch(intent)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        appState.present(R.string.chat_list_voice_unavailable)
+                    }
                 },
                 onArchivedBack = { showArchived = false },
                 onOpenSettings = onOpenSettings,
@@ -1391,10 +1408,22 @@ private fun SwipeableChatRow(
     onArchiveToggle: () -> Unit,
     onMarkRead: () -> Unit,
 ) {
+    // Tracks the archive-state we've already fired against. A wavering
+    // swipe gesture can cross the dismissal threshold more than once
+    // (user drags past → back → past again as they hesitate), which
+    // would otherwise re-fire `onArchiveToggle()` and toggle archived
+    // back to its previous state. Reset to `null` when the row's
+    // backing `archived` flips (the source-list reshuffle replaces
+    // this composable instance, so this is mostly defensive) or when
+    // a fresh `item.id` lands in this slot.
+    var firedForArchived by remember(item.id) { mutableStateOf<Boolean?>(null) }
     val dismissState =
         rememberSwipeToDismissBoxState(
             confirmValueChange = { target ->
-                if (target == SwipeToDismissBoxValue.StartToEnd) {
+                if (target == SwipeToDismissBoxValue.StartToEnd &&
+                    firedForArchived != item.group.archived
+                ) {
+                    firedForArchived = item.group.archived
                     onArchiveToggle()
                 }
                 // Always return false so the dismiss state never escapes
