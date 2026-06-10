@@ -383,7 +383,9 @@
     <string name="media_file_too_large">Dosya eklenemeyecek kadar büyük</string>
     <string name="media_album_too_large">Seçim gönderilemeyecek kadar büyük</string>
     <string name="group_image_search_title">Grup görseli</string>
-    <string name="group_image_search_open">Görsel ara</string>
+    <string name="group_image_search_set">Grup görseli ayarla</string>
+    <string name="group_image_search_edit">Grup görselini düzenle</string>
+    <string name="group_image_search_remove">Görseli kaldır</string>
     <string name="group_image_search_action">Ara</string>
     <string name="group_image_search_query_label">Görsel araması</string>
     <string name="group_image_search_query_hint">Web\'de ara…</string>

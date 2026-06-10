@@ -382,7 +382,9 @@
     <string name="media_file_too_large">檔案太大,無法附加</string>
     <string name="media_album_too_large">選取內容太大,無法傳送</string>
     <string name="group_image_search_title">群組頭像</string>
-    <string name="group_image_search_open">搜尋圖片</string>
+    <string name="group_image_search_set">設定群組頭像</string>
+    <string name="group_image_search_edit">編輯群組頭像</string>
+    <string name="group_image_search_remove">移除頭像</string>
     <string name="group_image_search_action">搜尋</string>
     <string name="group_image_search_query_label">圖片搜尋</string>
     <string name="group_image_search_query_hint">在網路上搜尋…</string>

@@ -383,7 +383,9 @@
     <string name="media_file_too_large">File troppo grande da allegare</string>
     <string name="media_album_too_large">Selezione troppo grande per essere inviata</string>
     <string name="group_image_search_title">Immagine del gruppo</string>
-    <string name="group_image_search_open">Cerca immagine</string>
+    <string name="group_image_search_set">Imposta immagine del gruppo</string>
+    <string name="group_image_search_edit">Modifica immagine del gruppo</string>
+    <string name="group_image_search_remove">Rimuovi immagine</string>
     <string name="group_image_search_action">Cerca</string>
     <string name="group_image_search_query_label">Ricerca immagine</string>
     <string name="group_image_search_query_hint">Cerca sul web…</string>

@@ -110,11 +110,11 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -238,6 +238,7 @@ import dev.ipf.darkmatter.media.ImageSearchException
 import dev.ipf.darkmatter.media.ImageSearchResult
 import dev.ipf.darkmatter.media.MediaPipeline
 import dev.ipf.darkmatter.media.MediaReferenceParser
+import dev.ipf.darkmatter.media.sanitizeHttpsAvatarUrl
 import dev.ipf.darkmatter.notifications.NotificationNavStep
 import dev.ipf.darkmatter.notifications.NotificationTarget
 import dev.ipf.darkmatter.notifications.resolveNotificationNav
@@ -275,6 +276,7 @@ import dev.ipf.marmotkit.MediaAttachmentReferenceFfi
 import dev.ipf.marmotkit.RelayHealthFfi
 import dev.ipf.marmotkit.RelayListFfi
 import dev.ipf.marmotkit.UserProfileMetadataFfi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -3628,7 +3630,6 @@ private fun GroupDetailsScreen(
 ) {
     var name by remember(controller.group.groupIdHex, controller.group.name) { mutableStateOf(controller.group.name) }
     var description by remember(controller.group.groupIdHex, controller.group.description) { mutableStateOf(controller.group.description) }
-    var avatarUrl by remember(controller.group.groupIdHex, controller.group.avatarUrl) { mutableStateOf(controller.group.avatarUrl.orEmpty()) }
     var pendingMember by remember { mutableStateOf("") }
     var pendingMemberError by remember { mutableStateOf<String?>(null) }
     var showMemberScanner by remember { mutableStateOf(false) }
@@ -3726,8 +3727,26 @@ private fun GroupDetailsScreen(
                                     menuOpen = false
                                     name = controller.group.name
                                     description = controller.group.description
-                                    avatarUrl = controller.group.avatarUrl.orEmpty()
                                     showEditProfile = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (controller.group.avatarUrl.isNullOrBlank()) {
+                                                R.string.group_image_search_set
+                                            } else {
+                                                R.string.group_image_search_edit
+                                            },
+                                        ),
+                                    )
+                                },
+                                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
+                                enabled = activeMutation == null && !controller.mutationInFlight,
+                                onClick = {
+                                    menuOpen = false
+                                    showImageSearch = true
                                 },
                             )
                         }
@@ -3946,46 +3965,18 @@ private fun GroupDetailsScreen(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = avatarUrl,
-                    onValueChange = { avatarUrl = it },
-                    label = { Text(stringResource(R.string.group_avatar_url)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    trailingIcon = {
-                        IconButton(onClick = { showImageSearch = true }) {
-                            Icon(
-                                Icons.Default.TravelExplore,
-                                contentDescription = stringResource(R.string.group_image_search_open),
-                            )
-                        }
-                    },
-                )
                 Button(
                     onClick = {
                         runGroupMutation(
                             action = GroupMutationAction.SaveProfile,
-                            mutation = {
-                                // Name/description and the avatar are separate MLS
-                                // commits; only fire the ones that actually changed.
-                                val profileChanged =
-                                    name != controller.group.name || description != controller.group.description
-                                val avatarChanged = avatarUrl.trim() != controller.group.avatarUrl.orEmpty()
-                                val profileOk = !profileChanged || controller.updateGroupProfile(name, description)
-                                val avatarOk = !avatarChanged || controller.updateGroupAvatarUrl(avatarUrl)
-                                profileOk && avatarOk
-                            },
+                            mutation = { controller.updateGroupProfile(name, description) },
                             onSuccess = { showEditProfile = false },
                         )
                     },
                     enabled =
                         activeMutation == null &&
                             !controller.mutationInFlight &&
-                            (
-                                name != controller.group.name ||
-                                    description != controller.group.description ||
-                                    avatarUrl.trim() != controller.group.avatarUrl.orEmpty()
-                            ),
+                            (name != controller.group.name || description != controller.group.description),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (activeMutation?.action == GroupMutationAction.SaveProfile) {
@@ -4002,12 +3993,19 @@ private fun GroupDetailsScreen(
 
     if (showImageSearch) {
         GroupImageSearchSheet(
-            initialUrl = avatarUrl,
+            initialUrl = controller.group.avatarUrl.orEmpty(),
             groupTitle = controller.title(groupTitleCopy),
             groupSeed = controller.group.groupIdHex,
-            onPick = { picked ->
-                avatarUrl = picked
-                showImageSearch = false
+            onApply = { picked ->
+                // Controller handles success/failure toasts via its standard
+                // mutation-lock path (toast_group_updated /
+                // toast_couldnt_update_group); the sheet only owns its own
+                // lifecycle here.
+                runGroupMutation(
+                    action = GroupMutationAction.SaveProfile,
+                    mutation = { controller.updateGroupAvatarUrl(picked) },
+                    onSuccess = { showImageSearch = false },
+                )
             },
             onDismiss = { showImageSearch = false },
         )
@@ -4122,13 +4120,17 @@ private fun GroupDetailsScreen(
 }
 
 /**
- * Bottom sheet that lets the user search the web for a group avatar URL.
+ * Bottom sheet that lets an admin pick a new group avatar.
  *
  * Two entry points: (1) the URL TextField (manual HTTPS paste with live
  * preview + validation), (2) the search field (DuckDuckGo image search,
- * results shown as a 3-column grid of thumbnails). Tapping a result fills
- * the URL field and dismisses the sheet — the user still hits the regular
- * "Save group" button to commit the change. No FFI work happens here.
+ * results shown as a grid of thumbnails). The sheet commits the change
+ * itself via [onApply] — the caller wires that to the avatar-update FFI
+ * and presents a success toast.
+ *
+ * When the group already has an avatar, a destructive "Remove image"
+ * button is exposed, which calls [onApply] with `null` (caller maps that
+ * to clearing the avatar).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -4136,7 +4138,7 @@ private fun GroupImageSearchSheet(
     initialUrl: String,
     groupTitle: String,
     groupSeed: String,
-    onPick: (String) -> Unit,
+    onApply: (String?) -> Unit,
     onDismiss: () -> Unit,
     searchClient: ImageSearchClient = remember { DuckDuckGoImageSearchClient() },
 ) {
@@ -4146,13 +4148,23 @@ private fun GroupImageSearchSheet(
     var results by remember { mutableStateOf<List<ImageSearchResult>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
     var searchErrorRes by remember { mutableStateOf<Int?>(null) }
-    var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Ticket counter for stale-result guarding. Each `launchSearch()` bumps
+    // it and the in-flight coroutine captures that ticket value; on
+    // completion, the coroutine only writes back to `results` /
+    // `searchErrorRes` / `isSearching` if `requestId` still equals its
+    // captured ticket. Without this, a slow first search can resolve AFTER
+    // a faster second search has already populated the UI, clobbering the
+    // new view with stale thumbnails. `Job.cancel()` alone isn't enough
+    // because cancellation is cooperative — a returning coroutine still
+    // executes its tail past the suspension point.
+    var requestId by remember { mutableStateOf(0) }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
     val trimmedUrl = urlDraft.trim()
     val previewUrl =
         remember(trimmedUrl) {
             // Same HTTPS-only safety check the picker applies; an
             // unsanitized URL won't render in the preview avatar either.
-            sanitizeAvatarUrlForPreview(trimmedUrl)
+            sanitizeHttpsAvatarUrl(trimmedUrl)
         }
     val emptyQueryRes = R.string.group_image_search_enter_query
     val missingTokenRes = R.string.group_image_search_unavailable
@@ -4168,26 +4180,34 @@ private fun GroupImageSearchSheet(
         val q = queryDraft.trim()
         if (q.isEmpty()) {
             searchErrorRes = emptyQueryRes
+            results = emptyList()
             return
         }
+        val ticket = requestId + 1
+        requestId = ticket
         searchErrorRes = null
+        results = emptyList()
         isSearching = true
         searchJob =
             scope.launch {
                 try {
-                    val hits = withContext(Dispatchers.IO) { searchClient.search(q) }
+                    val hits = searchClient.search(q)
+                    if (requestId != ticket) return@launch
                     results = hits
                     searchErrorRes = if (hits.isEmpty()) noResultsRes else null
                 } catch (_: ImageSearchException.EmptyQuery) {
-                    searchErrorRes = emptyQueryRes
+                    if (requestId == ticket) searchErrorRes = emptyQueryRes
                 } catch (_: ImageSearchException.MissingToken) {
-                    searchErrorRes = missingTokenRes
-                } catch (_: kotlinx.coroutines.CancellationException) {
-                    throw kotlinx.coroutines.CancellationException()
+                    if (requestId == ticket) searchErrorRes = missingTokenRes
+                } catch (e: CancellationException) {
+                    // Rethrow the original so the cause chain stays
+                    // intact for downstream loggers + structured
+                    // concurrency tracking.
+                    throw e
                 } catch (_: Throwable) {
-                    searchErrorRes = badResponseRes
+                    if (requestId == ticket) searchErrorRes = badResponseRes
                 } finally {
-                    isSearching = false
+                    if (requestId == ticket) isSearching = false
                 }
             }
     }
@@ -4212,7 +4232,7 @@ private fun GroupImageSearchSheet(
             )
             // Live preview row: avatar bubble seeded from the current draft
             // URL, plus the group's name so the user knows what they're
-            // editing. Mirrors the iOS preview section at the top of the sheet.
+            // editing.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -4317,6 +4337,22 @@ private fun GroupImageSearchSheet(
                     }
                 }
             }
+            // Destructive "Remove image" only when the group ALREADY has an
+            // avatar — for a group without one there's nothing to remove.
+            if (initialUrl.isNotBlank()) {
+                TextButton(
+                    onClick = { onApply(null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors =
+                        ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.group_image_search_remove))
+                }
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -4328,9 +4364,13 @@ private fun GroupImageSearchSheet(
                     Text(stringResource(R.string.cancel))
                 }
                 Button(
-                    onClick = { onPick(trimmedUrl) },
+                    onClick = { onApply(trimmedUrl.takeIf { it.isNotEmpty() }) },
                     modifier = Modifier.weight(1f),
-                    enabled = trimmedUrl.isEmpty() || previewUrl != null,
+                    // Enable when either there's a valid HTTPS URL to apply
+                    // OR the field is blank AND there's an initial URL (i.e.
+                    // user can apply "no image" via the main button too,
+                    // though the destructive Remove path is more discoverable).
+                    enabled = previewUrl != null || (trimmedUrl.isEmpty() && initialUrl.isNotBlank()),
                 ) {
                     Text(stringResource(R.string.group_image_search_apply))
                 }
@@ -4358,6 +4398,10 @@ private fun GroupImageSearchTile(
         modifier =
             Modifier
                 .aspectRatio(1f)
+                // TalkBack: announce the current selection so users hear
+                // which thumbnail is staged. Without this, the only cue is
+                // the border color change, which is inaccessible.
+                .semantics { selected = isSelected }
                 .clickable(onClick = onTap),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -4379,51 +4423,46 @@ private fun GroupImageSearchTile(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            // Footer chip showing source host so the user has provenance at a
-            // glance — many DuckDuckGo results come from the same site
-            // pattern, and surfacing the host helps avoid picking trackable
-            // hotlinked images by mistake.
-            hit.sourceHost?.takeIf { it.isNotBlank() }?.let { host ->
-                Box(
+            // Footer strip: source host (left) and pixel dimensions (right).
+            // Surfacing the host helps avoid picking trackable hotlinked
+            // images by mistake; the dimensions hint at "is this big enough
+            // to use as an avatar" before the user commits.
+            val host = hit.sourceHost?.takeIf { it.isNotBlank() }
+            val dims = hit.dimensionsLabel?.takeIf { it.isNotBlank() }
+            if (host != null || dims != null) {
+                Row(
                     modifier =
                         Modifier
                             .fillMaxWidth()
                             .align(Alignment.BottomCenter)
                             .background(Color.Black.copy(alpha = 0.5f))
                             .padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        host,
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (host != null) {
+                        Text(
+                            host,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    if (dims != null) {
+                        if (host != null) Spacer(Modifier.weight(1f))
+                        Text(
+                            dims,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
     }
-}
-
-/**
- * Same HTTPS-only + private-host filter the search client applies, exposed
- * here so the manual-URL preview avatar honors the same rule (without
- * needing to wire the client's private function out).
- */
-private fun sanitizeAvatarUrlForPreview(raw: String): String? {
-    if (raw.isBlank()) return null
-    var candidate = raw.trim()
-    if (candidate.startsWith("//")) candidate = "https:$candidate"
-    val parsed = runCatching { java.net.URI(candidate) }.getOrNull() ?: return null
-    if (parsed.scheme?.lowercase() != "https") return null
-    val host = parsed.host ?: return null
-    if (host.isBlank()) return null
-    if (dev.ipf.darkmatter.core.HostSafety
-            .isPrivateOrLoopbackHost(host)
-    ) {
-        return null
-    }
-    return candidate
 }
 
 @Composable

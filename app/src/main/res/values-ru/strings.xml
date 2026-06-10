@@ -385,7 +385,9 @@
     <string name="media_file_too_large">Файл слишком большой для отправки</string>
     <string name="media_album_too_large">Выбор слишком большой для отправки</string>
     <string name="group_image_search_title">Изображение группы</string>
-    <string name="group_image_search_open">Найти изображение</string>
+    <string name="group_image_search_set">Задать изображение группы</string>
+    <string name="group_image_search_edit">Изменить изображение группы</string>
+    <string name="group_image_search_remove">Удалить изображение</string>
     <string name="group_image_search_action">Найти</string>
     <string name="group_image_search_query_label">Поиск изображения</string>
     <string name="group_image_search_query_hint">Искать в интернете…</string>

@@ -383,7 +383,9 @@
     <string name="media_file_too_large">Datei zu groß zum Anhängen</string>
     <string name="media_album_too_large">Auswahl zu groß zum Senden</string>
     <string name="group_image_search_title">Gruppenbild</string>
-    <string name="group_image_search_open">Bild suchen</string>
+    <string name="group_image_search_set">Gruppenbild festlegen</string>
+    <string name="group_image_search_edit">Gruppenbild bearbeiten</string>
+    <string name="group_image_search_remove">Bild entfernen</string>
     <string name="group_image_search_action">Suchen</string>
     <string name="group_image_search_query_label">Bildersuche</string>
     <string name="group_image_search_query_hint">Im Web suchen…</string>

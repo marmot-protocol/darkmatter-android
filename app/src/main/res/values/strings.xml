@@ -386,7 +386,9 @@
     <string name="media_file_too_large">File too large to attach</string>
     <string name="media_album_too_large">Selection too large to send</string>
     <string name="group_image_search_title">Group image</string>
-    <string name="group_image_search_open">Search for image</string>
+    <string name="group_image_search_set">Set group image</string>
+    <string name="group_image_search_edit">Edit group image</string>
+    <string name="group_image_search_remove">Remove image</string>
     <string name="group_image_search_action">Search</string>
     <string name="group_image_search_query_label">Image search</string>
     <string name="group_image_search_query_hint">Search the web…</string>
