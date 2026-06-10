@@ -10,6 +10,7 @@ import dev.ipf.marmotkit.MarkdownAutolinkKindFfi
 import dev.ipf.marmotkit.MarkdownInlineFfi
 import dev.ipf.marmotkit.MarkdownListKindFfi
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -157,11 +158,49 @@ class MarkdownInlineTextTest {
     fun onlyHttpAndHttpsSchemesAreOpenable() {
         assertTrue(isOpenableMarkdownLink("https://example.com"))
         assertTrue(isOpenableMarkdownLink("HTTP://EXAMPLE.COM"))
-        assertTrue(!isOpenableMarkdownLink("javascript:alert(1)"))
-        assertTrue(!isOpenableMarkdownLink("file:///etc/passwd"))
-        assertTrue(!isOpenableMarkdownLink("nostr:npub1abc"))
-        assertTrue(!isOpenableMarkdownLink("httpsx://example.com"))
-        assertTrue(!isOpenableMarkdownLink(""))
+        assertFalse(isOpenableMarkdownLink("javascript:alert(1)"))
+        assertFalse(isOpenableMarkdownLink("file:///etc/passwd"))
+        assertFalse(isOpenableMarkdownLink("nostr:npub1abc"))
+        assertFalse(isOpenableMarkdownLink("httpsx://example.com"))
+        assertFalse(isOpenableMarkdownLink(""))
+    }
+
+    @Test
+    fun whitespacePaddedUrlsAreNormalizedNotRejected() {
+        // The gate accepts a padded http(s) URL…
+        assertTrue(isOpenableMarkdownLink("  https://example.com"))
+        // …but padding never launders a forbidden scheme through.
+        assertFalse(isOpenableMarkdownLink(" javascript:alert(1)"))
+
+        // The annotation must carry the TRIMMED destination: Uri.parse of a
+        // padded string yields a null scheme, so storing the raw form would
+        // pass the gate and then fail at launch.
+        val annotated =
+            build(
+                listOf(
+                    MarkdownInlineFfi.Link(
+                        dest = "  https://example.com  ",
+                        title = null,
+                        children = listOf(MarkdownInlineFfi.Text("padded")),
+                    ),
+                ),
+            )
+        assertEquals("padded", annotated.text)
+        val link = annotated.getLinkAnnotations(0, annotated.length).single()
+        assertEquals("https://example.com", (link.item as LinkAnnotation.Url).url)
+
+        // A padded javascript: destination stays completely inert.
+        val inert =
+            build(
+                listOf(
+                    MarkdownInlineFfi.Link(
+                        dest = " javascript:alert(1)",
+                        title = null,
+                        children = listOf(MarkdownInlineFfi.Text("sneaky")),
+                    ),
+                ),
+            )
+        assertTrue(inert.getLinkAnnotations(0, inert.length).isEmpty())
     }
 
     @Test
@@ -172,5 +211,10 @@ class MarkdownInlineTextTest {
         val ordered = MarkdownListKindFfi.Ordered(start = 3u, delimiter = ".")
         assertEquals("3.", markdownListMarker(ordered, index = 0))
         assertEquals("5.", markdownListMarker(ordered, index = 2))
+        // start is FFI-supplied: UInt.MAX_VALUE must not wrap to a small
+        // number — the marker math runs in Long.
+        val huge = MarkdownListKindFfi.Ordered(start = UInt.MAX_VALUE, delimiter = ".")
+        assertEquals("4294967295.", markdownListMarker(huge, index = 0))
+        assertEquals("4294967296.", markdownListMarker(huge, index = 1))
     }
 }

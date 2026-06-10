@@ -150,7 +150,10 @@ private fun MarkdownBlockQuoteView(
                 .background(LocalContentColor.current.copy(alpha = 0.35f), RoundedCornerShape(1.5.dp)),
         )
         Spacer(Modifier.width(8.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // weight(1f) gives the quoted content a bounded width so fillMaxWidth
+        // children (nested code blocks) don't measure under unbounded
+        // constraints inside the IntrinsicSize.Min row.
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             blocks.forEach { MarkdownBlockView(it, linkListener) }
         }
     }
@@ -304,9 +307,12 @@ private fun AnnotatedString.Builder.appendMarkdownInlines(
             // image URL when it's plain http(s).
             is MarkdownInlineFfi.Image ->
                 appendMarkdownLink(inline.dest, inline.alt, codeStyle, linkStyle, linkListener)
-            is MarkdownInlineFfi.Autolink ->
-                if (inline.kind == MarkdownAutolinkKindFfi.URI && isOpenableMarkdownLink(inline.url)) {
-                    withLink(LinkAnnotation.Url(inline.url, TextLinkStyles(style = linkStyle), linkListener)) {
+            is MarkdownInlineFfi.Autolink -> {
+                // Normalize at the boundary: the gate, the annotation, and the
+                // eventual ACTION_VIEW all see the same trimmed destination.
+                val dest = inline.url.trim()
+                if (inline.kind == MarkdownAutolinkKindFfi.URI && isOpenableMarkdownLink(dest)) {
+                    withLink(LinkAnnotation.Url(dest, TextLinkStyles(style = linkStyle), linkListener)) {
                         append(inline.url)
                     }
                 } else {
@@ -315,6 +321,7 @@ private fun AnnotatedString.Builder.appendMarkdownInlines(
                     // http/https.
                     append(inline.url)
                 }
+            }
             is MarkdownInlineFfi.Math -> withStyle(codeStyle) { append(inline.content) }
             // Nostr entities render as their bech32 text for now; routing
             // npubs through presentProfile is a follow-up.
@@ -331,11 +338,16 @@ private fun AnnotatedString.Builder.appendMarkdownLink(
     linkStyle: SpanStyle,
     linkListener: LinkInteractionListener?,
 ) {
+    // Normalize once at the boundary so the openability gate, the stored
+    // annotation, and the eventual ACTION_VIEW all agree on the same string.
+    // A whitespace-padded URL would otherwise pass the (trimming) gate but
+    // lose its scheme in Uri.parse(" https://…").
+    val normalizedDest = dest.trim()
     // A label-less link (`[](url)` or an image with empty alt) would otherwise
     // produce a zero-length, untappable annotation — show the URL itself.
-    val visible = children.ifEmpty { listOf(MarkdownInlineFfi.Text(dest)) }
-    if (isOpenableMarkdownLink(dest)) {
-        withLink(LinkAnnotation.Url(dest, TextLinkStyles(style = linkStyle), linkListener)) {
+    val visible = children.ifEmpty { listOf(MarkdownInlineFfi.Text(normalizedDest)) }
+    if (isOpenableMarkdownLink(normalizedDest)) {
+        withLink(LinkAnnotation.Url(normalizedDest, TextLinkStyles(style = linkStyle), linkListener)) {
             appendMarkdownInlines(visible, codeStyle, linkStyle, linkListener)
         }
     } else {
@@ -349,7 +361,9 @@ internal fun markdownListMarker(
 ): String =
     when (kind) {
         is MarkdownListKindFfi.Bullet -> "•"
-        is MarkdownListKindFfi.Ordered -> "${kind.start + index.toUInt()}${kind.delimiter}"
+        // Compute in Long: UInt addition wraps silently, and `start` is an
+        // FFI-supplied value we don't control.
+        is MarkdownListKindFfi.Ordered -> "${kind.start.toLong() + index}${kind.delimiter}"
     }
 
 /** The only link schemes the markdown renderer will hand to `ACTION_VIEW`. */
@@ -370,8 +384,12 @@ private fun openMarkdownLink(
     context: android.content.Context,
     url: String,
 ) {
-    if (!isOpenableMarkdownLink(url)) return
-    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+    // Annotations are built from trimmed destinations, but re-normalize here
+    // so the launch-time re-check and Uri.parse always agree — a padded URL
+    // must never pass the gate and then lose its scheme in Uri.parse.
+    val normalized = url.trim()
+    if (!isOpenableMarkdownLink(normalized)) return
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(normalized))
     try {
         context.startActivity(intent)
     } catch (_: android.content.ActivityNotFoundException) {
