@@ -760,9 +760,12 @@ class DarkMatterAppState(
 
     suspend fun setAuditLogsEnabled(enabled: Boolean): Boolean =
         runCatching {
+            // setAuditLogSettings now applies the switch to every live session
+            // in place via a recorder hot-swap (enable → live recorder,
+            // disable → flush + close); no session reopen or runtime restart
+            // required on the host side.
             val updated = marmotIo { setAuditLogSettings(AuditLogSettingsFfi(enabled = enabled)) }
             auditLogSettings = updated
-            restartMarmotRuntime()
             present(R.string.toast_security_privacy_updated)
             true
         }.getOrElse {
@@ -770,6 +773,41 @@ class DarkMatterAppState(
             present(R.string.toast_couldnt_update_security_privacy, AppText.Plain(it.readableMessage()))
             false
         }
+
+    /**
+     * Delete every local audit log file. Each delete is best-effort; the
+     * runtime hot-swaps any live recorder so logging keeps running on a
+     * fresh file when audit logging is currently on. Returns true if at
+     * least one file was successfully removed (or rotated).
+     */
+    suspend fun deleteAuditLogs(): Boolean {
+        val files =
+            runCatching { marmotIo { auditLogFiles() } }
+                .getOrElse {
+                    if (it is CancellationException) throw it
+                    present(R.string.toast_couldnt_delete_audit_logs, AppText.Plain(it.readableMessage()))
+                    return false
+                }
+        if (files.isEmpty()) {
+            present(R.string.toast_no_audit_logs_to_delete)
+            return false
+        }
+        var anyDeleted = false
+        for (file in files) {
+            val outcome =
+                runCatching { marmotIo { deleteAuditLogFile(file.path) } }
+                    .onFailure {
+                        if (it is CancellationException) throw it
+                        appStateDebug { "deleteAuditLogFile failed: ${it.readableMessage()}" }
+                    }.getOrNull() ?: continue
+            anyDeleted = true
+            appStateDebug { "audit log deleted still_recording=${outcome.stillRecording}" }
+        }
+        present(
+            if (anyDeleted) R.string.toast_audit_logs_deleted else R.string.toast_couldnt_delete_audit_logs,
+        )
+        return anyDeleted
+    }
 
     fun updateThemeMode(mode: AppThemeMode) {
         themeMode = mode

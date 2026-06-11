@@ -163,6 +163,8 @@
     <string name="telemetry_settings_subtitle">Relay-Verbindungstelemetrie teilen.</string>
     <string name="audit_logs">Prüfprotokolle</string>
     <string name="audit_logs_settings_subtitle">Sicherheitsprüfprotokolle erstellen und senden.</string>
+    <string name="delete_audit_logs">Prüfprotokolle löschen</string>
+    <string name="delete_audit_logs_subtitle">Entferne alle lokalen Prüfprotokoll-Dateien. Wenn die Aufzeichnung an ist, läuft sie in einer neuen Datei weiter.</string>
     <string name="developer">Entwickler</string>
     <string name="developer_mode">Entwicklermodus</string>
     <string name="developer_mode_subtitle">Zeigt Diagnosen und MLS-Interna an.</string>
@@ -338,6 +340,9 @@
     <string name="toast_couldnt_load_mls_state">MLS-Status konnte nicht geladen werden</string>
     <string name="toast_security_privacy_updated">Sicherheits- und Datenschutzeinstellungen aktualisiert</string>
     <string name="toast_couldnt_update_security_privacy">Sicherheits- und Datenschutzeinstellungen konnten nicht aktualisiert werden</string>
+    <string name="toast_audit_logs_deleted">Prüfprotokolle gelöscht</string>
+    <string name="toast_couldnt_delete_audit_logs">Prüfprotokolle konnten nicht gelöscht werden</string>
+    <string name="toast_no_audit_logs_to_delete">Keine Prüfprotokolle zum Löschen vorhanden</string>
     <string name="toast_chat_created">Chat erstellt</string>
     <string name="toast_notification_permission_denied">Benachrichtigungsberechtigung verweigert</string>
     <string name="toast_copied_npub">npub kopiert</string>

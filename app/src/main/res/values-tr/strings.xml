@@ -163,6 +163,8 @@
     <string name="telemetry_settings_subtitle">Röle bağlantı telemetrisini paylaş.</string>
     <string name="audit_logs">Denetim günlükleri</string>
     <string name="audit_logs_settings_subtitle">Güvenlik denetim günlüğü dosyaları oluştur ve gönder.</string>
+    <string name="delete_audit_logs">Denetim günlüklerini sil</string>
+    <string name="delete_audit_logs_subtitle">Tüm yerel denetim günlüğü dosyalarını siler. Günlük tutma açıksa yeni bir dosyada devam eder.</string>
     <string name="developer">Geliştirici</string>
     <string name="developer_mode">Geliştirici modu</string>
     <string name="developer_mode_subtitle">Teşhisleri ve MLS dahili bilgilerini gösterir.</string>
@@ -338,6 +340,9 @@
     <string name="toast_couldnt_load_mls_state">MLS durumu yüklenemedi</string>
     <string name="toast_security_privacy_updated">Güvenlik ve gizlilik güncellendi</string>
     <string name="toast_couldnt_update_security_privacy">Güvenlik ve gizlilik güncellenemedi</string>
+    <string name="toast_audit_logs_deleted">Denetim günlükleri silindi</string>
+    <string name="toast_couldnt_delete_audit_logs">Denetim günlükleri silinemedi</string>
+    <string name="toast_no_audit_logs_to_delete">Silinecek denetim günlüğü yok</string>
     <string name="toast_chat_created">Sohbet oluşturuldu</string>
     <string name="toast_notification_permission_denied">Bildirim izni reddedildi</string>
     <string name="toast_copied_npub">npub kopyalandı</string>

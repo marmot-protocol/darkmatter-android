@@ -6902,6 +6902,59 @@ private fun SecurityPrivacyScreen(
                             }
                         },
                     )
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                    var deleteAuditLogsConfirmOpen by remember { mutableStateOf(false) }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !auditLogsBusy) { deleteAuditLogsConfirmOpen = true }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.delete_audit_logs),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                stringResource(R.string.delete_audit_logs_subtitle),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (deleteAuditLogsConfirmOpen) {
+                        AlertDialog(
+                            onDismissRequest = { deleteAuditLogsConfirmOpen = false },
+                            title = { Text(stringResource(R.string.delete_audit_logs)) },
+                            text = { Text(stringResource(R.string.delete_audit_logs_subtitle)) },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        deleteAuditLogsConfirmOpen = false
+                                        auditLogsBusy = true
+                                        appState.launchMutation {
+                                            try {
+                                                appState.deleteAuditLogs()
+                                            } finally {
+                                                auditLogsBusy = false
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Text(
+                                        stringResource(R.string.delete),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { deleteAuditLogsConfirmOpen = false }) {
+                                    Text(stringResource(R.string.cancel))
+                                }
+                            },
+                        )
+                    }
                 }
             }
             item {

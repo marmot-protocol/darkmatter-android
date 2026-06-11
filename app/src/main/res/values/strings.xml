@@ -168,6 +168,8 @@
     <string name="telemetry_settings_subtitle">Share relay connection telemetry.</string>
     <string name="audit_logs">Audit logs</string>
     <string name="audit_logs_settings_subtitle">Create and Send Group Audit Log Files</string>
+    <string name="delete_audit_logs">Delete audit logs</string>
+    <string name="delete_audit_logs_subtitle">Remove all local forensic audit files. Logging continues on a fresh file if it\'s still on.</string>
     <string name="developer">Developer</string>
     <string name="developer_mode">Developer mode</string>
     <string name="developer_mode_subtitle">Shows diagnostics and MLS internals.</string>
@@ -343,6 +345,9 @@
     <string name="toast_couldnt_load_mls_state">Couldn\'t load MLS state</string>
     <string name="toast_security_privacy_updated">Security &amp; Privacy updated</string>
     <string name="toast_couldnt_update_security_privacy">Couldn\'t update Security &amp; Privacy</string>
+    <string name="toast_audit_logs_deleted">Audit logs deleted</string>
+    <string name="toast_couldnt_delete_audit_logs">Couldn\'t delete audit logs</string>
+    <string name="toast_no_audit_logs_to_delete">No audit logs to delete</string>
     <string name="toast_chat_created">Chat created</string>
     <string name="toast_notification_permission_denied">Notification permission denied</string>
     <string name="toast_copied_npub">Copied npub</string>
