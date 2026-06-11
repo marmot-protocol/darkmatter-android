@@ -502,7 +502,13 @@ fun DarkMatterApp(
  */
 private val LocalSnackbarBottomInset =
     staticCompositionLocalOf<MutableState<Dp>> {
-        error("LocalSnackbarBottomInset not provided")
+        // Safe fallback for hosts rendered outside the app shell —
+        // androidTest fixtures, Compose previews, or any future caller
+        // that uses [DarkMatterSnackbarHost] without going through
+        // [DarkMatterApp]'s provider. The host reads `.value`, so the
+        // factory must return a real MutableState rather than throw;
+        // 0.dp matches the no-composer surface behaviour.
+        mutableStateOf(0.dp)
     }
 
 @Composable
