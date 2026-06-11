@@ -6723,6 +6723,7 @@ private fun NotificationsScreen(
 ) {
     var pendingNotificationEnable by remember { mutableStateOf(false) }
     var pendingBackgroundConnectionEnable by remember { mutableStateOf(false) }
+    var pendingNativePushEnable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -6732,11 +6733,16 @@ private fun NotificationsScreen(
             }
             if (granted && pendingBackgroundConnectionEnable) {
                 scope.launch { appState.setBackgroundConnectionEnabled(true) }
-            } else if (!granted) {
+            }
+            if (granted && pendingNativePushEnable) {
+                scope.launch { appState.setNativePushEnabled(true) }
+            }
+            if (!granted) {
                 appState.present(R.string.toast_notification_permission_denied)
             }
             pendingNotificationEnable = false
             pendingBackgroundConnectionEnable = false
+            pendingNativePushEnable = false
         }
 
     LaunchedEffect(appState.activeAccountRef) {
@@ -6792,6 +6798,35 @@ private fun NotificationsScreen(
                                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                 } else {
                                     scope.launch { appState.setBackgroundConnectionEnabled(enabled) }
+                                }
+                            },
+                        )
+                    }
+                    val nativePushAvailable = appState.isNativePushAvailable()
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.native_push), style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                stringResource(
+                                    if (nativePushAvailable) {
+                                        R.string.native_push_subtitle
+                                    } else {
+                                        R.string.native_push_unavailable_subtitle
+                                    },
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = nativePushAvailable && appState.localNotificationSettings?.nativePushEnabled == true,
+                            enabled = nativePushAvailable && appState.activeAccountRef != null,
+                            onCheckedChange = { enabled ->
+                                if (enabled && !appState.localNotificationPermissionGranted) {
+                                    pendingNativePushEnable = true
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                } else {
+                                    scope.launch { appState.setNativePushEnabled(enabled) }
                                 }
                             },
                         )
