@@ -33,10 +33,16 @@ data class PushServerConfig(
             rawPubkey: String?,
             rawRelayHint: String?,
         ): PushServerConfig? {
-            val pubkey = rawPubkey?.trim().orEmpty()
-            if (pubkey.isEmpty()) return null
+            val pubkey = rawPubkey?.trim()?.lowercase().orEmpty()
+            // A Nostr/MIP-05 server pubkey is a 32-byte secp256k1 key. Anything
+            // other than exactly 64 hex chars is a misconfiguration we'd rather
+            // refuse to register against than silently fail deep in the FFI.
+            if (pubkey.length != 64) return null
+            if (!pubkey.all { it in HEX_CHARS }) return null
             val relayHint = rawRelayHint?.trim()?.takeIf { it.isNotEmpty() }
             return PushServerConfig(serverPubkeyHex = pubkey, relayHint = relayHint)
         }
+
+        private val HEX_CHARS = ('0'..'9').toSet() + ('a'..'f').toSet()
     }
 }
