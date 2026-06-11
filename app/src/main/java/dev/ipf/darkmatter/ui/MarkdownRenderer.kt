@@ -238,8 +238,10 @@ private fun rememberMarkdownInlineText(
     linkListener: LinkInteractionListener,
 ): AnnotatedString {
     val contentColor = LocalContentColor.current
-    val linkColor = MaterialTheme.colorScheme.primary
-    return remember(inlines, contentColor, linkColor, linkListener) {
+    // Links must derive from the content color like every other accent:
+    // colorScheme.primary disappears on the outgoing bubble, whose container
+    // IS primary. Underline alone carries the affordance on both surfaces.
+    return remember(inlines, contentColor, linkListener) {
         markdownInlinesToAnnotatedString(
             inlines = inlines,
             codeStyle =
@@ -249,7 +251,7 @@ private fun rememberMarkdownInlineText(
                 ),
             linkStyle =
                 SpanStyle(
-                    color = linkColor,
+                    color = contentColor,
                     textDecoration = TextDecoration.Underline,
                 ),
             linkListener = linkListener,
