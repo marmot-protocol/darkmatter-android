@@ -74,6 +74,22 @@ class ChatListTitleTest {
     }
 
     @Test
+    fun whitespaceOnlyGroupNameRoutesThroughUnnamedPath() {
+        // Locks the `isNotBlank()` contract: a name of pure whitespace
+        // must not satisfy the named-group branch. Otherwise the title
+        // would render as a blank string instead of the peer name.
+        val title =
+            GroupProjector.displayTitle(
+                group = group(name = "   "),
+                otherMemberAccount = "peer-acc",
+                memberCount = 2,
+                memberTitle = { id -> if (id == "peer-acc") "Alice" else "you" },
+                copy = copy,
+            )
+        assertEquals("Alice", title)
+    }
+
+    @Test
     fun pendingInviteUsesWelcomerFallback() {
         val title =
             GroupProjector.displayTitle(
