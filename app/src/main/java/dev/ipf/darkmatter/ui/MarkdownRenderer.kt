@@ -357,6 +357,164 @@ private fun AnnotatedString.Builder.appendMarkdownLink(
     }
 }
 
+/**
+ * Chat-list previews cap the flattened string here: the row is one ellipsized
+ * line, so anything past a couple hundred characters can never paint and
+ * building it would only burn allocation on every list recomposition.
+ */
+internal const val MARKDOWN_PREVIEW_MAX_LENGTH = 200
+
+/** [markdownDocumentToPreviewAnnotatedString] with the chat-row code-chip style. */
+@Composable
+internal fun rememberMarkdownPreviewText(document: MarkdownDocumentFfi): AnnotatedString {
+    val contentColor = LocalContentColor.current
+    return remember(document, contentColor) {
+        markdownDocumentToPreviewAnnotatedString(
+            document = document,
+            codeStyle =
+                SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    background = contentColor.copy(alpha = 0.08f),
+                ),
+        )
+    }
+}
+
+/**
+ * Pure document → single-line [AnnotatedString] flattening for the chat-list
+ * preview row (kept free of composition so it's unit-testable, like
+ * [markdownInlinesToAnnotatedString]).
+ *
+ * Rules:
+ * - Blocks are walked in order; each block's text contribution is joined to
+ *   the previous one with a single space. Structure-only blocks (thematic
+ *   breaks) contribute nothing.
+ * - Paragraphs, headings, quote bodies, list items, and table cells flatten
+ *   to their inline runs. Code and math blocks contribute their content in
+ *   [codeStyle] with internal whitespace collapsed to single spaces.
+ * - Inline styling survives: bold, italic, strikethrough, and the inline-code
+ *   chip. Line breaks become spaces — the preview is one line by contract.
+ * - Links, autolinks, and images render their visible text with NO
+ *   [LinkAnnotation] and no link styling: the row's only tap target is the
+ *   chat itself, so nothing in the preview may look or act tappable.
+ * - The result is capped at [maxLength]; the walk stops early once the budget
+ *   is spent so a huge message never builds a giant string for a one-line row.
+ */
+internal fun markdownDocumentToPreviewAnnotatedString(
+    document: MarkdownDocumentFfi,
+    codeStyle: SpanStyle,
+    maxLength: Int = MARKDOWN_PREVIEW_MAX_LENGTH,
+): AnnotatedString {
+    val flattened =
+        buildAnnotatedString {
+            for (block in document.blocks) {
+                if (length >= maxLength) break
+                appendPreviewBlock(block, codeStyle, maxLength)
+            }
+        }
+    return if (flattened.length > maxLength) flattened.subSequence(0, maxLength) else flattened
+}
+
+private fun AnnotatedString.Builder.appendPreviewBlock(
+    block: MarkdownBlockFfi,
+    codeStyle: SpanStyle,
+    maxLength: Int,
+) {
+    when (block) {
+        is MarkdownBlockFfi.Paragraph -> appendPreviewInlineSegment(block.inlines, codeStyle)
+        is MarkdownBlockFfi.Heading -> appendPreviewInlineSegment(block.inlines, codeStyle)
+        MarkdownBlockFfi.ThematicBreak -> Unit
+        is MarkdownBlockFfi.CodeBlock -> appendPreviewCodeContent(block.content, codeStyle)
+        is MarkdownBlockFfi.MathBlock -> appendPreviewCodeContent(block.content, codeStyle)
+        is MarkdownBlockFfi.BlockQuote ->
+            block.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength) }
+        is MarkdownBlockFfi.List ->
+            block.items.forEach { item ->
+                item.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength) }
+            }
+        is MarkdownBlockFfi.Table -> {
+            block.header.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle) }
+            block.rows.forEach { row ->
+                row.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle) }
+            }
+        }
+    }
+}
+
+private val previewWhitespaceRun = Regex("\\s+")
+
+private fun AnnotatedString.Builder.appendPreviewCodeContent(
+    content: String,
+    codeStyle: SpanStyle,
+) {
+    // A code block is a multi-line region; the preview is one line. Collapse
+    // every whitespace run (incl. newlines and indentation) to a single space
+    // so `fun main() {\n  hi()\n}` reads as `fun main() { hi() }`.
+    val singleLine = content.trim().replace(previewWhitespaceRun, " ")
+    appendPreviewSegment(buildAnnotatedString { withStyle(codeStyle) { append(singleLine) } })
+}
+
+private fun AnnotatedString.Builder.appendPreviewInlineSegment(
+    inlines: List<MarkdownInlineFfi>,
+    codeStyle: SpanStyle,
+) {
+    appendPreviewSegment(buildAnnotatedString { appendPreviewInlines(inlines, codeStyle) })
+}
+
+/**
+ * Joins a leaf segment to the builder with the single-space block separator.
+ * The segment is materialized first so an empty contribution (blank
+ * paragraph, empty table cell) commits neither text nor a stray separator.
+ */
+private fun AnnotatedString.Builder.appendPreviewSegment(segment: AnnotatedString) {
+    if (segment.isEmpty()) return
+    if (length > 0) append(' ')
+    append(segment)
+}
+
+private fun AnnotatedString.Builder.appendPreviewInlines(
+    inlines: List<MarkdownInlineFfi>,
+    codeStyle: SpanStyle,
+) {
+    inlines.forEach { inline ->
+        when (inline) {
+            is MarkdownInlineFfi.Text -> append(inline.content)
+            // One-line preview: the author's line breaks flatten to spaces
+            // (unlike the bubble renderer, which preserves them).
+            MarkdownInlineFfi.SoftBreak, MarkdownInlineFfi.HardBreak -> append(' ')
+            is MarkdownInlineFfi.Code -> withStyle(codeStyle) { append(inline.content) }
+            is MarkdownInlineFfi.Emph ->
+                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                    appendPreviewInlines(inline.children, codeStyle)
+                }
+            is MarkdownInlineFfi.Strong ->
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    appendPreviewInlines(inline.children, codeStyle)
+                }
+            is MarkdownInlineFfi.Strikethrough ->
+                withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
+                    appendPreviewInlines(inline.children, codeStyle)
+                }
+            // Visible text only — no annotation, no link styling. A label-less
+            // link still shows its destination so the preview isn't blank.
+            is MarkdownInlineFfi.Link ->
+                appendPreviewInlines(
+                    inline.children.ifEmpty { listOf(MarkdownInlineFfi.Text(inline.dest.trim())) },
+                    codeStyle,
+                )
+            is MarkdownInlineFfi.Image ->
+                appendPreviewInlines(
+                    inline.alt.ifEmpty { listOf(MarkdownInlineFfi.Text(inline.dest.trim())) },
+                    codeStyle,
+                )
+            is MarkdownInlineFfi.Autolink -> append(inline.url)
+            is MarkdownInlineFfi.Math -> withStyle(codeStyle) { append(inline.content) }
+            is MarkdownInlineFfi.NostrMention -> append(inline.entity.bech32)
+            is MarkdownInlineFfi.NostrUri -> append(inline.entity.bech32)
+        }
+    }
+}
+
 internal fun markdownListMarker(
     kind: MarkdownListKindFfi,
     index: Int,

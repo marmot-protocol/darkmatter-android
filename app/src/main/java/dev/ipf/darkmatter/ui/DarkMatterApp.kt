@@ -1707,15 +1707,29 @@ private fun ChatRow(
         },
         supportingContent = {
             val draft = appState.draftFor(item.group.groupIdHex)?.takeIf { it.isNotBlank() }
+            // Tokens only ever describe the last message's body, so they're
+            // ignored whenever the line shows something else (invite copy,
+            // draft). When the controller hasn't parsed yet (or the parse
+            // produced nothing), fall back to today's plaintext line. No
+            // parsing happens here — composition stays parse-free.
+            val markdownPreview =
+                item.previewTokens
+                    ?.takeIf { !item.group.pendingConfirmation && draft == null && it.blocks.isNotEmpty() }
             val preview =
-                when {
-                    item.group.pendingConfirmation -> stringResource(R.string.invitation)
-                    draft != null -> stringResource(R.string.chat_row_draft_prefix) + draft
-                    else ->
-                        item.projectedPreviewText(
-                            copy = messageTextCopy,
-                            empty = stringResource(R.string.no_messages_yet),
-                        )
+                if (markdownPreview != null) {
+                    rememberMarkdownPreviewText(markdownPreview)
+                } else {
+                    AnnotatedString(
+                        when {
+                            item.group.pendingConfirmation -> stringResource(R.string.invitation)
+                            draft != null -> stringResource(R.string.chat_row_draft_prefix) + draft
+                            else ->
+                                item.projectedPreviewText(
+                                    copy = messageTextCopy,
+                                    empty = stringResource(R.string.no_messages_yet),
+                                )
+                        },
+                    )
                 }
             Text(
                 text = preview,
