@@ -9,6 +9,15 @@ import android.content.SharedPreferences
  * the last value when calling `upsertPushRegistration` so the registration
  * survives an app restart even before Firebase delivers a fresh
  * `onNewToken` callback.
+ *
+ * **Thread confinement.** The non-suspending mutators (`setToken`,
+ * `recordPendingClear`, `clearPending`) do a read-modify-write on
+ * SharedPreferences without an internal lock. They are safe today because
+ * every caller is on `Dispatchers.Main.immediate` — either via
+ * [dev.ipf.darkmatter.state.DarkMatterAppState]'s `notificationScope` or
+ * the Firebase service callback that resolves on the same dispatcher. A
+ * new off-main caller must serialize through one of those scopes (or add
+ * an internal lock here) to avoid lost-update on the pending-clears set.
  */
 class PushTokenStore(
     private val preferences: SharedPreferences,
@@ -45,6 +54,7 @@ class PushTokenStore(
     }
 
     fun clearPending(account: String) {
+        if (account.isBlank()) return
         val current = pendingClears()
         if (account !in current) return
         preferences.edit().putStringSet(KEY_PENDING_CLEARS, current - account).apply()
