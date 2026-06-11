@@ -13,6 +13,8 @@ import dev.ipf.marmotkit.MarkdownDocumentFfi
 import dev.ipf.marmotkit.MarkdownInlineFfi
 import dev.ipf.marmotkit.MarkdownListItemFfi
 import dev.ipf.marmotkit.MarkdownListKindFfi
+import dev.ipf.marmotkit.MarkdownNostrEntityFfi
+import dev.ipf.marmotkit.MarkdownNostrHrpFfi
 import dev.ipf.marmotkit.MarkdownTableCellFfi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -215,6 +217,41 @@ class MarkdownPreviewTextTest {
                 ),
             )
         assertEquals("quoted alpha beta h1 h2 c1 c2", annotated.text)
+    }
+
+    @Test
+    fun mentionsInPreviewsShowNamesOrShortenedBech32ButStayInert() {
+        val knownNpub = "npub1" + "q".repeat(58)
+        val unknownNpub = "npub1" + "z".repeat(58)
+        val nevent = "nevent1" + "q".repeat(60)
+        val annotated =
+            markdownDocumentToPreviewAnnotatedString(
+                document =
+                    MarkdownDocumentFfi(
+                        listOf(
+                            MarkdownBlockFfi.Paragraph(
+                                listOf(
+                                    MarkdownInlineFfi.NostrMention(
+                                        MarkdownNostrEntityFfi(MarkdownNostrHrpFfi.NPUB, knownNpub),
+                                    ),
+                                    MarkdownInlineFfi.Text(" "),
+                                    MarkdownInlineFfi.NostrMention(
+                                        MarkdownNostrEntityFfi(MarkdownNostrHrpFfi.NPUB, unknownNpub),
+                                    ),
+                                    MarkdownInlineFfi.Text(" "),
+                                    MarkdownInlineFfi.NostrUri(
+                                        MarkdownNostrEntityFfi(MarkdownNostrHrpFfi.NEVENT, nevent),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                codeStyle = codeStyle,
+                mentionDisplayName = { bech32 -> "Alice".takeIf { bech32 == knownNpub } },
+            )
+        assertEquals("@Alice @npub1zzzzzzz…zzzzzz nevent1qqqqq…qqqqqq", annotated.text)
+        // Previews never carry tap targets — not even for profile entities.
+        assertTrue(annotated.getLinkAnnotations(0, annotated.length).isEmpty())
     }
 
     @Test

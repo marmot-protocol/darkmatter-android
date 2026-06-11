@@ -1717,7 +1717,13 @@ private fun ChatRow(
                     ?.takeIf { !item.group.pendingConfirmation && draft == null && it.blocks.isNotEmpty() }
             val preview =
                 if (markdownPreview != null) {
-                    rememberMarkdownPreviewText(markdownPreview)
+                    rememberMarkdownPreviewText(
+                        markdownPreview,
+                        mentionDisplayName =
+                            remember(appState) {
+                                { bech32: String -> appState.mentionDisplayName(bech32) }
+                            },
+                    )
                 } else {
                     AnnotatedString(
                         when {
@@ -5694,7 +5700,21 @@ private fun MessageBubble(
                                 markdownDocument.blocks.isNotEmpty() &&
                                 bodyTextToRender == record.plaintext
                             ) {
-                                MarkdownMessageBody(markdownDocument)
+                                // Mention names resolve through the profile
+                                // cache; npub taps stay in-app via the
+                                // profile sheet (never an external nostr:
+                                // intent).
+                                MarkdownMessageBody(
+                                    markdownDocument,
+                                    mentionDisplayName =
+                                        remember(appState) {
+                                            { bech32: String -> appState.mentionDisplayName(bech32) }
+                                        },
+                                    onNostrProfileTap =
+                                        remember(appState) {
+                                            { bech32: String -> appState.presentNostrProfile(bech32) }
+                                        },
+                                )
                             } else {
                                 Text(
                                     bodyTextToRender,

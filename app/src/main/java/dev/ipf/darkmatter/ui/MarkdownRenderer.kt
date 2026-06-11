@@ -17,6 +17,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -36,12 +37,15 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.ipf.marmotkit.MarkdownAlignmentFfi
 import dev.ipf.marmotkit.MarkdownAutolinkKindFfi
 import dev.ipf.marmotkit.MarkdownBlockFfi
 import dev.ipf.marmotkit.MarkdownDocumentFfi
 import dev.ipf.marmotkit.MarkdownInlineFfi
 import dev.ipf.marmotkit.MarkdownListKindFfi
+import dev.ipf.marmotkit.MarkdownNostrEntityFfi
+import dev.ipf.marmotkit.MarkdownNostrHrpFfi
 import dev.ipf.marmotkit.MarkdownTableCellFfi
 
 /**
@@ -62,64 +66,105 @@ import dev.ipf.marmotkit.MarkdownTableCellFfi
  * - Inline images: alt text styled as a link to the image URL. Inline remote
  *   fetches would bypass the encrypted-media pipeline, so we don't.
  * - Math (inline + block): monospace literal, no typesetting.
- * - Nostr mentions/URIs: plain bech32 text, not tappable.
+ *
+ * Nostr entities are first-class: a mention renders as "@DisplayName" (bold)
+ * when [mentionDisplayName] resolves one, else as its shortened bech32 in the
+ * code style; npub/nprofile entities route taps to [onNostrProfileTap] (an
+ * in-app profile presentation — identity taps are never handed to external
+ * apps via ACTION_VIEW). note/nevent/naddr/nrelay stay styled but inert.
  */
 @Composable
 internal fun MarkdownMessageBody(
     document: MarkdownDocumentFfi,
     modifier: Modifier = Modifier,
+    mentionDisplayName: ((String) -> String?)? = null,
+    onNostrProfileTap: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    // One listener for every link in the document; the tapped URL rides in on
-    // the annotation itself. Scheme gating lives in openMarkdownLink (and the
-    // builder never annotates a non-http(s) destination in the first place).
+    // One listener for every link in the document; the tapped destination
+    // rides in on the annotation itself. URL annotations go through the
+    // scheme gate to ACTION_VIEW; Clickable annotations carry a nostr
+    // profile entity and stay in-app.
     val linkListener =
-        remember(context) {
+        remember(context, onNostrProfileTap) {
             LinkInteractionListener { annotation ->
-                (annotation as? LinkAnnotation.Url)?.let { openMarkdownLink(context, it.url) }
+                when (annotation) {
+                    is LinkAnnotation.Url -> openMarkdownLink(context, annotation.url)
+                    is LinkAnnotation.Clickable ->
+                        annotation.tag
+                            .takeIf { it.startsWith(NOSTR_PROFILE_LINK_TAG_PREFIX) }
+                            ?.removePrefix(NOSTR_PROFILE_LINK_TAG_PREFIX)
+                            ?.let { bech32 -> onNostrProfileTap?.invoke(bech32) }
+                    else -> Unit
+                }
             }
+        }
+    val bodyContext =
+        remember(linkListener, mentionDisplayName) {
+            MarkdownBodyContext(linkListener, mentionDisplayName)
         }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         document.blocks.forEach { block ->
-            MarkdownBlockView(block, linkListener)
+            MarkdownBlockView(block, bodyContext)
         }
     }
 }
 
+/** Per-document inputs threaded through every block view. */
+private data class MarkdownBodyContext(
+    val linkListener: LinkInteractionListener,
+    val mentionDisplayName: ((String) -> String?)?,
+)
+
 @Composable
 private fun MarkdownBlockView(
     block: MarkdownBlockFfi,
-    linkListener: LinkInteractionListener,
+    ctx: MarkdownBodyContext,
 ) {
     when (block) {
         is MarkdownBlockFfi.Paragraph ->
             Text(
-                rememberMarkdownInlineText(block.inlines, linkListener),
+                rememberMarkdownInlineText(block.inlines, ctx),
                 style = MaterialTheme.typography.bodyLarge,
             )
         is MarkdownBlockFfi.Heading ->
             Text(
-                rememberMarkdownInlineText(block.inlines, linkListener),
-                style = markdownHeadingStyle(block.level.toInt()),
+                rememberMarkdownInlineText(block.inlines, ctx),
+                style = markdownHeadingTextStyle(block.level.toInt(), MaterialTheme.typography),
             )
         MarkdownBlockFfi.ThematicBreak ->
             HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.25f))
         is MarkdownBlockFfi.CodeBlock -> MarkdownCodeBlockView(block.content)
-        is MarkdownBlockFfi.BlockQuote -> MarkdownBlockQuoteView(block.blocks, linkListener)
-        is MarkdownBlockFfi.List -> MarkdownListView(block, linkListener)
-        is MarkdownBlockFfi.Table -> MarkdownTableView(block, linkListener)
+        is MarkdownBlockFfi.BlockQuote -> MarkdownBlockQuoteView(block.blocks, ctx)
+        is MarkdownBlockFfi.List -> MarkdownListView(block, ctx)
+        is MarkdownBlockFfi.Table -> MarkdownTableView(block, ctx)
         // No math typesetting in v1 — show the raw TeX in the code treatment
         // so it at least reads as "source", not as broken prose.
         is MarkdownBlockFfi.MathBlock -> MarkdownCodeBlockView(block.content)
     }
 }
 
-@Composable
-private fun markdownHeadingStyle(level: Int): TextStyle =
+/**
+ * Six distinct, strictly descending heading tiers, all SemiBold, sized for a
+ * chat bubble: the ramp tops out at headlineSmall (a bubble is not a document
+ * page) and bottoms out at body sizes where only the weight separates H5/H6
+ * from prose. H3/H4 derive from titleLarge with explicit 20/18sp sizes
+ * because the M3 token scale has no monotonic steps between titleLarge (22)
+ * and bodyLarge (16) — titleMedium/titleSmall collide with the body sizes.
+ * Out-of-range levels clamp to the smallest tier. Pure so the ramp is
+ * unit-testable.
+ */
+internal fun markdownHeadingTextStyle(
+    level: Int,
+    typography: Typography,
+): TextStyle =
     when (level) {
-        1 -> MaterialTheme.typography.titleLarge
-        2 -> MaterialTheme.typography.titleMedium
-        else -> MaterialTheme.typography.titleSmall
+        1 -> typography.headlineSmall
+        2 -> typography.titleLarge
+        3 -> typography.titleLarge.copy(fontSize = 20.sp, lineHeight = 26.sp)
+        4 -> typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 24.sp)
+        5 -> typography.bodyLarge
+        else -> typography.bodyMedium
     }.copy(fontWeight = FontWeight.SemiBold)
 
 @Composable
@@ -140,7 +185,7 @@ private fun MarkdownCodeBlockView(content: String) {
 @Composable
 private fun MarkdownBlockQuoteView(
     blocks: List<MarkdownBlockFfi>,
-    linkListener: LinkInteractionListener,
+    ctx: MarkdownBodyContext,
 ) {
     Row(Modifier.height(IntrinsicSize.Min)) {
         Box(
@@ -154,7 +199,7 @@ private fun MarkdownBlockQuoteView(
         // children (nested code blocks) don't measure under unbounded
         // constraints inside the IntrinsicSize.Min row.
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            blocks.forEach { MarkdownBlockView(it, linkListener) }
+            blocks.forEach { MarkdownBlockView(it, ctx) }
         }
     }
 }
@@ -162,7 +207,7 @@ private fun MarkdownBlockQuoteView(
 @Composable
 private fun MarkdownListView(
     block: MarkdownBlockFfi.List,
-    linkListener: LinkInteractionListener,
+    ctx: MarkdownBodyContext,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(if (block.tight) 2.dp else 6.dp)) {
         block.items.forEachIndexed { index, item ->
@@ -179,7 +224,7 @@ private fun MarkdownListView(
                     modifier = Modifier.padding(end = 6.dp),
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item.blocks.forEach { MarkdownBlockView(it, linkListener) }
+                    item.blocks.forEach { MarkdownBlockView(it, ctx) }
                 }
             }
         }
@@ -194,13 +239,13 @@ private fun MarkdownListView(
 @Composable
 private fun MarkdownTableView(
     block: MarkdownBlockFfi.Table,
-    linkListener: LinkInteractionListener,
+    ctx: MarkdownBodyContext,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        MarkdownTableRowView(block.header, block.alignments, header = true, linkListener)
+        MarkdownTableRowView(block.header, block.alignments, header = true, ctx)
         HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.25f))
         block.rows.forEach { row ->
-            MarkdownTableRowView(row, block.alignments, header = false, linkListener)
+            MarkdownTableRowView(row, block.alignments, header = false, ctx)
         }
     }
 }
@@ -210,12 +255,12 @@ private fun MarkdownTableRowView(
     cells: List<MarkdownTableCellFfi>,
     alignments: List<MarkdownAlignmentFfi>,
     header: Boolean,
-    linkListener: LinkInteractionListener,
+    ctx: MarkdownBodyContext,
 ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         cells.forEachIndexed { index, cell ->
             Text(
-                rememberMarkdownInlineText(cell.inlines, linkListener),
+                rememberMarkdownInlineText(cell.inlines, ctx),
                 style =
                     MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
@@ -235,13 +280,19 @@ private fun MarkdownTableRowView(
 @Composable
 private fun rememberMarkdownInlineText(
     inlines: List<MarkdownInlineFfi>,
-    linkListener: LinkInteractionListener,
+    ctx: MarkdownBodyContext,
 ): AnnotatedString {
     val contentColor = LocalContentColor.current
+    // Resolve mention display names during composition, not inside remember's
+    // calculation: the resolver reads Compose state (the profile revision), so
+    // the read must both subscribe this scope AND change a remember key when a
+    // profile arrives — otherwise the cached string would survive the
+    // recomposition and the mention would never upgrade from bech32 to name.
+    val mentionNames = resolveMentionNames(inlines, ctx.mentionDisplayName)
     // Links must derive from the content color like every other accent:
     // colorScheme.primary disappears on the outgoing bubble, whose container
     // IS primary. Underline alone carries the affordance on both surfaces.
-    return remember(inlines, contentColor, linkListener) {
+    return remember(inlines, contentColor, ctx, mentionNames) {
         markdownInlinesToAnnotatedString(
             inlines = inlines,
             codeStyle =
@@ -254,33 +305,102 @@ private fun rememberMarkdownInlineText(
                     color = contentColor,
                     textDecoration = TextDecoration.Underline,
                 ),
-            linkListener = linkListener,
+            linkListener = ctx.linkListener,
+            mentionDisplayName = mentionNames::get,
         )
     }
 }
 
+/** Mention bech32 → resolved display name (or null) for one inline tree. */
+private fun resolveMentionNames(
+    inlines: List<MarkdownInlineFfi>,
+    resolve: ((String) -> String?)?,
+): Map<String, String?> {
+    if (resolve == null) return emptyMap()
+    val bech32s = mutableSetOf<String>()
+    collectMentionBech32s(inlines, bech32s)
+    return bech32s.associateWith(resolve)
+}
+
+private fun collectMentionBech32s(
+    inlines: List<MarkdownInlineFfi>,
+    out: MutableSet<String>,
+) {
+    inlines.forEach { inline ->
+        when (inline) {
+            is MarkdownInlineFfi.NostrMention -> out += inline.entity.bech32
+            is MarkdownInlineFfi.Emph -> collectMentionBech32s(inline.children, out)
+            is MarkdownInlineFfi.Strong -> collectMentionBech32s(inline.children, out)
+            is MarkdownInlineFfi.Strikethrough -> collectMentionBech32s(inline.children, out)
+            is MarkdownInlineFfi.Link -> collectMentionBech32s(inline.children, out)
+            is MarkdownInlineFfi.Image -> collectMentionBech32s(inline.alt, out)
+            else -> Unit
+        }
+    }
+}
+
+private fun collectBlockMentionBech32s(
+    blocks: List<MarkdownBlockFfi>,
+    out: MutableSet<String>,
+) {
+    blocks.forEach { block ->
+        when (block) {
+            is MarkdownBlockFfi.Paragraph -> collectMentionBech32s(block.inlines, out)
+            is MarkdownBlockFfi.Heading -> collectMentionBech32s(block.inlines, out)
+            is MarkdownBlockFfi.BlockQuote -> collectBlockMentionBech32s(block.blocks, out)
+            is MarkdownBlockFfi.List ->
+                block.items.forEach { collectBlockMentionBech32s(it.blocks, out) }
+            is MarkdownBlockFfi.Table -> {
+                block.header.forEach { collectMentionBech32s(it.inlines, out) }
+                block.rows.forEach { row -> row.forEach { collectMentionBech32s(it.inlines, out) } }
+            }
+            else -> Unit
+        }
+    }
+}
+
+/**
+ * [LinkAnnotation.Clickable] tag prefix for nostr profile entities
+ * (npub/nprofile). These deliberately do NOT become [LinkAnnotation.Url]s:
+ * an identity tap must stay in-app (profile sheet), never fan out to whatever
+ * external app claims the nostr: scheme.
+ */
+internal const val NOSTR_PROFILE_LINK_TAG_PREFIX = "nostr-profile:"
+
 /**
  * Pure inline-tree → [AnnotatedString] mapping (kept free of composition so
- * it's unit-testable). Only http/https destinations become tappable
- * [LinkAnnotation.Url]s; anything else (javascript:, file:, nostr:, …)
- * renders its visible text with no annotation at all, so there is nothing to
- * tap and nothing to launch.
+ * it's unit-testable). Only allowlisted destinations (see
+ * [isOpenableMarkdownLink]) become tappable [LinkAnnotation.Url]s; anything
+ * else (javascript:, data:, file:, …) renders its visible text with no
+ * annotation at all, so there is nothing to tap and nothing to launch.
+ * Nostr mentions resolve through [mentionDisplayName] (bold "@Name") or fall
+ * back to their shortened bech32 in [codeStyle].
  */
 internal fun markdownInlinesToAnnotatedString(
     inlines: List<MarkdownInlineFfi>,
     codeStyle: SpanStyle,
     linkStyle: SpanStyle,
     linkListener: LinkInteractionListener? = null,
+    mentionDisplayName: ((String) -> String?)? = null,
 ): AnnotatedString =
     buildAnnotatedString {
-        appendMarkdownInlines(inlines, codeStyle, linkStyle, linkListener)
+        appendMarkdownInlines(
+            inlines,
+            MarkdownInlineRenderContext(codeStyle, linkStyle, linkListener, mentionDisplayName),
+        )
     }
+
+/** Immutable bundle threaded through the recursive inline walk. */
+private class MarkdownInlineRenderContext(
+    val codeStyle: SpanStyle,
+    val linkStyle: SpanStyle,
+    val linkListener: LinkInteractionListener?,
+    val mentionDisplayName: ((String) -> String?)?,
+)
 
 private fun AnnotatedString.Builder.appendMarkdownInlines(
     inlines: List<MarkdownInlineFfi>,
-    codeStyle: SpanStyle,
-    linkStyle: SpanStyle,
-    linkListener: LinkInteractionListener?,
+    ctx: MarkdownInlineRenderContext,
 ) {
     inlines.forEach { inline ->
         when (inline) {
@@ -289,56 +409,110 @@ private fun AnnotatedString.Builder.appendMarkdownInlines(
             // newline (not the CommonMark collapse-to-space) to match how the
             // plaintext fallback has always displayed.
             MarkdownInlineFfi.SoftBreak, MarkdownInlineFfi.HardBreak -> append('\n')
-            is MarkdownInlineFfi.Code -> withStyle(codeStyle) { append(inline.content) }
+            is MarkdownInlineFfi.Code -> withStyle(ctx.codeStyle) { append(inline.content) }
             is MarkdownInlineFfi.Emph ->
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    appendMarkdownInlines(inline.children, codeStyle, linkStyle, linkListener)
+                    appendMarkdownInlines(inline.children, ctx)
                 }
             is MarkdownInlineFfi.Strong ->
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    appendMarkdownInlines(inline.children, codeStyle, linkStyle, linkListener)
+                    appendMarkdownInlines(inline.children, ctx)
                 }
             is MarkdownInlineFfi.Strikethrough ->
                 withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-                    appendMarkdownInlines(inline.children, codeStyle, linkStyle, linkListener)
+                    appendMarkdownInlines(inline.children, ctx)
                 }
             is MarkdownInlineFfi.Link ->
-                appendMarkdownLink(inline.dest, inline.children, codeStyle, linkStyle, linkListener)
+                appendMarkdownLink(inline.dest, inline.children, ctx)
             // No inline image fetches (they'd bypass the encrypted-media
             // pipeline): the alt text stands in, tappable through to the
-            // image URL when it's plain http(s).
+            // image URL when its scheme is allowlisted.
             is MarkdownInlineFfi.Image ->
-                appendMarkdownLink(inline.dest, inline.alt, codeStyle, linkStyle, linkListener)
+                appendMarkdownLink(inline.dest, inline.alt, ctx)
             is MarkdownInlineFfi.Autolink -> {
                 // Normalize at the boundary: the gate, the annotation, and the
                 // eventual ACTION_VIEW all see the same trimmed destination.
-                val dest = inline.url.trim()
-                if (inline.kind == MarkdownAutolinkKindFfi.URI && isOpenableMarkdownLink(dest)) {
-                    withLink(LinkAnnotation.Url(dest, TextLinkStyles(style = linkStyle), linkListener)) {
+                // A bare email autolink opens through mailto: (the visible
+                // text stays the plain address).
+                val trimmed = inline.url.trim()
+                val dest =
+                    if (inline.kind == MarkdownAutolinkKindFfi.EMAIL &&
+                        !trimmed.startsWith("mailto:", ignoreCase = true)
+                    ) {
+                        "mailto:$trimmed"
+                    } else {
+                        trimmed
+                    }
+                if (isOpenableMarkdownLink(dest)) {
+                    withLink(LinkAnnotation.Url(dest, TextLinkStyles(style = ctx.linkStyle), ctx.linkListener)) {
                         append(inline.url)
                     }
                 } else {
-                    // Email autolinks (and any non-http URI) stay visible but
-                    // inert — the only schemes this renderer ever opens are
-                    // http/https.
+                    // Non-allowlisted URIs stay visible but inert.
                     append(inline.url)
                 }
             }
-            is MarkdownInlineFfi.Math -> withStyle(codeStyle) { append(inline.content) }
-            // Nostr entities render as their bech32 text for now; routing
-            // npubs through presentProfile is a follow-up.
-            is MarkdownInlineFfi.NostrMention -> append(inline.entity.bech32)
-            is MarkdownInlineFfi.NostrUri -> append(inline.entity.bech32)
+            is MarkdownInlineFfi.Math -> withStyle(ctx.codeStyle) { append(inline.content) }
+            is MarkdownInlineFfi.NostrMention -> appendNostrEntity(inline.entity, mention = true, ctx)
+            is MarkdownInlineFfi.NostrUri -> appendNostrEntity(inline.entity, mention = false, ctx)
         }
     }
+}
+
+/**
+ * Mention → "@DisplayName" (bold) when resolvable, else "@" + shortened
+ * bech32 in the code style; a plain nostr: URI shows the shortened bech32
+ * without the "@" and never resolves a name. npub/nprofile entities carry a
+ * [LinkAnnotation.Clickable] routed (via the shared listener) to the in-app
+ * profile sheet; the other HRPs (note/nevent/naddr/nrelay) have no in-app
+ * destination yet, so they stay inert.
+ */
+private fun AnnotatedString.Builder.appendNostrEntity(
+    entity: MarkdownNostrEntityFfi,
+    mention: Boolean,
+    ctx: MarkdownInlineRenderContext,
+) {
+    val appendVisible: AnnotatedString.Builder.() -> Unit = {
+        val name = if (mention) ctx.mentionDisplayName?.invoke(entity.bech32) else null
+        if (name != null) {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("@$name") }
+        } else {
+            withStyle(ctx.codeStyle) {
+                if (mention) append('@')
+                append(shortenedBech32(entity.bech32))
+            }
+        }
+    }
+    val opensProfile =
+        entity.hrp == MarkdownNostrHrpFfi.NPUB || entity.hrp == MarkdownNostrHrpFfi.NPROFILE
+    if (opensProfile) {
+        withLink(
+            LinkAnnotation.Clickable(
+                tag = NOSTR_PROFILE_LINK_TAG_PREFIX + entity.bech32,
+                styles = null,
+                linkInteractionListener = ctx.linkListener,
+            ),
+        ) { appendVisible() }
+    } else {
+        appendVisible()
+    }
+}
+
+/**
+ * `npub1qqqq…qqqq` style truncation for bech32 entities: first 12 + ellipsis
+ * + last 6, leaving short strings untouched. 12 leading characters keep the
+ * HRP plus a recognizable run of the body even for `nprofile1`.
+ */
+internal fun shortenedBech32(bech32: String): String {
+    val trimmed = bech32.trim()
+    if (trimmed.length <= 19) return trimmed
+    return trimmed.take(12) + "…" + trimmed.takeLast(6)
 }
 
 private fun AnnotatedString.Builder.appendMarkdownLink(
     dest: String,
     children: List<MarkdownInlineFfi>,
-    codeStyle: SpanStyle,
-    linkStyle: SpanStyle,
-    linkListener: LinkInteractionListener?,
+    ctx: MarkdownInlineRenderContext,
 ) {
     // Normalize once at the boundary so the openability gate, the stored
     // annotation, and the eventual ACTION_VIEW all agree on the same string.
@@ -349,11 +523,11 @@ private fun AnnotatedString.Builder.appendMarkdownLink(
     // produce a zero-length, untappable annotation — show the URL itself.
     val visible = children.ifEmpty { listOf(MarkdownInlineFfi.Text(normalizedDest)) }
     if (isOpenableMarkdownLink(normalizedDest)) {
-        withLink(LinkAnnotation.Url(normalizedDest, TextLinkStyles(style = linkStyle), linkListener)) {
-            appendMarkdownInlines(visible, codeStyle, linkStyle, linkListener)
+        withLink(LinkAnnotation.Url(normalizedDest, TextLinkStyles(style = ctx.linkStyle), ctx.linkListener)) {
+            appendMarkdownInlines(visible, ctx)
         }
     } else {
-        appendMarkdownInlines(visible, codeStyle, linkStyle, linkListener)
+        appendMarkdownInlines(visible, ctx)
     }
 }
 
@@ -366,9 +540,23 @@ internal const val MARKDOWN_PREVIEW_MAX_LENGTH = 200
 
 /** [markdownDocumentToPreviewAnnotatedString] with the chat-row code-chip style. */
 @Composable
-internal fun rememberMarkdownPreviewText(document: MarkdownDocumentFfi): AnnotatedString {
+internal fun rememberMarkdownPreviewText(
+    document: MarkdownDocumentFfi,
+    mentionDisplayName: ((String) -> String?)? = null,
+): AnnotatedString {
     val contentColor = LocalContentColor.current
-    return remember(document, contentColor) {
+    // Same name-resolution pattern as rememberMarkdownInlineText: resolve in
+    // composition (subscribing to the profile revision) and key the cache on
+    // the result so a late-arriving profile re-flattens the row.
+    val mentionNames =
+        if (mentionDisplayName == null) {
+            emptyMap()
+        } else {
+            val bech32s = mutableSetOf<String>()
+            collectBlockMentionBech32s(document.blocks, bech32s)
+            bech32s.associateWith(mentionDisplayName)
+        }
+    return remember(document, contentColor, mentionNames) {
         markdownDocumentToPreviewAnnotatedString(
             document = document,
             codeStyle =
@@ -376,6 +564,7 @@ internal fun rememberMarkdownPreviewText(document: MarkdownDocumentFfi): Annotat
                     fontFamily = FontFamily.Monospace,
                     background = contentColor.copy(alpha = 0.08f),
                 ),
+            mentionDisplayName = mentionNames::get,
         )
     }
 }
@@ -397,6 +586,8 @@ internal fun rememberMarkdownPreviewText(document: MarkdownDocumentFfi): Annotat
  * - Links, autolinks, and images render their visible text with NO
  *   [LinkAnnotation] and no link styling: the row's only tap target is the
  *   chat itself, so nothing in the preview may look or act tappable.
+ * - Nostr mentions/URIs show the same visible text as the bubble (resolved
+ *   display name or shortened bech32) but, like links, stay annotation-free.
  * - The result is capped at [maxLength]; the walk stops early once the budget
  *   is spent so a huge message never builds a giant string for a one-line row.
  */
@@ -404,12 +595,13 @@ internal fun markdownDocumentToPreviewAnnotatedString(
     document: MarkdownDocumentFfi,
     codeStyle: SpanStyle,
     maxLength: Int = MARKDOWN_PREVIEW_MAX_LENGTH,
+    mentionDisplayName: ((String) -> String?)? = null,
 ): AnnotatedString {
     val flattened =
         buildAnnotatedString {
             for (block in document.blocks) {
                 if (length >= maxLength) break
-                appendPreviewBlock(block, codeStyle, maxLength)
+                appendPreviewBlock(block, codeStyle, maxLength, mentionDisplayName)
             }
         }
     return if (flattened.length > maxLength) flattened.subSequence(0, maxLength) else flattened
@@ -419,23 +611,24 @@ private fun AnnotatedString.Builder.appendPreviewBlock(
     block: MarkdownBlockFfi,
     codeStyle: SpanStyle,
     maxLength: Int,
+    mentionDisplayName: ((String) -> String?)?,
 ) {
     when (block) {
-        is MarkdownBlockFfi.Paragraph -> appendPreviewInlineSegment(block.inlines, codeStyle)
-        is MarkdownBlockFfi.Heading -> appendPreviewInlineSegment(block.inlines, codeStyle)
+        is MarkdownBlockFfi.Paragraph -> appendPreviewInlineSegment(block.inlines, codeStyle, mentionDisplayName)
+        is MarkdownBlockFfi.Heading -> appendPreviewInlineSegment(block.inlines, codeStyle, mentionDisplayName)
         MarkdownBlockFfi.ThematicBreak -> Unit
         is MarkdownBlockFfi.CodeBlock -> appendPreviewCodeContent(block.content, codeStyle)
         is MarkdownBlockFfi.MathBlock -> appendPreviewCodeContent(block.content, codeStyle)
         is MarkdownBlockFfi.BlockQuote ->
-            block.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength) }
+            block.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName) }
         is MarkdownBlockFfi.List ->
             block.items.forEach { item ->
-                item.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength) }
+                item.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName) }
             }
         is MarkdownBlockFfi.Table -> {
-            block.header.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle) }
+            block.header.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, mentionDisplayName) }
             block.rows.forEach { row ->
-                row.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle) }
+                row.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, mentionDisplayName) }
             }
         }
     }
@@ -457,8 +650,9 @@ private fun AnnotatedString.Builder.appendPreviewCodeContent(
 private fun AnnotatedString.Builder.appendPreviewInlineSegment(
     inlines: List<MarkdownInlineFfi>,
     codeStyle: SpanStyle,
+    mentionDisplayName: ((String) -> String?)?,
 ) {
-    appendPreviewSegment(buildAnnotatedString { appendPreviewInlines(inlines, codeStyle) })
+    appendPreviewSegment(buildAnnotatedString { appendPreviewInlines(inlines, codeStyle, mentionDisplayName) })
 }
 
 /**
@@ -475,6 +669,7 @@ private fun AnnotatedString.Builder.appendPreviewSegment(segment: AnnotatedStrin
 private fun AnnotatedString.Builder.appendPreviewInlines(
     inlines: List<MarkdownInlineFfi>,
     codeStyle: SpanStyle,
+    mentionDisplayName: ((String) -> String?)?,
 ) {
     inlines.forEach { inline ->
         when (inline) {
@@ -485,15 +680,15 @@ private fun AnnotatedString.Builder.appendPreviewInlines(
             is MarkdownInlineFfi.Code -> withStyle(codeStyle) { append(inline.content) }
             is MarkdownInlineFfi.Emph ->
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    appendPreviewInlines(inline.children, codeStyle)
+                    appendPreviewInlines(inline.children, codeStyle, mentionDisplayName)
                 }
             is MarkdownInlineFfi.Strong ->
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    appendPreviewInlines(inline.children, codeStyle)
+                    appendPreviewInlines(inline.children, codeStyle, mentionDisplayName)
                 }
             is MarkdownInlineFfi.Strikethrough ->
                 withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-                    appendPreviewInlines(inline.children, codeStyle)
+                    appendPreviewInlines(inline.children, codeStyle, mentionDisplayName)
                 }
             // Visible text only — no annotation, no link styling. A label-less
             // link still shows its destination so the preview isn't blank.
@@ -501,16 +696,31 @@ private fun AnnotatedString.Builder.appendPreviewInlines(
                 appendPreviewInlines(
                     inline.children.ifEmpty { listOf(MarkdownInlineFfi.Text(inline.dest.trim())) },
                     codeStyle,
+                    mentionDisplayName,
                 )
             is MarkdownInlineFfi.Image ->
                 appendPreviewInlines(
                     inline.alt.ifEmpty { listOf(MarkdownInlineFfi.Text(inline.dest.trim())) },
                     codeStyle,
+                    mentionDisplayName,
                 )
             is MarkdownInlineFfi.Autolink -> append(inline.url)
             is MarkdownInlineFfi.Math -> withStyle(codeStyle) { append(inline.content) }
-            is MarkdownInlineFfi.NostrMention -> append(inline.entity.bech32)
-            is MarkdownInlineFfi.NostrUri -> append(inline.entity.bech32)
+            // Same visible text as the bubble (name or shortened bech32) but
+            // inert: the row's only tap target is the chat itself.
+            is MarkdownInlineFfi.NostrMention -> {
+                val name = mentionDisplayName?.invoke(inline.entity.bech32)
+                if (name != null) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("@$name") }
+                } else {
+                    withStyle(codeStyle) {
+                        append('@')
+                        append(shortenedBech32(inline.entity.bech32))
+                    }
+                }
+            }
+            is MarkdownInlineFfi.NostrUri ->
+                withStyle(codeStyle) { append(shortenedBech32(inline.entity.bech32)) }
         }
     }
 }
@@ -526,19 +736,29 @@ internal fun markdownListMarker(
         is MarkdownListKindFfi.Ordered -> "${kind.start.toLong() + index}${kind.delimiter}"
     }
 
-/** The only link schemes the markdown renderer will hand to `ACTION_VIEW`. */
+/**
+ * The only link schemes the markdown renderer will hand to `ACTION_VIEW`,
+ * mirroring iOS's MessageLinkPolicy. Explicit allowlist — javascript:, data:,
+ * file:, ftp:, intent: and anything unknown stays inert text. nostr: is also
+ * absent on purpose: profile entities route in-app via
+ * [NOSTR_PROFILE_LINK_TAG_PREFIX], never to an arbitrary external handler.
+ */
+private val openableMarkdownLinkSchemes =
+    setOf("http", "https", "mailto", "tel", "whitenoise", "whitenoise-staging")
+
 internal fun isOpenableMarkdownLink(dest: String): Boolean {
     val trimmed = dest.trim()
-    return trimmed.startsWith("http://", ignoreCase = true) ||
-        trimmed.startsWith("https://", ignoreCase = true)
+    val colon = trimmed.indexOf(':')
+    if (colon <= 0) return false
+    return trimmed.substring(0, colon).lowercase() in openableMarkdownLinkSchemes
 }
 
 /**
  * Same fire-and-catch pattern as `openAttachmentExternally`: no
  * `resolveActivity` pre-flight (package visibility makes it lie), just catch
- * `ActivityNotFoundException` as the authoritative "no browser" signal and
- * swallow it — a dead tap beats a crash, and devices without any browser are
- * vanishingly rare.
+ * `ActivityNotFoundException` as the authoritative "no handler" signal and
+ * swallow it — a dead tap beats a crash. One ACTION_VIEW path serves every
+ * allowed scheme (browser, mail, dialer, whitenoise deep links alike).
  */
 private fun openMarkdownLink(
     context: android.content.Context,
@@ -553,6 +773,6 @@ private fun openMarkdownLink(
     try {
         context.startActivity(intent)
     } catch (_: android.content.ActivityNotFoundException) {
-        // No handler for http(s) — nothing sane to do.
+        // No handler for this scheme on the device — nothing sane to do.
     }
 }
