@@ -985,11 +985,19 @@ class DarkMatterAppState(
         if (!isNativePushAvailable()) return null
         val token =
             suspendCancellableCoroutine<String?> { continuation ->
+                // The Firebase Task API has no cancel surface, so the
+                // completion listener can fire after this coroutine is
+                // cancelled. Guard the resume on isActive so a stale callback
+                // doesn't try to push a value onto a closed continuation; the
+                // task completes in the background and its result is dropped.
                 FirebaseMessaging
                     .getInstance()
                     .token
-                    .addOnSuccessListener { continuation.resume(it) }
-                    .addOnFailureListener { continuation.resume(null) }
+                    .addOnCompleteListener { task ->
+                        if (continuation.isActive) {
+                            continuation.resume(if (task.isSuccessful) task.result else null)
+                        }
+                    }
             }
         if (!token.isNullOrBlank()) pushTokenStore.setToken(token)
         return token?.takeIf { it.isNotBlank() }
