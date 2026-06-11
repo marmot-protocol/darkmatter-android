@@ -353,7 +353,7 @@
     <string name="theme_system">Sistema</string>
     <string name="theme_light">Claro</string>
     <string name="theme_dark">Oscuro</string>
-    <string name="theme_amoled">AMOLED (negro puro)</string>
+    <string name="theme_amoled">AMOLED</string>
     <string name="language">Idioma</string>
     <string name="language_system">Idioma del sistema</string>
     <string name="language_english">English</string>
