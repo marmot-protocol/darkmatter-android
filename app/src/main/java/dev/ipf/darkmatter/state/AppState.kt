@@ -238,11 +238,15 @@ class DarkMatterAppState(
     private val localNotificationPresenter = LocalNotificationPresenter(appContext)
     private val pushTokenStore = PushTokenStore.create(appContext)
 
-    // Last (account, platform, token, server-pubkey, relay-hint) tuple we
-    // successfully handed to the runtime. Skip redundant FFI calls when
-    // nothing has changed across foreground/token-rotation/account-bind
-    // events. Cleared on sign-out and on disable.
-    private var lastSyncedPushFingerprint: String? = null
+    // Per-account (platform, token, server-pubkey, relay-hint) fingerprint
+    // of the most recent successful `upsertPushRegistration`. Skip redundant
+    // FFI calls when nothing has changed across foreground/token-rotation/
+    // account-bind events. Keyed per account so multi-account devices keep a
+    // working registration on every enabled account, not just the active
+    // one. An entry is removed when the corresponding account disables
+    // native push, signs out, or hits a sync failure that may indicate the
+    // registration is stale.
+    private val perAccountSyncedFingerprints = mutableMapOf<String, String>()
 
     var phase by mutableStateOf<AppPhase>(AppPhase.Bootstrapping)
         private set
@@ -550,9 +554,6 @@ class DarkMatterAppState(
         activeAccountRef = label
         preferences.edit().putString(ACTIVE_ACCOUNT_KEY, label).apply()
         accounts.firstOrNull { it.label == label }?.accountIdHex?.let { warmProfile(it) }
-        // Account switch invalidates the cached push fingerprint — the new
-        // active account may have a different push registration state.
-        lastSyncedPushFingerprint = null
         notificationScope.launch {
             configurePrivacyRuntime()
             refreshLocalNotificationSettings()
@@ -599,6 +600,7 @@ class DarkMatterAppState(
         // (setActiveAccount) is *not* a sign-out — it keeps the L2 disk cache
         // so re-entry into the same account doesn't re-download every image.
         clearAllMediaCaches()
+        val signedOutRef = activeAccountRef
         val outcome = signOutOutcome(accounts.map { it.label }, activeAccountRef)
         val next = outcome.nextActiveRef
         activeAccountRef = next
@@ -614,6 +616,20 @@ class DarkMatterAppState(
             accounts.firstOrNull { it.label == label }?.accountIdHex?.let { warmProfile(it) }
         }
         notificationScope.launch {
+            // Tell the runtime to forget the signed-out account's push
+            // registration before refreshing visible settings. Otherwise the
+            // MIP-05 server keeps wrapping wake messages for an account that
+            // can no longer decrypt them on this device. Best-effort: a
+            // failure here doesn't block sign-out, the next foreground sync
+            // will retry.
+            if (signedOutRef != null) {
+                runCatching { marmotIo { setNativePushEnabled(signedOutRef, false) } }
+                    .onFailure {
+                        rethrowIfCancellation(it)
+                        appStateDebug { "setNativePushEnabled(false) failed on sign-out: ${it.readableMessage()}" }
+                    }
+                clearPushRegistrationForAccount(signedOutRef)
+            }
             refreshLocalNotificationSettings()
         }
     }
@@ -910,25 +926,35 @@ class DarkMatterAppState(
     }
 
     /**
-     * If native push is configured AND the active account has it enabled,
-     * push the current FCM token to the runtime so the MIP-05 server can
-     * deliver wake messages. Idempotent — repeated calls within the same
-     * (token, account, server, relay) tuple are no-ops.
+     * Push the current FCM token to the runtime for every signed-in account
+     * that has `nativePushEnabled = true`. Multi-account devices keep a
+     * working registration on every account, not just the active one — a
+     * push for account A still wakes the device when account B is in
+     * focus. Idempotent per account: a successful sync caches the
+     * (token, server, relay) fingerprint and skips on the next call until
+     * something changes.
      */
     suspend fun syncNativePushRegistrationIfEnabled() {
         if (!isNativePushAvailable()) return
-        val account = activeAccountRef ?: return
         val config = PushServerConfig.current() ?: return
-        val settings =
-            localNotificationSettings
-                ?: runCatching { marmotIo { notificationSettings(account) } }
-                    .also { result -> result.getOrNull()?.let { localNotificationSettings = it } }
-                    .getOrNull()
-                ?: return
-        if (!settings.nativePushEnabled) return
+        val accountRefs = accounts.map { it.label }
+        if (accountRefs.isEmpty()) return
         val token = pushTokenStore.lastToken() ?: fetchFcmTokenOrNull() ?: return
-        val fingerprint = "$account|FCM|$token|${config.serverPubkeyHex}|${config.relayHint.orEmpty()}"
-        if (fingerprint == lastSyncedPushFingerprint) return
+        for (account in accountRefs) {
+            syncPushForAccount(account, config, token)
+        }
+    }
+
+    private suspend fun syncPushForAccount(
+        account: String,
+        config: PushServerConfig,
+        token: String,
+    ) {
+        val settings = runCatching { marmotIo { notificationSettings(account) } }.getOrNull() ?: return
+        if (account == activeAccountRef) localNotificationSettings = settings
+        if (!settings.nativePushEnabled) return
+        val fingerprint = "FCM|$token|${config.serverPubkeyHex}|${config.relayHint.orEmpty()}"
+        if (perAccountSyncedFingerprints[account] == fingerprint) return
         runCatching {
             marmotIo {
                 upsertPushRegistration(
@@ -939,10 +965,13 @@ class DarkMatterAppState(
                     relayHint = config.relayHint,
                 )
             }
-            lastSyncedPushFingerprint = fingerprint
+            perAccountSyncedFingerprints[account] = fingerprint
             appStateDebug { "push registration synced account=${account.take(8)}" }
         }.onFailure {
             rethrowIfCancellation(it)
+            // Drop the fingerprint on failure so the next sync retries
+            // rather than assuming the registration is fresh.
+            perAccountSyncedFingerprints.remove(account)
             appStateDebug { "push registration sync failed: ${it.readableMessage()}" }
         }
     }
@@ -966,12 +995,7 @@ class DarkMatterAppState(
             if (enabled) {
                 syncNativePushRegistrationIfEnabled()
             } else {
-                lastSyncedPushFingerprint = null
-                runCatching { marmotIo { clearPushRegistration(account) } }
-                    .onFailure {
-                        rethrowIfCancellation(it)
-                        appStateDebug { "clearPushRegistration failed: ${it.readableMessage()}" }
-                    }
+                clearPushRegistrationForAccount(account)
             }
             true
         }.getOrElse {
@@ -979,6 +1003,21 @@ class DarkMatterAppState(
             present(R.string.toast_couldnt_update_notifications, AppText.Plain(it.readableMessage()))
             false
         }
+    }
+
+    /**
+     * Best-effort runtime-side clear of an account's push registration plus
+     * the cached fingerprint. Safe to call whether or not the account is
+     * currently registered server-side — a no-op on the server side just
+     * returns success.
+     */
+    private suspend fun clearPushRegistrationForAccount(account: String) {
+        perAccountSyncedFingerprints.remove(account)
+        runCatching { marmotIo { clearPushRegistration(account) } }
+            .onFailure {
+                rethrowIfCancellation(it)
+                appStateDebug { "clearPushRegistration failed: ${it.readableMessage()}" }
+            }
     }
 
     private suspend fun fetchFcmTokenOrNull(): String? {
