@@ -476,6 +476,13 @@ class ChatsController(
     // `bind()` clears the set alongside the cache to reset both at once.
     private val inFlightMemberFetches = mutableSetOf<String>()
 
+    // Monotonically increments on every `bind()`. Captured by each
+    // [schedulePendingMemberFetches] job; once a later bind has happened
+    // (account switch, sign-out, or re-bind), the captured epoch no
+    // longer matches and the job drops its result instead of poisoning
+    // the new account's cache with stale members.
+    private var bindEpoch: Long = 0L
+
     suspend fun bind(accountRef: String?) {
         chatsDebug { "bind account=${accountRef?.take(8)}" }
         this.accountRef = accountRef
@@ -484,6 +491,7 @@ class ChatsController(
         groupRecordsById = emptyMap()
         memberCacheByGroup = emptyMap()
         inFlightMemberFetches.clear()
+        bindEpoch += 1L
         recompute()
         error = null
 
@@ -776,6 +784,7 @@ class ChatsController(
      */
     private fun schedulePendingMemberFetches() {
         val account = accountRef ?: return
+        val epoch = bindEpoch
         val pending =
             chatRows
                 .asSequence()
@@ -792,6 +801,7 @@ class ChatsController(
             appState.launchMutation {
                 try {
                     val members = appState.marmotIo { groupMembers(account, groupIdHex) }
+                    if (bindEpoch != epoch) return@launchMutation
                     members
                         .map { it.memberIdHex }
                         .filter { it.isNotBlank() }
@@ -805,7 +815,11 @@ class ChatsController(
                     // bind retries; the row falls back to the short
                     // hex projector branch until then.
                 } finally {
-                    inFlightMemberFetches.remove(groupIdHex)
+                    // Only mutate the in-flight set if this job still
+                    // belongs to the current bind. A later bind() has
+                    // already cleared the set; removing again would be
+                    // a no-op but obscures the invariant.
+                    if (bindEpoch == epoch) inFlightMemberFetches.remove(groupIdHex)
                 }
             }
         }
