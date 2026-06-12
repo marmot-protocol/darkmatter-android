@@ -195,14 +195,20 @@ object GroupSystemEvents {
                         actorName != null -> String.format(copy.renamedFormat, actorName, name)
                         else -> String.format(copy.renamedPassiveFormat, name)
                     }
-                } ?: event.text.ifBlank { copy.fallback }
+                } ?: copy.fallback
             TypeGroupAvatarChanged ->
                 when {
                     actorIsSelf -> copy.youAvatarChanged
                     actorName != null -> String.format(copy.avatarChangedFormat, actorName)
                     else -> copy.avatarChangedPassive
                 }
-            else -> event.text.ifBlank { copy.fallback }
+            // Never render the embedded `text` for unknown (or malformed)
+            // payloads: the system row visually presents content as a
+            // state-derived fact, and `text` is peer-authored free text — an
+            // unknown system_type carrying "X removed you" would read as a
+            // spoofed authoritative event. Unknown types get the neutral
+            // fallback until a known rendering exists for them.
+            else -> copy.fallback
         }
     }
 

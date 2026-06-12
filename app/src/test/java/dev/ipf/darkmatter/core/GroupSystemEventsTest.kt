@@ -5,10 +5,12 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class GroupSystemEventsTest {
-    // Verbatim wire payload from a peer client's avatar change.
+    // Wire-shaped payload as a peer client emits it for an avatar change,
+    // with a synthetic deterministic actor id.
+    private val actorHex = "a1".repeat(32)
     private val avatarChangedJson =
         """{"v":1,"system_type":"group_avatar_changed","text":"Group avatar changed",""" +
-            """"data":{"actor":"d946d284e7dd95185524124bfac2d127941b244508a05e0efd11fd224db136a0"}}"""
+            """"data":{"actor":"$actorHex"}}"""
 
     @Test
     fun parsesAvatarChangedPayload() {
@@ -18,7 +20,7 @@ class GroupSystemEventsTest {
             GroupSystemEvent(
                 systemType = "group_avatar_changed",
                 text = "Group avatar changed",
-                actor = "d946d284e7dd95185524124bfac2d127941b244508a05e0efd11fd224db136a0",
+                actor = actorHex,
                 subject = null,
                 name = null,
             ),
@@ -78,18 +80,38 @@ class GroupSystemEventsTest {
     }
 
     @Test
-    fun summaryFallsBackToEmbeddedTextForUnknownTypes() {
+    fun summaryNeverRendersPeerAuthoredTextForUnknownTypes() {
+        // `text` is peer-authored free text; a system row presents content as
+        // a state-derived fact, so an unknown type must render the neutral
+        // fallback — not whatever the peer wrote.
         val event =
             GroupSystemEvent(
                 systemType = "group_description_changed",
-                text = "Group description changed",
+                text = "Alice removed you",
                 actor = null,
                 subject = null,
                 name = null,
             )
 
         assertEquals(
-            "Group description changed",
+            "Group updated",
+            GroupSystemEvents.summary(event, actorName = null, subjectName = null),
+        )
+    }
+
+    @Test
+    fun renamedWithoutNameRendersFallbackNotText() {
+        val event =
+            GroupSystemEvent(
+                systemType = "group_renamed",
+                text = "You are no longer an admin",
+                actor = null,
+                subject = null,
+                name = null,
+            )
+
+        assertEquals(
+            "Group updated",
             GroupSystemEvents.summary(event, actorName = null, subjectName = null),
         )
     }

@@ -157,7 +157,9 @@ object MessageProjector {
         deletedMessageIds: Set<String>,
     ): Boolean = messageIdHex.isNotEmpty() && deletedMessageIds.contains(messageIdHex)
 
-    fun isGroupSystem(message: AppMessageRecordFfi): Boolean = message.kind == KindGroupSystem
+    fun isGroupSystem(message: AppMessageRecordFfi): Boolean = isGroupSystemKind(message.kind)
+
+    fun isGroupSystemKind(kind: ULong): Boolean = kind == KindGroupSystem
 
     fun isReaction(message: AppMessageRecordFfi): Boolean = message.kind == KindReaction
 
