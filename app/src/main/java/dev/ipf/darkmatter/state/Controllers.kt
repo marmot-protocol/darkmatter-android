@@ -3014,14 +3014,27 @@ class ConversationController(
                 // against the new text. Empty falls back to plain rendering.
                 contentTokens = tokens ?: MarkdownDocumentFfi(blocks = emptyList()),
             )
-        optimisticMessages[id] =
+        val updated =
             TimelineMessage(
                 id,
                 record,
                 status,
                 timelineOrder = existingItem?.timelineOrder ?: nextOptimisticTimelineOrder(),
             )
-        publishTimelineFromIndexes()
+        optimisticMessages[id] = updated
+        // A streaming chunk only mutates this one item's text, and none of its
+        // sort keys (recordedAt, timelineOrder, id) change across chunks — so
+        // its timeline slot is fixed. Replace the slot in place instead of
+        // rebuilding + re-sorting the whole timeline per chunk on the Main
+        // thread. Finished/Failed (and the first chunk, which has no slot yet)
+        // take the full publish so status-driven reconciliation stays on the
+        // canonical path. See #145.
+        val slot = if (status == MessageStatus.Streaming) timeline.indexOfFirst { it.id == id } else -1
+        if (slot >= 0) {
+            timeline = timeline.toMutableList().apply { set(slot, updated) }
+        } else {
+            publishTimelineFromIndexes()
+        }
     }
 
     // The authoritative sender for a stream comes from the projected timeline
