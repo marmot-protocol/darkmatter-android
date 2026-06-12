@@ -3623,7 +3623,13 @@ private fun ConversationScreen(
         mutableStateOf(emptyList<String>())
     }
     LaunchedEffect(context) {
-        recentReactionEmojis = withContext(Dispatchers.IO) { RecentEmojiPreferences.load(context) }
+        val loaded = withContext(Dispatchers.IO) { RecentEmojiPreferences.load(context) }
+        // A pick made before this load lands has already merged the disk list
+        // (recordPicked re-reads prefs), so a non-empty state is strictly newer
+        // — don't clobber it with the stale read.
+        if (recentReactionEmojis.isEmpty()) {
+            recentReactionEmojis = loaded
+        }
     }
     // Selected-but-not-yet-sent image attachments: when non-empty the preview
     // / caption sheet is shown. Multi-pick goes through
@@ -5595,12 +5601,20 @@ private fun MessageBubble(
                                     ),
                             )
                         }
-                        // Projection cached per item (a projection change replaces
-                        // the item instance, invalidating the key); the display
-                        // name resolves outside the cache so a late profile load
-                        // still updates it. See #131.
+                        // Projected items: the preview is a pure function of
+                        // item.projected, so caching keyed on the item is always
+                        // correct (a reprojection replaces the instance). The
+                        // optimistic fallback instead resolves the target from
+                        // controller.messageById, which can gain the target after
+                        // this bubble composes — resolve those live. Display names
+                        // resolve outside the cache either way so a late profile
+                        // load still updates them. See #131.
                         val replyPreview =
-                            remember(item, messageTextCopy) {
+                            if (item.projected != null) {
+                                remember(item, messageTextCopy) {
+                                    controller.replyPreview(item, messageTextCopy)
+                                }
+                            } else {
                                 controller.replyPreview(item, messageTextCopy)
                             }
                         replyPreview?.let { (replySender, body) ->
