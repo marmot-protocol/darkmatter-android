@@ -95,6 +95,24 @@ class GroupSystemEventsTest {
     }
 
     @Test
+    fun actorAttributionFallsBackToTheEventSigner() {
+        val unattributed =
+            GroupSystemEvent(
+                systemType = "member_added",
+                text = "",
+                actor = null,
+                subject = "ab12cd",
+                name = null,
+            )
+
+        // Signer fills in for a missing data.actor; an explicit actor wins;
+        // passive voice only when neither names the committer.
+        assertEquals("d946d2", GroupSystemEvents.actorHex(unattributed, "d946d2"))
+        assertEquals("ef34", GroupSystemEvents.actorHex(unattributed.copy(actor = "ef34"), "d946d2"))
+        assertNull(GroupSystemEvents.actorHex(unattributed, ""))
+    }
+
+    @Test
     fun previewTextIsNameFreePassiveForm() {
         assertEquals("The group avatar changed", GroupSystemEvents.previewText(avatarChangedJson))
         assertEquals("Group updated", GroupSystemEvents.previewText("not json"))

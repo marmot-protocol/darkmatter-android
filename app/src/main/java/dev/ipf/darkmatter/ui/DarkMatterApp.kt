@@ -3538,7 +3538,7 @@ private fun GroupSystemRow(
         if (event != null) {
             GroupSystemEvents.summary(
                 event = event,
-                actorName = event.actor?.let { appState.displayName(it) },
+                actorName = GroupSystemEvents.actorHex(event, record.sender)?.let { appState.displayName(it) },
                 subjectName = event.subject?.let { appState.displayName(it) },
                 copy = copy,
             )

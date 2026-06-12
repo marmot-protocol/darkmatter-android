@@ -89,6 +89,18 @@ object GroupSystemEvents {
         }.getOrNull()
 
     /**
+     * The hex pubkey to attribute the change to: the payload's `actor` when
+     * named, otherwise the event signer — a peer that omits `data.actor` but
+     * signs as the committing member still names the actor via the envelope.
+     * Null (passive voice) only when neither is present, e.g. a synthesized
+     * row for a convergence reorg.
+     */
+    fun actorHex(
+        event: GroupSystemEvent,
+        senderHex: String,
+    ): String? = event.actor ?: senderHex.takeIf { it.isNotBlank() }
+
+    /**
      * One-line summary rendered from `system_type` + `data` per the spec —
      * the embedded `text` is a last-resort fallback only, since synthesized
      * rows often carry it empty and names should re-resolve as profiles load.
