@@ -2642,7 +2642,10 @@ class ConversationController(
             ?: 1uL
 
     private fun recomputeReactions() {
-        val mine = appState.activeAccount?.accountIdHex
+        // Lowercased to match baseReactionSenders(): hex account-id casing can
+        // drift between the active account and reaction senders, and a mismatch
+        // would render your own reaction as not-mine. See #143.
+        val mine = appState.activeAccount?.accountIdHex?.lowercase()
         val sendersByTarget = baseReactionSenders()
         if (mine != null) {
             optimisticReactionChanges.values.forEach { change ->
@@ -2692,10 +2695,12 @@ class ConversationController(
     }
 
     private fun reactionTalliesFor(targetMessageId: String): List<ReactionTally> {
-        val mine = appState.activeAccount?.accountIdHex
+        // Lowercased sender sets for the same casing-drift reason as
+        // recomputeReactions(). See #143.
+        val mine = appState.activeAccount?.accountIdHex?.lowercase()
         val sendersByEmoji = linkedMapOf<String, MutableSet<String>>()
         timelineRecords[targetMessageId]?.reactions?.byEmoji?.forEach { summary ->
-            sendersByEmoji.getOrPut(summary.emoji) { linkedSetOf() }.addAll(summary.senders)
+            sendersByEmoji.getOrPut(summary.emoji) { linkedSetOf() }.addAll(summary.senders.map { it.lowercase() })
         }
         if (mine != null) {
             optimisticReactionChanges.values
@@ -2772,7 +2777,9 @@ class ConversationController(
         timelineRecords.values.forEach { record ->
             val byEmoji = result.getOrPut(record.messageIdHex) { linkedMapOf() }
             record.reactions.byEmoji.forEach { summary ->
-                byEmoji.getOrPut(summary.emoji) { linkedSetOf() }.addAll(summary.senders)
+                // Lowercased so the optimistic add/remove and the `mine` check in
+                // recomputeReactions() match regardless of casing drift. See #143.
+                byEmoji.getOrPut(summary.emoji) { linkedSetOf() }.addAll(summary.senders.map { it.lowercase() })
             }
         }
         return result
