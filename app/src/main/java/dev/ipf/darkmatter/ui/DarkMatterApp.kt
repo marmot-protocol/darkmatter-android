@@ -3616,8 +3616,14 @@ private fun ConversationScreen(
     val context = LocalContext.current
     val groupTitleCopy = rememberGroupTitleCopy()
     val messageTextCopy = rememberMessageTextCopy()
+    // Seeded empty and populated off the Main thread: the first access to a
+    // SharedPreferences file blocks on disk, and doing that inside composition
+    // stalls the conversation screen's first frame. See #147.
     var recentReactionEmojis by remember(context) {
-        mutableStateOf(RecentEmojiPreferences.load(context))
+        mutableStateOf(emptyList<String>())
+    }
+    LaunchedEffect(context) {
+        recentReactionEmojis = withContext(Dispatchers.IO) { RecentEmojiPreferences.load(context) }
     }
     // Selected-but-not-yet-sent image attachments: when non-empty the preview
     // / caption sheet is shown. Multi-pick goes through
