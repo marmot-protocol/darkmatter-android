@@ -8774,6 +8774,9 @@ private fun DiagnosticsScreen(
     var health by remember { mutableStateOf<RelayHealthFfi?>(null) }
     var entries by remember { mutableStateOf<List<DiagnosticLogEntry>>(emptyList()) }
     var streaming by remember { mutableStateOf(false) }
+    // Gates Send-to-self so rapid taps don't fan out into N concurrent
+    // create-group + publish + archive triples against the relays.
+    var sendingPing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val sentPingFormat = stringResource(R.string.diagnostic_sent_ping_to_self)
     val sendToSelfFailedFormat = stringResource(R.string.diagnostic_send_to_self_failed)
@@ -8827,29 +8830,38 @@ private fun DiagnosticsScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(
                         onClick = {
+                            sendingPing = true
                             scope.launch {
-                                val account = appState.activeAccountRef ?: return@launch
-                                runCatching {
-                                    val groupId =
-                                        appState.marmotIo {
-                                            createGroup(
-                                                account,
-                                                "diagnostic-${System.currentTimeMillis() / 1000L}",
-                                                emptyList(),
-                                                null,
-                                            )
-                                        }
-                                    appState.marmotIo { sendText(account, groupId, "ping at ${System.currentTimeMillis() / 1000L}") }
-                                    // Archive the throwaway diagnostic group so it doesn't
-                                    // accumulate as an orphan in the chat list on every click. See #70.
-                                    appState.marmotIo { setGroupArchived(account, groupId, true) }
-                                    appendLog(String.format(sentPingFormat, IdentityFormatter.short(groupId)))
-                                }.onFailure {
-                                    appendLog(String.format(sendToSelfFailedFormat, it.message ?: it.javaClass.simpleName))
+                                val account = appState.activeAccountRef
+                                if (account == null) {
+                                    sendingPing = false
+                                    return@launch
+                                }
+                                try {
+                                    runCatching {
+                                        val groupId =
+                                            appState.marmotIo {
+                                                createGroup(
+                                                    account,
+                                                    "diagnostic-${System.currentTimeMillis() / 1000L}",
+                                                    emptyList(),
+                                                    null,
+                                                )
+                                            }
+                                        appState.marmotIo { sendText(account, groupId, "ping at ${System.currentTimeMillis() / 1000L}") }
+                                        // Archive the throwaway diagnostic group so it doesn't
+                                        // accumulate as an orphan in the chat list on every click. See #70.
+                                        appState.marmotIo { setGroupArchived(account, groupId, true) }
+                                        appendLog(String.format(sentPingFormat, IdentityFormatter.short(groupId)))
+                                    }.onFailure {
+                                        appendLog(String.format(sendToSelfFailedFormat, it.message ?: it.javaClass.simpleName))
+                                    }
+                                } finally {
+                                    sendingPing = false
                                 }
                             }
                         },
-                        enabled = appState.activeAccountRef != null,
+                        enabled = !sendingPing && appState.activeAccountRef != null,
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
