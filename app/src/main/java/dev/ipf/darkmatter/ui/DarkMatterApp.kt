@@ -2087,6 +2087,12 @@ private const val MEDIA_ALBUM_MAX_TOTAL_BYTES = ConversationController.MEDIA_RET
  *  so async decode never reflows the list (would break the open-time anchor). */
 private val MediaBubbleHeight = 240.dp
 
+/** Hard cap on the height a `dim`-shaped image bubble can claim, so a tall
+ *  portrait can't dominate the chat viewport. Width fills the bubble; this
+ *  bounds the height so the aspect-ratio sizing degrades to a cropped
+ *  preview at the extremes. */
+private val MediaBubbleMaxHeight = 340.dp
+
 /**
  * Parse the imeta `dim` field ("WxH") into a width/height aspect ratio.
  * Returns null when [dim] is null, blank, malformed, or non-positive on
@@ -2099,11 +2105,11 @@ private fun aspectRatioFromDim(dim: String?): Float? {
     val w = parts[0].trim().toIntOrNull() ?: return null
     val h = parts[1].trim().toIntOrNull() ?: return null
     if (w <= 0 || h <= 0) return null
-    // Clamp so a very tall portrait (e.g. 100×3000) doesn't take the full
-    // viewport, and a very wide panorama (3000×100) doesn't squeeze the
-    // bubble down to a sliver. 0.5..2.5 keeps the bubble between a
-    // wide-landscape strip and a tall-portrait card.
-    return (w.toFloat() / h.toFloat()).coerceIn(0.5f, 2.5f)
+    // Clamp wide panoramas so the bubble doesn't squeeze to a sliver.
+    // Tall portraits are bounded by [MediaBubbleMaxHeight] at the layout
+    // site instead — keeping the aspect ratio uncramped lets the placeholder
+    // still convey "this is a tall image" before the bytes arrive.
+    return (w.toFloat() / h.toFloat()).coerceIn(0.4f, 2.5f)
 }
 
 /** Saves a nullable Uri across process death (camera capture round-trip). */
@@ -2196,15 +2202,18 @@ private fun MediaImageBubble(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),
         // Reserve aspect-ratio space from the imeta `dim` when present, so
-        // the bubble has its final shape *before* the bytes decode and the
+        // the bubble has its final shape before the bytes decode and the
         // timeline doesn't reflow after the open-time scroll-to-bottom.
+        // Tall portraits are bounded by [MediaBubbleMaxHeight] so a 9:16
+        // photo doesn't dominate the viewport — height capped, width given
+        // up so the bubble centers as a portrait card rather than a slab.
         // Older messages (and any sender that doesn't ship `dim`) fall back
         // to the fixed bubble height.
         modifier =
             run {
                 val ratio = aspectRatioFromDim(reference.dim)
                 if (ratio != null) {
-                    Modifier.fillMaxWidth().aspectRatio(ratio)
+                    Modifier.fillMaxWidth().aspectRatio(ratio).heightIn(max = MediaBubbleMaxHeight)
                 } else {
                     Modifier.fillMaxWidth().height(MediaBubbleHeight)
                 }
@@ -2588,7 +2597,25 @@ private fun MediaFileBubble(
                     scope.launch {
                         val outcome =
                             runCatching {
-                                val data = controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
+                                // For own sends, the retained-uploads LRU still
+                                // holds the source plaintext during the upload
+                                // window. Prefer those bytes — the FFI download
+                                // path is mid-flight (the blob may not have
+                                // fully propagated through the Blossom server
+                                // yet) and would otherwise return invalid bytes
+                                // that the system reader rejects.
+                                val retained =
+                                    if (mine) {
+                                        controller
+                                            .pendingAttachmentsList(messageIdHex)
+                                            .getOrNull(attachmentIndex)
+                                            ?.plaintextBytes
+                                    } else {
+                                        null
+                                    }
+                                val data =
+                                    retained
+                                        ?: controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
                                 cached = true
                                 openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
                             }.getOrDefault(OpenAttachmentResult.Error)
@@ -4250,31 +4277,35 @@ private fun ConversationScreen(
                 appState.present(R.string.media_file_too_large)
             }
             if (merged.isEmpty()) return@launchMutation
-            // Image attachments ship as one album so the masonry layout has
-            // multiple tiles to lay out; non-image attachments ship as their
-            // own kind-9 messages, one per file, because each carries
-            // distinct filename/MIME/size metadata that doesn't benefit
-            // from grid composition. The caption rides with the images
-            // when present; otherwise it attaches to the first file send.
+            // Two-phase ship: SEED every send synchronously (so all the
+            // optimistic bubbles appear in the same recomposition pass and
+            // the user sees the queue light up at once), THEN run the
+            // FFI upload+publish for each in pick order (so the post-
+            // confirm timeline keeps the order the user picked).
             //
-            // Each send is launched on its own mutation coroutine so all
-            // optimistic bubbles appear in the same recomposition pass —
-            // serializing them on this scope made the user watch files
-            // upload one at a time. The per-file order is preserved by
-            // dispatch order; the optimistic-timeline-order counter is
-            // monotonic so the resulting timeline keeps pick order even
-            // when uploads finish out-of-order.
+            // Image attachments ride one kind-9 album (the masonry layout
+            // wants multiple tiles in one message). Non-image attachments
+            // ship as their own kind-9 each, because each carries distinct
+            // filename/MIME metadata that doesn't benefit from grid
+            // composition. Caption sticks with images when present;
+            // otherwise it attaches to the first file send.
             val docs = docOutcome.attachments
+            val seeded = mutableListOf<ConversationController.QueuedAttachmentSend>()
             if (acceptedImages.isNotEmpty()) {
-                appState.launchMutation { controller.sendAttachments(acceptedImages, trimmedCaption) }
+                controller.queueAttachments(acceptedImages, trimmedCaption)?.let(seeded::add)
                 for (doc in docs) {
-                    appState.launchMutation { controller.sendAttachments(listOf(doc), null) }
+                    controller.queueAttachments(listOf(doc), null)?.let(seeded::add)
                 }
             } else {
                 docs.forEachIndexed { index, doc ->
                     val perFileCaption = if (index == 0) trimmedCaption else null
-                    appState.launchMutation { controller.sendAttachments(listOf(doc), perFileCaption) }
+                    controller.queueAttachments(listOf(doc), perFileCaption)?.let(seeded::add)
                 }
+            }
+            // Run uploads sequentially so the kind-9 publishes go out in
+            // pick order. The optimistic bubbles are already on screen.
+            for (slot in seeded) {
+                controller.uploadQueued(slot)
             }
         }
     }

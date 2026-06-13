@@ -1419,26 +1419,47 @@ class ConversationController(
         attachments: List<PendingAttachment>,
         caption: String?,
     ) {
-        val account = conversationAccountRef ?: return
-        if (!canSendMessages || attachments.isEmpty()) return
-        if (attachments.any { it.plaintextBytes.isEmpty() }) return
-        // Reject albums whose summed plaintext exceeds the retained-uploads
-        // LRU cap BEFORE inserting an optimistic bubble. The cache's
-        // evict-until-under-cap pass would otherwise drop the just-inserted
-        // entry on its own oversize, and the user would see the bubble
-        // immediately flip to "reattach to retry" with no retainable bytes.
+        val seeded = queueAttachments(attachments, caption) ?: return
+        uploadQueued(seeded)
+    }
+
+    /**
+     * Slot-allocated for a queued attachment send: holds the temp message id,
+     * the optimistic record, and the timeline-order key so a caller that
+     * batched several queues can drive the uploads in pick-order without
+     * losing the synchronously-seeded bubbles.
+     */
+    data class QueuedAttachmentSend(
+        val account: String,
+        val key: String,
+        val tempId: String,
+        val optimisticOrder: ULong,
+        val optimistic: AppMessageRecordFfi,
+    )
+
+    /**
+     * Synchronous half of a media send: validates the album, allocates a
+     * temp id, retains the bytes for retry, inserts the optimistic bubble,
+     * and republishes the timeline so the bubble appears immediately.
+     * Returns null when the send can't proceed (no account, can't send,
+     * empty, or oversize). Caller pairs each non-null result with a
+     * matching [uploadQueued] call to drive the FFI work.
+     */
+    suspend fun queueAttachments(
+        attachments: List<PendingAttachment>,
+        caption: String?,
+    ): QueuedAttachmentSend? {
+        val account = conversationAccountRef ?: return null
+        if (!canSendMessages || attachments.isEmpty()) return null
+        if (attachments.any { it.plaintextBytes.isEmpty() }) return null
         if (albumExceedsRetainedCap(attachments)) {
             appState.present(R.string.media_album_too_large)
-            return
+            return null
         }
-
         val tempId = UUID.randomUUID().toString()
         val key = "msg:$tempId"
         val now = nowSeconds()
         val trimmedCaption = caption?.trim()?.takeIf { it.isNotBlank() }
-        // Body: the caption if present, otherwise a legible placeholder while
-        // the upload runs. The real message arriving after publish carries the
-        // imeta tags and supersedes this optimistic one.
         val placeholderName =
             if (attachments.size == 1) {
                 attachments.first().fileName
@@ -1453,15 +1474,8 @@ class ConversationController(
                 groupIdHex = group.groupIdHex,
                 sender = appState.activeAccount?.accountIdHex ?: "",
                 plaintext = body,
-                // Markdown in a media caption renders styled from the first
-                // optimistic frame. The 📎 placeholder parses to a plain
-                // paragraph, and the bubble suppresses body text while the
-                // upload is pending anyway, so parsing `body` is uniform.
                 contentTokens = appState.parseMarkdownOrEmpty(body),
                 kind = 9uL,
-                // One `_media_pending` tag per attachment. retryFailedSend
-                // detects ANY of these as a media-retry trigger and re-runs
-                // the whole album through performMediaUpload.
                 tags =
                     attachments.map {
                         MessageTagFfi(listOf("_media_pending", it.fileName, it.mediaType))
@@ -1470,9 +1484,6 @@ class ConversationController(
                 receivedAt = now,
             )
         val optimisticOrder = nextOptimisticTimelineOrder()
-        // Retain the compressed bytes for the whole album so a failed upload
-        // can be retried in place. uploadedReferences caches the Blossom
-        // results so a publish-only failure doesn't re-upload every blob.
         retainedMediaUploads.put(key, RetainedMediaUpload(attachments, trimmedCaption))
         optimisticMessages[key] =
             TimelineMessage(
@@ -1483,7 +1494,12 @@ class ConversationController(
             )
         messageById[tempId] = optimistic
         publishTimelineFromIndexes()
-        performMediaUpload(account, key, tempId, optimisticOrder, optimistic)
+        return QueuedAttachmentSend(account, key, tempId, optimisticOrder, optimistic)
+    }
+
+    /** Drive the upload + publish for a previously [queueAttachments]-seeded slot. */
+    suspend fun uploadQueued(seeded: QueuedAttachmentSend) {
+        performMediaUpload(seeded.account, seeded.key, seeded.tempId, seeded.optimisticOrder, seeded.optimistic)
     }
 
     /**
