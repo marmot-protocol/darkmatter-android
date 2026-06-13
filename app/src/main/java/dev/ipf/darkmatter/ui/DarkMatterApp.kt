@@ -3378,10 +3378,10 @@ private fun rememberLocalPreviewBitmap(uri: android.net.Uri): ImageBitmap? {
         bitmap =
             withContext(Dispatchers.Default) {
                 runCatching {
-                    val bytes = MediaPipeline.readDownscaledJpeg(context.contentResolver, uri)
-                    bytes?.let {
+                    val jpeg = MediaPipeline.readDownscaledJpeg(context.contentResolver, uri)
+                    jpeg?.bytes?.let { bytes ->
                         android.graphics.BitmapFactory
-                            .decodeByteArray(it, 0, it.size)
+                            .decodeByteArray(bytes, 0, bytes.size)
                             ?.asImageBitmap()
                     }
                 }.getOrNull()
@@ -3835,9 +3835,10 @@ private fun ConversationScreen(
                         val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
                         val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
                         PendingAttachment(
-                            plaintextBytes = jpeg,
+                            plaintextBytes = jpeg.bytes,
                             mediaType = MediaPipeline.RECOMPRESSED_MIME,
                             fileName = fileName,
+                            dim = "${jpeg.width}x${jpeg.height}",
                         )
                     }
                 }
@@ -3925,11 +3926,18 @@ private fun ConversationScreen(
                                 .takeIf { it.isNotBlank() }
                                 ?: "application/octet-stream"
                         val name = queryDisplayName(context.contentResolver, uri) ?: "file"
+                        val dim =
+                            if (resolvedMime.startsWith("image/", ignoreCase = true)) {
+                                MediaPipeline.imageDimOrNull(bytes)
+                            } else {
+                                null
+                            }
                         accepted +=
                             PendingAttachment(
                                 plaintextBytes = bytes,
                                 mediaType = resolvedMime,
                                 fileName = name,
+                                dim = dim,
                             )
                     }
                     ReadOutcome(accepted, rejected, albumOverflowed)

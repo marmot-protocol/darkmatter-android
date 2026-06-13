@@ -153,6 +153,17 @@ object MediaPipeline {
     }
 
     /**
+     * The bytes + decoded dimensions of a downscaled JPEG. Width/height are
+     * the *encoded* dimensions, not the source — receivers use them to
+     * reserve aspect-ratio space before the decode completes.
+     */
+    data class DownscaledJpeg(
+        val bytes: ByteArray,
+        val width: Int,
+        val height: Int,
+    )
+
+    /**
      * Decode the image at [uri], downscale so the longer edge ≤ [maxEdgePx],
      * and re-encode as JPEG at [quality]. Returns null when the source can't
      * be decoded (corrupt file, unsupported format, unreadable Uri).
@@ -162,7 +173,7 @@ object MediaPipeline {
         uri: Uri,
         maxEdgePx: Int = DEFAULT_MAX_EDGE_PX,
         quality: Int = DEFAULT_JPEG_QUALITY,
-    ): ByteArray? {
+    ): DownscaledJpeg? {
         // Two-pass decode: first read just the bounds so we can decide an
         // inSampleSize, then decode at that sampled size. Avoids a 50MB
         // bitmap in heap for a 12MP source. Any I/O or decode failure below
@@ -203,10 +214,12 @@ object MediaPipeline {
                 }
 
             try {
+                val width = scaled.width
+                val height = scaled.height
                 ByteArrayOutputStream().use { out ->
                     // compress() returns false on failure — don't ship partial bytes.
                     if (scaled.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)) {
-                        out.toByteArray()
+                        DownscaledJpeg(out.toByteArray(), width, height)
                     } else {
                         null
                     }
@@ -219,6 +232,24 @@ object MediaPipeline {
         } catch (_: SecurityException) {
             null
         }
+    }
+
+    /**
+     * Decode an existing image-byte payload's bounds (no allocation) and
+     * return them as a `WxH` string suitable for the NIP-92 `imeta dim`
+     * field, or null when the bytes don't decode. Used by the document-picker
+     * path which doesn't recompress — it still wants to advertise dimensions
+     * to the receiver so the bubble lays out before the bytes finish
+     * decoding.
+     */
+    fun imageDimOrNull(bytes: ByteArray): String? {
+        if (bytes.isEmpty()) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        if (w <= 0 || h <= 0) return null
+        return "${w}x${h}"
     }
 
     /**

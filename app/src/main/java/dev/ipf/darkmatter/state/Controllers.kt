@@ -466,6 +466,8 @@ data class PendingAttachment(
     val plaintextBytes: ByteArray,
     val mediaType: String,
     val fileName: String,
+    val dim: String? = null,
+    val thumbhash: String? = null,
 ) {
     // Manual equality so two attachments with identical bytes content count as
     // equal — the default data-class equality on ByteArray uses reference
@@ -1526,8 +1528,8 @@ class ConversationController(
                                             fileName = attachment.fileName,
                                             mediaType = attachment.mediaType,
                                             plaintext = attachment.plaintextBytes,
-                                            dim = null,
-                                            thumbhash = null,
+                                            dim = attachment.dim,
+                                            thumbhash = attachment.thumbhash,
                                         )
                                     },
                                 caption = retained.caption,
