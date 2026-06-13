@@ -3,6 +3,10 @@ package dev.ipf.darkmatter.core
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 class IdentityFormatterTest {
     @Test
@@ -44,5 +48,33 @@ class IdentityFormatterTest {
     fun initialsFallBackForBlankInput() {
         assertEquals("DM", IdentityFormatter.initials(""))
         assertEquals("DM", IdentityFormatter.initials("   "))
+    }
+
+    @Test
+    fun relativeTimeUsesInjectedCopyForUnits() {
+        val twoHoursAgo = (Instant.now().epochSecond - 7_200L).toULong()
+        val copy =
+            RelativeTimeCopy(
+                future = "FUT",
+                now = "NOW",
+                minutesFormat = "%1\$d-min",
+                hoursFormat = "%1\$d-hr",
+                daysFormat = "%1\$d-day",
+            )
+
+        assertEquals("2-hr", IdentityFormatter.relativeTime(twoHoursAgo, copy, Locale.US))
+    }
+
+    @Test
+    fun relativeTimeFallsThroughToLocalizedDateForOlderInstants() {
+        val eightDaysAgo = (Instant.now().epochSecond - (8 * 86_400L)).toULong()
+        val expected =
+            DateTimeFormatter
+                .ofLocalizedDate(FormatStyle.MEDIUM)
+                .withLocale(Locale.US)
+                .withZone(ZoneId.systemDefault())
+                .format(Instant.ofEpochSecond(eightDaysAgo.toLong()))
+
+        assertEquals(expected, IdentityFormatter.relativeTime(eightDaysAgo, RelativeTimeCopy.Default, Locale.US))
     }
 }
