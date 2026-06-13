@@ -378,6 +378,37 @@ private fun rememberConversationControllerCopy(): ConversationControllerCopy =
         streamFailedFormat = stringResource(R.string.stream_failed_format),
     )
 
+@Composable
+private fun rememberRelativeTimeCopy(): dev.ipf.darkmatter.core.RelativeTimeCopy {
+    val future = stringResource(R.string.relative_time_future)
+    val now = stringResource(R.string.relative_time_now)
+    val minutesFormat = stringResource(R.string.relative_time_minutes)
+    val hoursFormat = stringResource(R.string.relative_time_hours)
+    val daysFormat = stringResource(R.string.relative_time_days)
+    return remember(future, now, minutesFormat, hoursFormat, daysFormat) {
+        dev.ipf.darkmatter.core.RelativeTimeCopy(
+            future = future,
+            now = now,
+            minutesFormat = minutesFormat,
+            hoursFormat = hoursFormat,
+            daysFormat = daysFormat,
+        )
+    }
+}
+
+/**
+ * Composable shorthand for `IdentityFormatter.relativeTime` that reads the
+ * localized tokens + active locale from the composition. Pass the epoch
+ * seconds; the resolved string follows the user's selected language.
+ */
+@Composable
+private fun rememberedRelativeTime(epochSeconds: ULong): String =
+    IdentityFormatter.relativeTime(
+        epochSeconds,
+        rememberRelativeTimeCopy(),
+        LocalConfiguration.current.locales[0],
+    )
+
 private val AppThemeMode.labelRes: Int
     @StringRes
     get() =
@@ -1751,7 +1782,7 @@ private fun ChatRow(
         trailingContent = {
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    IdentityFormatter.relativeTime(item.latestAt ?: 0uL),
+                    rememberedRelativeTime(item.latestAt ?: 0uL),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -5817,7 +5848,7 @@ private fun MessageBubble(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                IdentityFormatter.relativeTime(record.recordedAt),
+                                rememberedRelativeTime(record.recordedAt),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = timestampColor,
                             )
@@ -6279,7 +6310,7 @@ private fun EditHistoryVersionRow(
                     )
                 }
                 Text(
-                    text = IdentityFormatter.relativeTime(row.recordedAt),
+                    text = rememberedRelativeTime(row.recordedAt),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -8880,7 +8911,7 @@ private fun DiagnosticsScreen(
                 items(entries, key = { it.id }) { entry ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            IdentityFormatter.relativeTime(entry.timestamp),
+                            rememberedRelativeTime(entry.timestamp),
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

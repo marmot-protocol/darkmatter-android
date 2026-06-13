@@ -3,6 +3,8 @@ package dev.ipf.darkmatter.core
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 object IdentityFormatter {
     fun short(
@@ -48,23 +50,56 @@ object IdentityFormatter {
         return String(Character.toChars(first)) + String(Character.toChars(second))
     }
 
-    fun relativeTime(epochSeconds: ULong): String {
+    fun relativeTime(
+        epochSeconds: ULong,
+        copy: RelativeTimeCopy = RelativeTimeCopy.Default,
+        locale: Locale = Locale.getDefault(),
+    ): String {
         if (epochSeconds == 0uL) return ""
         val instant = Instant.ofEpochSecond(epochSeconds.toLong())
         val now = Instant.now()
         val delta = now.epochSecond - instant.epochSecond
         return when {
             // Sender clock skew or a relay-provided future timestamp.
-            delta < 0 -> "future"
-            delta < 60 -> "now"
-            delta < 3_600 -> "${delta / 60}m"
-            delta < 86_400 -> "${delta / 3_600}h"
-            delta < 604_800 -> "${delta / 86_400}d"
+            delta < 0 -> copy.future
+            delta < 60 -> copy.now
+            delta < 3_600 -> String.format(locale, copy.minutesFormat, delta / 60)
+            delta < 86_400 -> String.format(locale, copy.hoursFormat, delta / 3_600)
+            delta < 604_800 -> String.format(locale, copy.daysFormat, delta / 86_400)
             else ->
+                // FormatStyle.MEDIUM picks the locale's natural month-and-day
+                // ordering (day-then-month for most non-US locales) instead of
+                // forcing "MMM d" English ordering.
                 DateTimeFormatter
-                    .ofPattern("MMM d")
+                    .ofLocalizedDate(FormatStyle.MEDIUM)
+                    .withLocale(locale)
                     .withZone(ZoneId.systemDefault())
                     .format(instant)
         }
+    }
+}
+
+/**
+ * Localized tokens consumed by [IdentityFormatter.relativeTime]. Threaded in
+ * from composables via [rememberRelativeTimeCopy] so the formatter itself
+ * stays pure and testable; the [Default] companion mirrors the prior
+ * hard-coded English fallback for non-composable callers and tests.
+ */
+data class RelativeTimeCopy(
+    val future: String,
+    val now: String,
+    val minutesFormat: String,
+    val hoursFormat: String,
+    val daysFormat: String,
+) {
+    companion object {
+        val Default =
+            RelativeTimeCopy(
+                future = "future",
+                now = "now",
+                minutesFormat = "%1\$dm",
+                hoursFormat = "%1\$dh",
+                daysFormat = "%1\$dd",
+            )
     }
 }
