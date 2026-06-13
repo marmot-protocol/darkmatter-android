@@ -3839,6 +3839,7 @@ private fun ConversationScreen(
                             mediaType = MediaPipeline.RECOMPRESSED_MIME,
                             fileName = fileName,
                             dim = "${jpeg.width}x${jpeg.height}",
+                            thumbhash = jpeg.thumbhash,
                         )
                     }
                 }

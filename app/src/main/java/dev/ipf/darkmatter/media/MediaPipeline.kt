@@ -155,12 +155,15 @@ object MediaPipeline {
     /**
      * The bytes + decoded dimensions of a downscaled JPEG. Width/height are
      * the *encoded* dimensions, not the source — receivers use them to
-     * reserve aspect-ratio space before the decode completes.
+     * reserve aspect-ratio space before the decode completes. `thumbhash`
+     * is the base64-encoded perceptual hash a receiver can render as a
+     * blurred placeholder while the full bytes decrypt + decode.
      */
     data class DownscaledJpeg(
         val bytes: ByteArray,
         val width: Int,
         val height: Int,
+        val thumbhash: String?,
     )
 
     /**
@@ -216,10 +219,15 @@ object MediaPipeline {
             try {
                 val width = scaled.width
                 val height = scaled.height
+                // Compute thumbhash from the already-decoded bitmap before
+                // recycle. Failures degrade silently — a missing hash just
+                // means receivers don't get a placeholder; it's not a
+                // reason to drop the upload.
+                val thumbhash = runCatching { Thumbhash.encodeFromBitmap(scaled) }.getOrNull()
                 ByteArrayOutputStream().use { out ->
                     // compress() returns false on failure — don't ship partial bytes.
                     if (scaled.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)) {
-                        DownscaledJpeg(out.toByteArray(), width, height)
+                        DownscaledJpeg(out.toByteArray(), width, height, thumbhash)
                     } else {
                         null
                     }
