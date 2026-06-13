@@ -2547,11 +2547,16 @@ class ConversationController(
         if (!HEX_MESSAGE_ID.matches(trimmed)) return
         if (trimmed == lastReadMessageId) return
         val account = conversationAccountRef ?: return
+        // Capture the previous pointer so a transient FFI failure restores it
+        // rather than nulling out the dedupe state entirely — a single failed
+        // mark-read would otherwise re-issue FFI hops on every subsequent
+        // settle, even on rows that were already marked successfully before.
+        val previous = lastReadMessageId
         lastReadMessageId = trimmed
         runCatching {
             appState.marmotIo { markTimelineMessageRead(account, group.groupIdHex, trimmed) }
         }.onFailure {
-            lastReadMessageId = null
+            lastReadMessageId = previous
             Log.w("DMConversation", "mark read failed for ${group.groupIdHex.take(8)} message=${trimmed.take(8)}", it)
         }
     }
