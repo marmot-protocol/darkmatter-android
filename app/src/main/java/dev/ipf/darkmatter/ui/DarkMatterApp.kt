@@ -2535,6 +2535,7 @@ private fun MediaFileBubble(
     reference: MediaAttachmentReferenceFfi,
     controller: ConversationController,
     appState: DarkMatterAppState,
+    mine: Boolean,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2593,7 +2594,7 @@ private fun MediaFileBubble(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    reference.mediaType,
+                    shortMediaTypeLabel(reference.mediaType),
                     style = MaterialTheme.typography.labelSmall,
                     color =
                         if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2607,7 +2608,9 @@ private fun MediaFileBubble(
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
+            } else if (!mine) {
+                // Outgoing rows skip the download chevron — the sender
+                // already had the bytes locally when the send fired.
                 Icon(
                     imageVector =
                         if (failed) Icons.Default.Refresh else Icons.Default.Download,
@@ -2615,8 +2618,37 @@ private fun MediaFileBubble(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
+            } else if (failed) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.media_open),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
+    }
+}
+
+/**
+ * Compact uppercase label for the file-bubble's MIME line: `application/pdf`
+ * becomes "PDF", `image/jpeg` becomes "JPG", `application/vnd.…` falls back
+ * to the lowercase MIME so the bubble never goes blank.
+ */
+private fun shortMediaTypeLabel(mediaType: String): String {
+    val trimmed = mediaType.trim()
+    if (trimmed.isEmpty()) return ""
+    val tail = trimmed.substringAfterLast('/', missingDelimiterValue = trimmed)
+    return when (val canonical = tail.substringBefore('+').substringBefore(';').lowercase()) {
+        "jpeg" -> "JPG"
+        "vnd.openxmlformats-officedocument.wordprocessingml.document" -> "DOCX"
+        "vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> "XLSX"
+        "vnd.openxmlformats-officedocument.presentationml.presentation" -> "PPTX"
+        "msword" -> "DOC"
+        "vnd.ms-excel" -> "XLS"
+        "vnd.ms-powerpoint" -> "PPT"
+        "" -> trimmed
+        else -> canonical.uppercase()
     }
 }
 
@@ -4185,7 +4217,23 @@ private fun ConversationScreen(
                 appState.present(R.string.media_file_too_large)
             }
             if (merged.isEmpty()) return@launchMutation
-            controller.sendAttachments(merged, trimmedCaption)
+            // Image attachments ship as one album so the masonry layout has
+            // multiple tiles to lay out; non-image attachments ship as their
+            // own kind-9 messages, one per file, because each carries
+            // distinct filename/MIME/size metadata that doesn't benefit
+            // from grid composition. The caption rides with the images
+            // when present; otherwise it attaches to the first file send.
+            val docs = docOutcome.attachments
+            if (acceptedImages.isNotEmpty()) {
+                controller.sendAttachments(acceptedImages, trimmedCaption)
+                for (doc in docs) {
+                    controller.sendAttachments(listOf(doc), null)
+                }
+            } else {
+                docs.forEachIndexed { index, doc ->
+                    controller.sendAttachments(listOf(doc), if (index == 0) trimmedCaption else null)
+                }
+            }
         }
     }
 
@@ -6129,6 +6177,7 @@ private fun MessageBubble(
                                     messageIdHex = record.messageIdHex,
                                     attachmentIndex = entry.index,
                                     reference = entry.value,
+                                    mine = mine,
                                     controller = controller,
                                     appState = appState,
                                 )
