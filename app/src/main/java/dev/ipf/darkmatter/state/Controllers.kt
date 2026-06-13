@@ -2555,6 +2555,7 @@ class ConversationController(
             appState.marmotIo { markTimelineMessageRead(account, group.groupIdHex, trimmed) }
         }.onFailure {
             lastReadMessageId = previous
+            if (it is CancellationException) throw it
             Log.w("DMConversation", "mark read failed for ${group.groupIdHex.take(8)} message=${trimmed.take(8)}", it)
         }
     }
