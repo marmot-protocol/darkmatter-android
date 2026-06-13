@@ -1750,6 +1750,23 @@ class ConversationController(
     ): String = "$account|${group.groupIdHex}|$messageIdHex|$attachmentIndex"
 
     /**
+     * Yes/no probe: are the decrypted bytes for [messageIdHex] /
+     * [attachmentIndex] already resident in either cache tier? Lets a file
+     * bubble decide whether to surface the download chevron without firing
+     * an FFI hop. Strictly peek — never schedules a download or seeds the
+     * cache. Returns false when there's no active account.
+     */
+    fun hasCachedAttachment(
+        messageIdHex: String,
+        attachmentIndex: Int,
+    ): Boolean {
+        val account = conversationAccountRef ?: return false
+        val cacheKey = mediaCacheKey(account, messageIdHex, attachmentIndex)
+        if (appState.mediaPlaintextCache.get(cacheKey) != null) return true
+        return appState.diskMediaCache.contains(cacheKey)
+    }
+
+    /**
      * Fetch and decrypt a Blossom-stored attachment. Backed by the app-level
      * LRU ([DarkMatterAppState.mediaPlaintextCache], keyed via [mediaCacheKey])
      * so re-opening a conversation doesn't re-download media already fetched

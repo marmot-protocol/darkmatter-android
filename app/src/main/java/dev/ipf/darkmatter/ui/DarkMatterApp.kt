@@ -2544,6 +2544,13 @@ private fun MediaFileBubble(
     var failed by remember(pillKey) { mutableStateOf(false) }
     val noOpenAppMessage = stringResource(R.string.media_no_app_to_open)
     val couldntOpenMessage = stringResource(R.string.media_couldnt_open)
+    // Cached bytes (own send, or downloaded earlier) mean the chevron is
+    // misleading — there's nothing to fetch. Probe on first composition,
+    // then flip after a successful in-bubble download. Outgoing sends are
+    // implicitly cached, so `mine` short-circuits to true.
+    var cached by remember(pillKey) {
+        mutableStateOf(mine || controller.hasCachedAttachment(messageIdHex, attachmentIndex))
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -2558,6 +2565,7 @@ private fun MediaFileBubble(
                         val outcome =
                             runCatching {
                                 val data = controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
+                                cached = true
                                 openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
                             }.getOrDefault(OpenAttachmentResult.Error)
                         when (outcome) {
@@ -2608,19 +2616,20 @@ private fun MediaFileBubble(
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else if (!mine) {
-                // Outgoing rows skip the download chevron — the sender
-                // already had the bytes locally when the send fired.
+            } else if (failed) {
                 Icon(
-                    imageVector =
-                        if (failed) Icons.Default.Refresh else Icons.Default.Download,
+                    imageVector = Icons.Default.Refresh,
                     contentDescription = stringResource(R.string.media_open),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
-            } else if (failed) {
+            } else if (!cached) {
+                // Bytes aren't local yet — show the chevron so the user
+                // knows the tap will fetch. Once cached (own send, or after
+                // first tap-and-download) the chevron disappears: nothing
+                // to fetch, and the row is just "tap to open".
                 Icon(
-                    imageVector = Icons.Default.Refresh,
+                    imageVector = Icons.Default.Download,
                     contentDescription = stringResource(R.string.media_open),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
@@ -4223,15 +4232,24 @@ private fun ConversationScreen(
             // distinct filename/MIME/size metadata that doesn't benefit
             // from grid composition. The caption rides with the images
             // when present; otherwise it attaches to the first file send.
+            //
+            // Each send is launched on its own mutation coroutine so all
+            // optimistic bubbles appear in the same recomposition pass —
+            // serializing them on this scope made the user watch files
+            // upload one at a time. The per-file order is preserved by
+            // dispatch order; the optimistic-timeline-order counter is
+            // monotonic so the resulting timeline keeps pick order even
+            // when uploads finish out-of-order.
             val docs = docOutcome.attachments
             if (acceptedImages.isNotEmpty()) {
-                controller.sendAttachments(acceptedImages, trimmedCaption)
+                appState.launchMutation { controller.sendAttachments(acceptedImages, trimmedCaption) }
                 for (doc in docs) {
-                    controller.sendAttachments(listOf(doc), null)
+                    appState.launchMutation { controller.sendAttachments(listOf(doc), null) }
                 }
             } else {
                 docs.forEachIndexed { index, doc ->
-                    controller.sendAttachments(listOf(doc), if (index == 0) trimmedCaption else null)
+                    val perFileCaption = if (index == 0) trimmedCaption else null
+                    appState.launchMutation { controller.sendAttachments(listOf(doc), perFileCaption) }
                 }
             }
         }
