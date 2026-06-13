@@ -159,12 +159,19 @@ class DiskByteCache(
     }
 
     private fun rehydrateIndex() {
+        val allFiles = cacheDir.listFiles()?.filter { it.isFile } ?: return
+        // A crash between `tmp.writeBytes` and `renameTo` strands a `.tmp`
+        // file that rehydrate (which only indexes `.bin`) never picks up,
+        // so the cap accounting drifts. Sweep stranded temps before
+        // building the index so the on-disk footprint matches what we
+        // count against `maxBytes`.
+        for (file in allFiles) {
+            if (file.name.endsWith(TMP_SUFFIX)) runCatching { file.delete() }
+        }
         val files =
-            cacheDir
-                .listFiles()
-                ?.filter { it.isFile && it.name.endsWith(SUFFIX) }
-                ?.sortedBy { it.lastModified() }
-                ?: return
+            allFiles
+                .filter { it.name.endsWith(SUFFIX) }
+                .sortedBy { it.lastModified() }
         for (file in files) {
             val size = file.length()
             if (size <= 0 || size > Int.MAX_VALUE) {
