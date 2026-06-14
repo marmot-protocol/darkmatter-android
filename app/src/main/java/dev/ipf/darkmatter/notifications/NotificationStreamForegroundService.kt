@@ -48,6 +48,11 @@ class NotificationStreamForegroundService : Service() {
                 foregroundServiceDebug(it) { "startForeground rejected" }
             }.isSuccess
         if (!startedForeground) {
+            // The enable path already optimistically persisted "background
+            // connection on" and got a `true` from start() (the intent was
+            // merely queued). Tell AppState the start actually failed so the
+            // toggle doesn't lie and the user sees why. See #164.
+            (application as? DarkMatterApplication)?.appState?.onBackgroundConnectionStartRejected()
             stopSelf(startId)
             return START_NOT_STICKY
         }
