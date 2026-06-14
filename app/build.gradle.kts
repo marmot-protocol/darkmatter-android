@@ -135,12 +135,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Never fall back to the debug keystore for a release build: the
-            // Android debug key is a well-known public key, so a release APK
-            // signed with it is trivially forgeable and anyone could ship a
-            // "valid" update. When release signing isn't configured, leave the
-            // release build UNSIGNED (it can't be installed/published by
-            // accident) and warn loudly rather than silently mis-signing. #104
+            // Never fall back to the debug keystore: the Android debug key is
+            // public, so a release APK signed with it is trivially forgeable.
+            // Leave the build unsigned when release signing isn't configured.
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             } else {

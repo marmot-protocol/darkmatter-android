@@ -42,17 +42,12 @@ object ProfileSanitizer {
     }
 
     /**
-     * NFKC compatibility normalization folds look-alike compatibility and
-     * fullwidth code points to their canonical forms (`ＡＢＣ` → `ABC`, `ﬁ` →
-     * `fi`, superscripts/circled letters → plain), removing a large class of
-     * display-name homoglyphs used for impersonation. Applied to the
-     * single-line identity surface (display name), not to message bodies,
-     * which must preserve the author's exact text.
-     *
-     * Note: NFKC does NOT fold *cross-script* confusables — Cyrillic `а`
-     * (U+0430) still reads as Latin `a`. Catching those needs the Unicode
-     * confusables skeleton table plus a mixed-script policy, which is a
-     * larger change tracked separately on #60.
+     * NFKC folds compatibility/fullwidth look-alikes to their canonical forms
+     * (`ＡＢＣ` → `ABC`, `ﬁ` → `fi`), removing a large class of display-name
+     * homoglyphs. Applied to the display-name surface only, not message
+     * bodies, which must keep the author's exact text. It does not fold
+     * cross-script confusables (Cyrillic `а` vs Latin `a`) — that needs the
+     * Unicode confusables table and a mixed-script policy.
      */
     private fun normalizeConfusables(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKC)
 
@@ -88,11 +83,9 @@ object ProfileSanitizer {
                     char.code in 0x2066..0x2069 -> Unit
                     char.code == 0x061C -> Unit
                     char.code == 0x200B || char.code == 0xFEFF -> Unit
-                    // Further invisible / default-ignorable format characters
-                    // abused for spoofing and layout tricks. ZWNJ (0x200C) and
-                    // ZWJ (0x200D) are deliberately NOT stripped — they carry
-                    // meaning in Indic/Arabic shaping and in emoji ZWJ
-                    // sequences. See #60.
+                    // More invisible/default-ignorable format chars abused for
+                    // spoofing. ZWNJ (0x200C) and ZWJ (0x200D) are kept — they
+                    // carry meaning in Indic/Arabic shaping and emoji sequences.
                     char.code == 0x00AD -> Unit // soft hyphen
                     char.code == 0x034F -> Unit // combining grapheme joiner
                     char.code == 0x180E -> Unit // Mongolian vowel separator
