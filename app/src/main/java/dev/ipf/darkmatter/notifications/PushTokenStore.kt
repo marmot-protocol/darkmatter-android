@@ -21,18 +21,16 @@ import android.content.SharedPreferences
 class PushTokenStore(
     private val preferences: SharedPreferences,
 ) {
-    private val lock = Any()
-
     fun lastToken(): String? = preferences.getString(KEY_FCM_TOKEN, null)?.takeIf { it.isNotBlank() }
 
     fun setToken(token: String) {
-        synchronized(lock) {
+        synchronized(LOCK) {
             preferences.edit().putString(KEY_FCM_TOKEN, token).apply()
         }
     }
 
     fun clear() {
-        synchronized(lock) {
+        synchronized(LOCK) {
             preferences.edit().remove(KEY_FCM_TOKEN).apply()
         }
     }
@@ -53,7 +51,7 @@ class PushTokenStore(
      */
     fun recordPendingClear(account: String) {
         if (account.isBlank()) return
-        synchronized(lock) {
+        synchronized(LOCK) {
             val current = pendingClears()
             if (account in current) return
             preferences.edit().putStringSet(KEY_PENDING_CLEARS, current + account).apply()
@@ -62,7 +60,7 @@ class PushTokenStore(
 
     fun clearPending(account: String) {
         if (account.isBlank()) return
-        synchronized(lock) {
+        synchronized(LOCK) {
             val current = pendingClears()
             if (account !in current) return
             preferences.edit().putStringSet(KEY_PENDING_CLEARS, current - account).apply()
@@ -70,6 +68,11 @@ class PushTokenStore(
     }
 
     companion object {
+        // Process-wide, NOT per-instance: callers construct fresh stores over
+        // the same prefs file (onNewToken does PushTokenStore.create(...) on a
+        // Firebase background thread while sign-out uses another instance), so
+        // an instance lock would serialize nothing across them. See #167.
+        private val LOCK = Any()
         private const val PREFS_NAME = "darkmatter.push.tokens"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_PENDING_CLEARS = "pending_clears"
