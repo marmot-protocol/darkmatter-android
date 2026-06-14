@@ -331,6 +331,15 @@ class DarkMatterAppState(
     private val projectedMessageIdsByConversation = mutableMapOf<String, MutableSet<String>>()
     private val timelineOrderOverridesByConversation = mutableMapOf<String, MutableMap<String, ULong>>()
     private val timelineTimestampOverridesByConversation = mutableMapOf<String, MutableMap<String, ULong>>()
+
+    // Retained-upload bytes survive screen disposal so a user who navigates
+    // out of a chat mid-send and returns sees the pending bubble still carry
+    // its preview/filename instead of an empty placeholder. Cap (and sizeOf
+    // policy) match the controller-local version they replace.
+    private val retainedMediaUploadsByConversation = mutableMapOf<String, dev.ipf.darkmatter.media.ByteSizeLruCache<String, RetainedMediaUpload>>()
+    private val activeUploadKeysByConversation = mutableMapOf<String, MutableSet<String>>()
+    private val pendingProjectionsAwaitingBridgeByConversation =
+        mutableMapOf<String, MutableMap<String, dev.ipf.marmotkit.TimelineMessageRecordFfi>>()
     private val recentConversationStateKeys = LinkedHashMap<String, Unit>(16, 0.75f, true)
 
     val draftStore: DraftStore = DraftStore.forContext(appContext)
@@ -415,6 +424,38 @@ class DarkMatterAppState(
             timelineTimestampOverridesByConversation.getOrPut(key) { mutableMapOf() }
         }
 
+    internal fun retainedMediaUploads(
+        accountRef: String?,
+        groupIdHex: String,
+    ): dev.ipf.darkmatter.media.ByteSizeLruCache<String, RetainedMediaUpload> =
+        synchronized(conversationStateLock) {
+            val key = retainConversationState(accountRef, groupIdHex)
+            retainedMediaUploadsByConversation.getOrPut(key) {
+                dev.ipf.darkmatter.media.ByteSizeLruCache(
+                    maxBytes = ConversationController.MEDIA_RETAINED_MAX_BYTES,
+                    sizeOf = { upload -> upload.attachments.sumOf { it.plaintextBytes.size } },
+                )
+            }
+        }
+
+    internal fun activeUploadKeys(
+        accountRef: String?,
+        groupIdHex: String,
+    ): MutableSet<String> =
+        synchronized(conversationStateLock) {
+            val key = retainConversationState(accountRef, groupIdHex)
+            activeUploadKeysByConversation.getOrPut(key) { mutableSetOf() }
+        }
+
+    internal fun pendingProjectionsAwaitingBridge(
+        accountRef: String?,
+        groupIdHex: String,
+    ): MutableMap<String, dev.ipf.marmotkit.TimelineMessageRecordFfi> =
+        synchronized(conversationStateLock) {
+            val key = retainConversationState(accountRef, groupIdHex)
+            pendingProjectionsAwaitingBridgeByConversation.getOrPut(key) { linkedMapOf() }
+        }
+
     private fun retainConversationState(
         accountRef: String?,
         groupIdHex: String,
@@ -428,6 +469,9 @@ class DarkMatterAppState(
             projectedMessageIdsByConversation.remove(staleKey)
             timelineOrderOverridesByConversation.remove(staleKey)
             timelineTimestampOverridesByConversation.remove(staleKey)
+            retainedMediaUploadsByConversation.remove(staleKey)
+            activeUploadKeysByConversation.remove(staleKey)
+            pendingProjectionsAwaitingBridgeByConversation.remove(staleKey)
         }
         return key
     }
