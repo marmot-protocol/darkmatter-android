@@ -338,6 +338,14 @@ class DarkMatterAppState(
     private val profileScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutationsScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    // Bumped whenever cross-account caches are cleared (switch / sign-out). An
+    // in-flight profile refresh captures it at start and discards its result if
+    // the epoch moved, so a job that resolves after a switch can't write the
+    // old account's data back into the just-cleared caches.
+    private val profileCacheEpoch =
+        java.util.concurrent.atomic
+            .AtomicInteger(0)
     private var notificationJob: Job? = null
     private var appInForeground = false
     private var activeConversationGroupIdHex: String? = null
@@ -604,9 +612,10 @@ class DarkMatterAppState(
      * many account switches: the npub cache, resolved profile presentations,
      * and group-member snapshots. Bumps [profileRevision] so any visible
      * profile re-resolves for the now-active account. Called on account switch
-     * and sign-out. See #107.
+     * and sign-out.
      */
     private fun clearCrossAccountCaches() {
+        profileCacheEpoch.incrementAndGet()
         npubs.clear()
         synchronized(profilePresentationLock) { profilePresentations.clear() }
         synchronized(groupMemberSnapshotLock) { groupMemberSnapshots.clear() }
@@ -1331,6 +1340,7 @@ class DarkMatterAppState(
     }
 
     suspend fun refreshProfile(accountIdHex: String) {
+        val epoch = profileCacheEpoch.get()
         val profile =
             try {
                 val result =
@@ -1354,13 +1364,16 @@ class DarkMatterAppState(
                 profileRefreshGate.finish(accountIdHex, System.currentTimeMillis())
             }
         if (profile != null) {
-            // Build the presentation off the main thread: readProfilePresentation
-            // calls blocking FFI (displayName + userProfile), and this completion
-            // runs on profileScope (Main.immediate) for every resolved profile —
-            // doing the FFI inline janked the main thread. Resolve on IO, then
-            // apply the in-memory state on the caller's (main) thread. See #159.
+            // Resolve the presentation off the main thread: readProfilePresentation
+            // does blocking FFI and this completion runs on profileScope
+            // (Main.immediate). Then apply the in-memory state on the main thread.
             val presentation = marmotIo { readProfilePresentation(accountIdHex) }
-            applyProfilePresentation(accountIdHex, presentation)
+            // Drop the result if an account switch / sign-out cleared the caches
+            // while this refresh was in flight, so we don't repopulate them with
+            // the previous account's data.
+            if (profileCacheEpoch.get() == epoch) {
+                applyProfilePresentation(accountIdHex, presentation)
+            }
         }
     }
 
@@ -1685,7 +1698,7 @@ class DarkMatterAppState(
      * Store a freshly-resolved [presentation] and bump [profileRevision] if it
      * changed. Pure in-memory state work, no FFI — safe on the main thread.
      * The blocking [readProfilePresentation] read is the caller's job to run
-     * off-main (see [refreshProfile]). See #159.
+     * off-main (see [refreshProfile]).
      */
     private fun applyProfilePresentation(
         accountIdHex: String,
