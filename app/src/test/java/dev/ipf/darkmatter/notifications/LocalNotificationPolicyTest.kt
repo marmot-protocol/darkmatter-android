@@ -72,7 +72,7 @@ class LocalNotificationPolicyTest {
         isDm = false,
         messageIdHex = "message",
         sender = user(),
-        receiver = user(accountIdHex = "account", displayName = "Me"),
+        receiver = user(accountIdHex = accountRef, displayName = "Me"),
         previewText = "Hello",
         timestampMs = 1234,
         isFromSelf = false,
