@@ -297,6 +297,16 @@ internal fun optimisticMessageIdForProjection(
     projected: AppMessageRecordFfi,
     allowDelayedProjection: Boolean = false,
 ): String? {
+    // Bridge fast-path: `performMediaUpload` inserts an optimistic entry whose
+    // `record.messageIdHex` is the confirmed event id returned by
+    // `sendMediaAttachments`. That id equals the projection's id once the relay
+    // echo arrives, so this pairing is exact — no need to fall back to the
+    // shape-heuristic below, which would otherwise pick up a sibling pending
+    // optimistic with the same `_media_pending` shape (the multi-document send
+    // case where N bubbles share direction/sender/kind/recordedAt).
+    optimisticMessages
+        .firstOrNull { it.record.messageIdHex == projected.messageIdHex }
+        ?.let { return it.record.messageIdHex }
     val projectedIsMedia = projected.tags.any { it.values.firstOrNull() == "imeta" }
     return optimisticMessages
         .firstOrNull { optimistic ->
