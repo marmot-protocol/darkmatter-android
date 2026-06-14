@@ -46,9 +46,11 @@ import dev.ipf.marmotkit.RelayTelemetrySettingsFfi
 import dev.ipf.marmotkit.UserProfileMetadataFfi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -56,7 +58,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.net.IDN
 import java.net.URI
@@ -340,6 +344,21 @@ class DarkMatterAppState(
     private val activeUploadKeysByConversation = mutableMapOf<String, MutableSet<String>>()
     private val pendingProjectionsAwaitingBridgeByConversation =
         mutableMapOf<String, MutableMap<String, dev.ipf.marmotkit.TimelineMessageRecordFfi>>()
+
+    // In-flight attachment downloads, keyed by the mediaCacheKey. Routed
+    // through `mutationsScope` so the FFI download continues even when the
+    // calling screen disposes (e.g., user tapped a file then swiped away).
+    // Memoized so a re-entry / sibling tile / retry tap shares the same
+    // Deferred instead of spawning a second Blossom fetch.
+    private val inFlightDownloads = mutableMapOf<String, Deferred<ByteArray>>()
+    private val inFlightDownloadsLock = Any()
+
+    // Strictly serialize attachment fetches. A 6-tile album otherwise fires
+    // N parallel Blossom calls on `mutationsScope` and the underlying FFI
+    // surfaces errors on the queued-behind tiles, leaving them stuck in
+    // `failed`. Throughput stays adequate because the Rust core does its
+    // own pipelining inside a single fetch.
+    private val attachmentDownloadSemaphore = Semaphore(1)
     private val recentConversationStateKeys = LinkedHashMap<String, Unit>(16, 0.75f, true)
 
     val draftStore: DraftStore = DraftStore.forContext(appContext)
@@ -497,6 +516,44 @@ class DarkMatterAppState(
         withContext(Dispatchers.IO) {
             marmot().block()
         }
+
+    /**
+     * Memoize an in-flight attachment download keyed on [cacheKey] and route
+     * the work through [mutationsScope] so it survives caller cancellation
+     * (e.g. the user tapped a file and swiped away). Concurrent callers for
+     * the same key share the same Deferred; the entry is dropped when the
+     * Deferred completes so a later retry can re-attempt.
+     */
+    internal fun memoizedDownload(
+        cacheKey: String,
+        block: suspend CoroutineScope.() -> ByteArray,
+    ): Deferred<ByteArray> {
+        synchronized(inFlightDownloadsLock) {
+            inFlightDownloads[cacheKey]?.takeIf { it.isActive }?.let { return it }
+            val deferred =
+                mutationsScope.async {
+                    try {
+                        // Cap concurrent attachment fetches so an N-tile
+                        // album doesn't saturate the underlying network or
+                        // Blossom stack into per-tile failures. Permits are
+                        // acquired inside the Deferred so the semaphore
+                        // never blocks the caller's `await()`.
+                        attachmentDownloadSemaphore.withPermit { block() }
+                    } finally {
+                        synchronized(inFlightDownloadsLock) {
+                            // Only drop the entry if it's still ours — a
+                            // concurrent retry that registered a new
+                            // Deferred under the same key must survive.
+                            if (inFlightDownloads[cacheKey]?.isCompleted == true) {
+                                inFlightDownloads.remove(cacheKey)
+                            }
+                        }
+                    }
+                }
+            inFlightDownloads[cacheKey] = deferred
+            return deferred
+        }
+    }
 
     suspend fun bootstrap() = bootstrapMutex.withLock { bootstrapLocked() }
 
