@@ -1307,8 +1307,13 @@ class DarkMatterAppState(
         // This is called from render/timeline projection paths, so do not synchronously
         // probe the Rust profile cache here. The refresh job owns the binding work.
         if (!profileRefreshGate.tryStart(id, System.currentTimeMillis())) return
+        // Snapshot the cache epoch now, before the job is queued. A switch or
+        // sign-out can clear the caches in the gap before this coroutine starts,
+        // so the staleness check must compare against the epoch at request time,
+        // not whatever it has become by the time the body runs.
+        val requestEpoch = profileCacheEpoch.get()
         profileScope.launch {
-            refreshProfile(id)
+            refreshProfile(id, requestEpoch)
         }
     }
 
@@ -1339,8 +1344,10 @@ class DarkMatterAppState(
         return snapshot
     }
 
-    suspend fun refreshProfile(accountIdHex: String) {
-        val epoch = profileCacheEpoch.get()
+    suspend fun refreshProfile(
+        accountIdHex: String,
+        epoch: Int = profileCacheEpoch.get(),
+    ) {
         val profile =
             try {
                 val result =
