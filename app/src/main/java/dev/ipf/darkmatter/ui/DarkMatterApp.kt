@@ -4091,8 +4091,12 @@ private fun ConversationScreen(
     // process death, so restoring them from a saved bundle gives us URIs
     // that fail to open on first read. Lose the staging buffer on
     // process death rather than keep ghost URIs around.
-    var pendingMediaUris by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
-    var pendingDocumentUris by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    // Keyed on chat.id so a conversation switch flushes the staging shelf —
+    // ConversationScreen is reused when `selectedChat` changes in place, and
+    // an unkeyed remember would otherwise carry URIs from chat A into chat B
+    // (where a Send would attach them to the wrong recipient).
+    var pendingMediaUris by remember(chat.id) { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    var pendingDocumentUris by remember(chat.id) { mutableStateOf<List<android.net.Uri>>(emptyList()) }
     // Survives process death while the camera app is foreground (the result
     // callback fires into a recreated activity, otherwise the capture is lost).
     var cameraOutputUri by rememberSaveable(stateSaver = NullableUriSaver) {
