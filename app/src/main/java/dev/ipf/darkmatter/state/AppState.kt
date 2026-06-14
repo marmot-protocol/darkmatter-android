@@ -1354,7 +1354,13 @@ class DarkMatterAppState(
                 profileRefreshGate.finish(accountIdHex, System.currentTimeMillis())
             }
         if (profile != null) {
-            notifyProfileChanged(accountIdHex)
+            // Build the presentation off the main thread: readProfilePresentation
+            // calls blocking FFI (displayName + userProfile), and this completion
+            // runs on profileScope (Main.immediate) for every resolved profile —
+            // doing the FFI inline janked the main thread. Resolve on IO, then
+            // apply the in-memory state on the caller's (main) thread. See #159.
+            val presentation = marmotIo { readProfilePresentation(accountIdHex) }
+            applyProfilePresentation(accountIdHex, presentation)
         }
     }
 
@@ -1675,8 +1681,16 @@ class DarkMatterAppState(
         return ProfilePresentation(displayName = displayName, avatarUrl = avatarUrl)
     }
 
-    private fun notifyProfileChanged(accountIdHex: String) {
-        val presentation = readProfilePresentation(accountIdHex)
+    /**
+     * Store a freshly-resolved [presentation] and bump [profileRevision] if it
+     * changed. Pure in-memory state work, no FFI — safe on the main thread.
+     * The blocking [readProfilePresentation] read is the caller's job to run
+     * off-main (see [refreshProfile]). See #159.
+     */
+    private fun applyProfilePresentation(
+        accountIdHex: String,
+        presentation: ProfilePresentation,
+    ) {
         val changed =
             synchronized(profilePresentationLock) {
                 profilePresentations.put(accountIdHex, presentation) != presentation
