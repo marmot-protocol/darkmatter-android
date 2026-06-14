@@ -42,6 +42,20 @@ class MarkdownPreviewTextTest {
     }
 
     @Test
+    fun deeplyNestedEmptyQuotesDoNotOverflowTheStack() {
+        // #156: a peer-crafted message of thousands of nested, empty block
+        // quotes never spends the length budget, so the structural depth cap
+        // is the only thing bounding the recursion. Far deeper than the cap;
+        // must return, not StackOverflowError.
+        var block: MarkdownBlockFfi = paragraph("deep")
+        repeat(10_000) { block = MarkdownBlockFfi.BlockQuote(listOf(block)) }
+        val annotated = build(listOf(block))
+        // Capped before reaching the innermost paragraph — the point is that it
+        // returns at all rather than crashing.
+        assertEquals("", annotated.text)
+    }
+
+    @Test
     fun blocksJoinWithASingleSpace() {
         val annotated =
             build(

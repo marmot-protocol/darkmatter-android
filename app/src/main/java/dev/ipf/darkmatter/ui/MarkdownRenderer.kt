@@ -105,10 +105,22 @@ internal fun MarkdownMessageBody(
         }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         document.blocks.forEach { block ->
-            MarkdownBlockView(block, bodyContext)
+            MarkdownBlockView(block, bodyContext, depth = 0)
         }
     }
 }
+
+/**
+ * Maximum block-nesting depth the renderer will descend before it stops
+ * recursing. Block quotes and lists render their children via
+ * [MarkdownBlockView] again, so a peer-crafted message with thousands of
+ * nested quotes/lists would otherwise overflow the stack and crash the app on
+ * open (a DoS — the body renders as soon as the conversation is shown). No
+ * legitimate chat message nests anywhere near this deep. See #156.
+ */
+internal const val MARKDOWN_MAX_BLOCK_DEPTH = 24
+
+internal fun markdownDepthExceeded(depth: Int): Boolean = depth >= MARKDOWN_MAX_BLOCK_DEPTH
 
 /** Per-document inputs threaded through every block view. */
 private data class MarkdownBodyContext(
@@ -120,7 +132,15 @@ private data class MarkdownBodyContext(
 private fun MarkdownBlockView(
     block: MarkdownBlockFfi,
     ctx: MarkdownBodyContext,
+    depth: Int,
 ) {
+    // Past the nesting cap, stop descending: render a plain ellipsis marker
+    // instead of recursing into another quote/list level. Bounds the render
+    // stack against a maliciously deep document. See #156.
+    if (markdownDepthExceeded(depth)) {
+        Text("…", style = MaterialTheme.typography.bodyLarge)
+        return
+    }
     when (block) {
         is MarkdownBlockFfi.Paragraph ->
             Text(
@@ -135,8 +155,8 @@ private fun MarkdownBlockView(
         MarkdownBlockFfi.ThematicBreak ->
             HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.25f))
         is MarkdownBlockFfi.CodeBlock -> MarkdownCodeBlockView(block.content)
-        is MarkdownBlockFfi.BlockQuote -> MarkdownBlockQuoteView(block.blocks, ctx)
-        is MarkdownBlockFfi.List -> MarkdownListView(block, ctx)
+        is MarkdownBlockFfi.BlockQuote -> MarkdownBlockQuoteView(block.blocks, ctx, depth)
+        is MarkdownBlockFfi.List -> MarkdownListView(block, ctx, depth)
         is MarkdownBlockFfi.Table -> MarkdownTableView(block, ctx)
         // No math typesetting in v1 — show the raw TeX in the code treatment
         // so it at least reads as "source", not as broken prose.
@@ -186,6 +206,7 @@ private fun MarkdownCodeBlockView(content: String) {
 private fun MarkdownBlockQuoteView(
     blocks: List<MarkdownBlockFfi>,
     ctx: MarkdownBodyContext,
+    depth: Int,
 ) {
     Row(Modifier.height(IntrinsicSize.Min)) {
         Box(
@@ -199,7 +220,7 @@ private fun MarkdownBlockQuoteView(
         // children (nested code blocks) don't measure under unbounded
         // constraints inside the IntrinsicSize.Min row.
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            blocks.forEach { MarkdownBlockView(it, ctx) }
+            blocks.forEach { MarkdownBlockView(it, ctx, depth + 1) }
         }
     }
 }
@@ -208,6 +229,7 @@ private fun MarkdownBlockQuoteView(
 private fun MarkdownListView(
     block: MarkdownBlockFfi.List,
     ctx: MarkdownBodyContext,
+    depth: Int,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(if (block.tight) 2.dp else 6.dp)) {
         block.items.forEachIndexed { index, item ->
@@ -224,7 +246,7 @@ private fun MarkdownListView(
                     modifier = Modifier.padding(end = 6.dp),
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item.blocks.forEach { MarkdownBlockView(it, ctx) }
+                    item.blocks.forEach { MarkdownBlockView(it, ctx, depth + 1) }
                 }
             }
         }
@@ -611,7 +633,7 @@ internal fun markdownDocumentToPreviewAnnotatedString(
         buildAnnotatedString {
             for (block in document.blocks) {
                 if (length >= maxLength) break
-                appendPreviewBlock(block, codeStyle, maxLength, mentionDisplayName)
+                appendPreviewBlock(block, codeStyle, maxLength, mentionDisplayName, depth = 0)
             }
         }
     return if (flattened.length > maxLength) flattened.subSequence(0, maxLength) else flattened
@@ -622,11 +644,16 @@ private fun AnnotatedString.Builder.appendPreviewBlock(
     codeStyle: SpanStyle,
     maxLength: Int,
     mentionDisplayName: ((String) -> String?)?,
+    depth: Int,
 ) {
     // Budget check inside the recursion too: the top-level loop only guards
     // between siblings, so a deep quote/list subtree would otherwise keep
     // flattening long after the row's budget is spent.
     if (length >= maxLength) return
+    // Structural depth cap: a deeply-nested subtree with NO text content never
+    // spends the length budget, so the budget alone can't bound the recursion
+    // — a peer could overflow the stack while building a one-line preview. See #156.
+    if (markdownDepthExceeded(depth)) return
     when (block) {
         is MarkdownBlockFfi.Paragraph -> appendPreviewInlineSegment(block.inlines, codeStyle, maxLength, mentionDisplayName)
         is MarkdownBlockFfi.Heading -> appendPreviewInlineSegment(block.inlines, codeStyle, maxLength, mentionDisplayName)
@@ -634,10 +661,10 @@ private fun AnnotatedString.Builder.appendPreviewBlock(
         is MarkdownBlockFfi.CodeBlock -> appendPreviewCodeContent(block.content, codeStyle, maxLength)
         is MarkdownBlockFfi.MathBlock -> appendPreviewCodeContent(block.content, codeStyle, maxLength)
         is MarkdownBlockFfi.BlockQuote ->
-            block.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName) }
+            block.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName, depth + 1) }
         is MarkdownBlockFfi.List ->
             block.items.forEach { item ->
-                item.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName) }
+                item.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName, depth + 1) }
             }
         is MarkdownBlockFfi.Table -> {
             block.header.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, maxLength, mentionDisplayName) }
