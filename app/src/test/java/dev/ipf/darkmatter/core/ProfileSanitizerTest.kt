@@ -13,6 +13,23 @@ class ProfileSanitizerTest {
     }
 
     @Test
+    fun displayNamesFoldFullwidthAndCompatibilityHomoglyphs() {
+        // #60: NFKC folds fullwidth/compatibility look-alikes so a spoofed
+        // "Ａdmin" / "ﬁnance" can't masquerade as the canonical form.
+        assertEquals("Admin", ProfileSanitizer.displayName("Ａｄｍｉｎ")) // fullwidth "Admin"
+        assertEquals("finance", ProfileSanitizer.displayName("ﬁnance")) // ﬁ ligature
+    }
+
+    @Test
+    fun displayNamesStripExtraInvisibleFormatCharsButKeepEmojiJoiners() {
+        // Soft hyphen / word joiner / invisible operators are spoofing noise.
+        assertEquals("Alice", ProfileSanitizer.displayName("Al­i⁠ce"))
+        // ZWJ emoji sequence (man + ZWJ + laptop) must survive intact.
+        val zwjEmoji = "👨‍💻"
+        assertEquals(zwjEmoji, ProfileSanitizer.displayName(zwjEmoji))
+    }
+
+    @Test
     fun imageUrlsOnlyAllowHttpsUrlsWithHosts() {
         assertEquals("https://example.com/avatar.png", ProfileSanitizer.imageUrl(" https://example.com/avatar.png "))
         assertNull(ProfileSanitizer.imageUrl("http://example.com/avatar.png"))
