@@ -532,25 +532,29 @@ class DarkMatterAppState(
             inFlightDownloads[cacheKey]?.takeIf { it.isActive }?.let { return it }
             val deferred =
                 mutationsScope.async {
-                    try {
-                        // Cap concurrent attachment fetches so an N-tile
-                        // album doesn't saturate the underlying network or
-                        // Blossom stack into per-tile failures. Permits are
-                        // acquired inside the Deferred so the semaphore
-                        // never blocks the caller's `await()`.
-                        attachmentDownloadSemaphore.withPermit { block() }
-                    } finally {
-                        synchronized(inFlightDownloadsLock) {
-                            // Only drop the entry if it's still ours — a
-                            // concurrent retry that registered a new
-                            // Deferred under the same key must survive.
-                            if (inFlightDownloads[cacheKey]?.isCompleted == true) {
-                                inFlightDownloads.remove(cacheKey)
-                            }
-                        }
-                    }
+                    // Cap concurrent attachment fetches so an N-tile album
+                    // doesn't saturate the underlying network or Blossom
+                    // stack into per-tile failures. Permits are acquired
+                    // inside the Deferred so the semaphore never blocks
+                    // the caller's `await()`.
+                    attachmentDownloadSemaphore.withPermit { block() }
                 }
             inFlightDownloads[cacheKey] = deferred
+            // Drop the map entry via `invokeOnCompletion` (fires AFTER the
+            // Deferred has transitioned to completed/cancelled — a `finally`
+            // inside `async`'s body races against that transition and can
+            // observe `isCompleted == false`, leaking the entry. A completed
+            // Deferred<ByteArray> retains the plaintext result, so a leaked
+            // entry keeps the bytes alive forever). Identity check ensures
+            // a concurrent retry that registered a fresh Deferred under the
+            // same key survives.
+            deferred.invokeOnCompletion {
+                synchronized(inFlightDownloadsLock) {
+                    if (inFlightDownloads[cacheKey] === deferred) {
+                        inFlightDownloads.remove(cacheKey)
+                    }
+                }
+            }
             return deferred
         }
     }
@@ -682,6 +686,26 @@ class DarkMatterAppState(
     private fun clearInMemoryMediaCaches() {
         mediaPlaintextCache.clear()
         mediaThumbnailCache.clear()
+        // The four per-conversation maps below hold (or potentially hold)
+        // decrypted plaintext keyed by account/group. Wiping them at the
+        // same call site keeps account-switch and sign-out symmetric with
+        // the L1 plaintext clear above; an unwiped retained-upload cache
+        // would otherwise let the next signed-in account see the previous
+        // account's outgoing bytes.
+        synchronized(conversationStateLock) {
+            retainedMediaUploadsByConversation.values.forEach { it.clear() }
+            retainedMediaUploadsByConversation.clear()
+            activeUploadKeysByConversation.values.forEach { it.clear() }
+            activeUploadKeysByConversation.clear()
+            pendingProjectionsAwaitingBridgeByConversation.values.forEach { it.clear() }
+            pendingProjectionsAwaitingBridgeByConversation.clear()
+        }
+        // Cancel any in-flight downloads (their Deferred holds the plaintext
+        // result) and drop the index so the next session starts cold.
+        synchronized(inFlightDownloadsLock) {
+            inFlightDownloads.values.forEach { it.cancel() }
+            inFlightDownloads.clear()
+        }
     }
 
     /**
