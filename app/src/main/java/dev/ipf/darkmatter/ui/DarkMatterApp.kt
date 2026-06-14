@@ -2212,6 +2212,13 @@ private fun MediaImageBubble(
     LaunchedEffect(key, attachmentIndex, epoch, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect // already have a decoded thumbnail
         if (!startDownload) return@LaunchedEffect
+        // The imeta-tag parser falls back to sourceEpoch=0 (the wire format
+        // doesn't carry it). Calling downloadMedia with epoch=0 errors with
+        // "missing encrypted media secret for epoch 0". Wait for the typed
+        // reference upgrade via `refreshMediaReferences` — once it lands,
+        // `epoch` re-keys this effect with the real value. The spinner stays
+        // visible during the wait (bitmap=null, failed=false, startDownload).
+        if (epoch == 0uL) return@LaunchedEffect
         failed = false
         try {
             val data = controller.downloadAttachment(key, attachmentIndex, reference)
@@ -2231,7 +2238,12 @@ private fun MediaImageBubble(
             // Composable left composition or key changed — propagate. A
             // cancelled effect isn't a download failure; the bubble is gone.
             throw cancel
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            android.util.Log.w(
+                "MediaImageBubble",
+                "auto-download failed for msg=${key.take(8)} idx=$attachmentIndex",
+                t,
+            )
             failed = true
         }
     }
@@ -2272,18 +2284,18 @@ private fun MediaImageBubble(
                                 .clickable { viewerOpen = true },
                     )
                 failed ->
-                    MediaBubbleAction(
-                        icon = Icons.Default.BrokenImage,
-                        label = stringResource(R.string.media_tap_to_retry),
+                    MediaCircleAction(
+                        icon = Icons.Default.Refresh,
+                        contentDescription = stringResource(R.string.media_tap_to_retry),
                         onClick = {
                             failed = false
                             reloadToken++
                         },
                     )
                 !startDownload ->
-                    MediaBubbleAction(
-                        icon = Icons.Default.Download,
-                        label = stringResource(R.string.media_tap_to_download),
+                    MediaCircleAction(
+                        icon = Icons.Default.ArrowDownward,
+                        contentDescription = stringResource(R.string.media_tap_to_download),
                         onClick = { startDownload = true },
                     )
                 else ->
@@ -2504,6 +2516,8 @@ private fun MediaImageGridTile(
     LaunchedEffect(decodeKey, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect
         if (!startDownload) return@LaunchedEffect
+        // Same epoch=0 guard as the single-image bubble — see comment there.
+        if (reference.sourceEpoch == 0uL) return@LaunchedEffect
         failed = false
         try {
             val data = controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
@@ -2519,7 +2533,12 @@ private fun MediaImageGridTile(
             }
         } catch (cancel: kotlinx.coroutines.CancellationException) {
             throw cancel
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            android.util.Log.w(
+                "MediaImageGridTile",
+                "tile auto-download failed for msg=${messageIdHex.take(8)} idx=$attachmentIndex",
+                t,
+            )
             failed = true
         }
     }
@@ -2561,21 +2580,19 @@ private fun MediaImageGridTile(
                     modifier = Modifier.fillMaxSize(),
                 )
             failed ->
-                IconButton(onClick = {
-                    failed = false
-                    reloadToken++
-                }) {
-                    Icon(
-                        Icons.Default.BrokenImage,
-                        contentDescription = stringResource(R.string.media_tap_to_retry),
-                    )
-                }
+                MediaCircleAction(
+                    icon = Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.media_tap_to_retry),
+                    onClick = {
+                        failed = false
+                        reloadToken++
+                    },
+                )
             !startDownload ->
-                Icon(
-                    Icons.Default.Download,
+                MediaCircleAction(
+                    icon = Icons.Default.ArrowDownward,
                     contentDescription = stringResource(R.string.media_tap_to_download),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(28.dp),
+                    onClick = { startDownload = true },
                 )
             else ->
                 CircularProgressIndicator(
@@ -2666,6 +2683,14 @@ private fun MediaFileBubble(
                                         ?: controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
                                 cached = true
                                 openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
+                            }.onFailure {
+                                // Swipe-up / screen-dispose cancels this
+                                // coroutine. The download itself continues on
+                                // `mutationsScope` and lands in the cache —
+                                // rethrow so the launch dies quietly instead
+                                // of misreporting cancellation as a generic
+                                // "couldn't open file" toast.
+                                if (it is kotlinx.coroutines.CancellationException) throw it
                             }.getOrDefault(OpenAttachmentResult.Error)
                         when (outcome) {
                             OpenAttachmentResult.Opened -> Unit
@@ -2847,7 +2872,40 @@ private suspend fun openAttachmentExternally(
     }
 }
 
-/** Centered icon+label tap target used for the retry/download bubble states. */
+/**
+ * Circular tap target overlaid on a media bubble. Used for both the
+ * "tap to download" affordance (download arrow) and the "tap to retry"
+ * affordance (refresh arrow) so the receiver-side bubble feels like a
+ * polished media-message card instead of a flat icon-label stack.
+ *
+ * Renders as a ~52dp opaque scrim circle with a centered icon — works
+ * over a blurred thumbhash placeholder or a plain surface tint without
+ * fighting the background.
+ */
+@Composable
+private fun MediaCircleAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = Color.Black.copy(alpha = 0.55f),
+        contentColor = Color.White,
+        modifier = modifier.size(52.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun MediaBubbleAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -2882,6 +2940,7 @@ private fun MediaBubbleAction(
 private fun MediaPendingPlaceholder(
     pendingAttachments: List<PendingAttachment>,
     failed: Boolean,
+    onRetry: (() -> Unit)? = null,
 ) {
     val statusLabel = stringResource(if (failed) R.string.media_upload_failed else R.string.media_uploading)
     val statusColor = if (failed) MaterialTheme.colorScheme.error else Color.White
@@ -2900,6 +2959,7 @@ private fun MediaPendingPlaceholder(
                     sizeBytes = attachment.plaintextBytes.size.toLong(),
                     failed = failed,
                     statusLabel = statusLabel,
+                    onRetry = onRetry,
                 )
             }
         }
@@ -2938,6 +2998,7 @@ private fun MediaPendingPlaceholder(
                         hasPreview = preview != null,
                         statusLabel = statusLabel,
                         statusColor = statusColor,
+                        onRetry = onRetry,
                     )
                 }
             } else {
@@ -2967,6 +3028,7 @@ private fun MediaPendingPlaceholder(
                         hasPreview = true,
                         statusLabel = statusLabel,
                         statusColor = statusColor,
+                        onRetry = onRetry,
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
@@ -2984,11 +3046,21 @@ private fun PendingFilePill(
     sizeBytes: Long,
     failed: Boolean,
     statusLabel: String,
+    onRetry: (() -> Unit)? = null,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (failed && onRetry != null) {
+                        Modifier.clickable(onClick = onRetry)
+                    } else {
+                        Modifier
+                    },
+                ),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -3017,8 +3089,8 @@ private fun PendingFilePill(
             }
             if (failed) {
                 Icon(
-                    Icons.Default.BrokenImage,
-                    contentDescription = null,
+                    Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.retry),
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(20.dp),
                 )
@@ -3040,18 +3112,30 @@ private fun PendingStatusOverlay(
     statusLabel: String,
     statusColor: Color,
     modifier: Modifier = Modifier,
+    onRetry: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (failed) {
-            Icon(
-                Icons.Default.BrokenImage,
-                contentDescription = null,
-                tint = statusColor,
-                modifier = Modifier.size(28.dp),
-            )
+            // Tap target for retry. Without this the user only has the
+            // small refresh icon down in the status row, which is easy to
+            // miss on a media bubble dominated by a blurred preview.
+            if (onRetry != null) {
+                MediaCircleAction(
+                    icon = Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.retry),
+                    onClick = onRetry,
+                )
+            } else {
+                Icon(
+                    Icons.Default.BrokenImage,
+                    contentDescription = null,
+                    tint = statusColor,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
         } else {
             CircularProgressIndicator(
                 modifier = Modifier.size(28.dp),
@@ -6399,6 +6483,12 @@ private fun MessageBubble(
                             MediaPendingPlaceholder(
                                 pendingAttachments = controller.pendingAttachmentsList(record.messageIdHex),
                                 failed = item.status == MessageStatus.Failed,
+                                onRetry =
+                                    if (mine && item.status == MessageStatus.Failed) {
+                                        { appState.launchMutation { controller.retryFailedSend(item) } }
+                                    } else {
+                                        null
+                                    },
                             )
                         }
                         // Body text policy:
