@@ -3,6 +3,8 @@ package dev.ipf.darkmatter.media
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.net.Uri
 import java.io.ByteArrayOutputStream
 
@@ -216,23 +218,40 @@ object MediaPipeline {
                     decoded
                 }
 
+            // Flatten alpha onto opaque white before hashing AND compressing
+            // so the thumbhash describes the exact pixels we ship. JPEG drops
+            // alpha by white-compositing inside compress(); without this step,
+            // a transparent PNG source hashes its alpha-blended pixels while
+            // the JPEG bytes carry the white-composite version — receivers
+            // would render a placeholder that doesn't match the final image.
+            val opaque =
+                if (scaled.hasAlpha()) {
+                    Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888).also {
+                        Canvas(it).apply {
+                            drawColor(Color.WHITE)
+                            drawBitmap(scaled, 0f, 0f, null)
+                        }
+                    }
+                } else {
+                    scaled
+                }
             try {
-                val width = scaled.width
-                val height = scaled.height
-                // Compute thumbhash from the already-decoded bitmap before
-                // recycle. Failures degrade silently — a missing hash just
-                // means receivers don't get a placeholder; it's not a
-                // reason to drop the upload.
-                val thumbhash = runCatching { Thumbhash.encodeFromBitmap(scaled) }.getOrNull()
+                val width = opaque.width
+                val height = opaque.height
+                // Failures degrade silently — a missing hash just means
+                // receivers don't get a placeholder; it's not a reason to
+                // drop the upload.
+                val thumbhash = runCatching { Thumbhash.encodeFromBitmap(opaque) }.getOrNull()
                 ByteArrayOutputStream().use { out ->
                     // compress() returns false on failure — don't ship partial bytes.
-                    if (scaled.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)) {
+                    if (opaque.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)) {
                         DownscaledJpeg(out.toByteArray(), width, height, thumbhash)
                     } else {
                         null
                     }
                 }
             } finally {
+                if (opaque !== scaled) opaque.recycle()
                 scaled.recycle()
             }
         } catch (_: java.io.IOException) {
