@@ -6941,9 +6941,6 @@ private fun MessageBubble(
         }
     val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
-    // Dismiss an already-open action menu if the message is deleted out from
-    // under it (optimistic or remote delete): a deleted message is inert.
-    LaunchedEffect(deleted) { if (deleted) menuOpen = false }
     var swipeDrag by remember(record.messageIdHex) { mutableStateOf(0f) }
     val animatedSwipeOffset by animateFloatAsState(targetValue = swipeDrag, label = "replySwipeOffset")
     val clipboard = LocalClipboardManager.current
@@ -7001,6 +6998,15 @@ private fun MessageBubble(
     var editHistoryOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     var reactionSheetOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     val quickReactionEmojis = RecentEmojiList.quickChoices(recentReactionEmojis)
+    // A deleted message is inert: tear down any open action/reaction surface if
+    // the message is deleted out from under it (optimistic or remote delete).
+    LaunchedEffect(deleted) {
+        if (deleted) {
+            menuOpen = false
+            emojiPickerOpen = false
+            reactionSheetOpen = false
+        }
+    }
 
     fun beginReply() {
         controller.replyingTo = record
@@ -7013,6 +7019,10 @@ private fun MessageBubble(
     }
 
     fun reactWithEmoji(emoji: String) {
+        // Chokepoint guard: never react to a deleted message, whatever path
+        // (menu, emoji picker) called in — even if that surface was open when
+        // the delete landed.
+        if (deleted) return
         onReactionEmojiPicked(emoji)
         // Route via launchMutation: same survives-navigation rationale as delete/send.
         appState.launchMutation { controller.toggleReaction(emoji, record) }
@@ -7464,7 +7474,9 @@ private fun MessageBubble(
                     )
                 }
                 val tallies = controller.reactions[record.messageIdHex].orEmpty()
-                if (tallies.isNotEmpty()) {
+                // Hide reaction tallies on a deleted message — nothing to show,
+                // and nothing to long-press-toggle.
+                if (tallies.isNotEmpty() && !deleted) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
                         tallies.forEach { tally ->
                             ReactionTallyChip(
