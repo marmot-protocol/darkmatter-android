@@ -311,27 +311,40 @@ object MediaPipeline {
         val thumbhash: String?,
     )
 
+    sealed class VideoReadResult {
+        data class Success(
+            val video: VideoForUpload,
+        ) : VideoReadResult()
+
+        data object TooLarge : VideoReadResult()
+
+        data object Failed : VideoReadResult()
+    }
+
     /**
      * Read the picked video URI as-is — no transcoding, matching the
      * darkmatter-ios and darkmatter-desktop behavior. Extracts dimensions
      * and a thumbhash from the poster frame so receivers paint a blurred
-     * preview before the full payload downloads. Returns null on read
-     * failure, when the source exceeds [VIDEO_MAX_BYTES], or when reading
-     * would overflow [remainingBytes] — caller threads its album budget
-     * through this parameter so a multi-video pick can't accumulate
-     * hundreds of MB in heap before the cap rejects the tail.
+     * preview before the full payload downloads. Returns a typed result so
+     * callers can surface "too large" vs "decode failed" as distinct
+     * toasts: [VideoReadResult.TooLarge] fires when the source exceeds
+     * [VIDEO_MAX_BYTES] OR the caller's remaining album budget, while
+     * [VideoReadResult.Failed] is for I/O / metadata extraction errors.
      */
     fun readVideoForUpload(
         context: android.content.Context,
         uri: Uri,
         remainingBytes: Long = VIDEO_MAX_BYTES,
-    ): VideoForUpload? {
+    ): VideoReadResult {
         val resolver = context.contentResolver
-        val mime = resolver.getType(uri)?.takeIf { it.startsWith("video/", ignoreCase = true) } ?: return null
+        val mime =
+            resolver.getType(uri)?.takeIf { it.startsWith("video/", ignoreCase = true) }
+                ?: return VideoReadResult.Failed
         val displayName = queryDisplayNameFromResolver(resolver, uri) ?: "video.mp4"
 
         val perFileCap = minOf(VIDEO_MAX_BYTES, remainingBytes.coerceAtLeast(0L))
-        if (perFileCap <= 0L) return null
+        if (perFileCap <= 0L) return VideoReadResult.TooLarge
+        var overflowed = false
         val bytes =
             runCatching {
                 resolver.openInputStream(uri)?.use { stream ->
@@ -342,12 +355,17 @@ object MediaPipeline {
                         val n = stream.read(buf)
                         if (n < 0) break
                         total += n.toLong()
-                        if (total > perFileCap) return null
+                        if (total > perFileCap) {
+                            overflowed = true
+                            return@use null
+                        }
                         out.write(buf, 0, n)
                     }
                     out.toByteArray()
                 }
-            }.getOrNull() ?: return null
+            }.getOrNull()
+        if (overflowed) return VideoReadResult.TooLarge
+        if (bytes == null) return VideoReadResult.Failed
 
         // MediaMetadataRetriever needs a seekable source — write to a temp
         // file. Sloppier alternatives (FileDescriptor from URI) work only
@@ -391,13 +409,15 @@ object MediaPipeline {
                             .getOrNull()
                     }
                 poster?.recycle()
-                return VideoForUpload(
-                    bytes = bytes,
-                    mediaType = mime,
-                    fileName = displayName,
-                    width = width,
-                    height = height,
-                    thumbhash = thumbhash,
+                return VideoReadResult.Success(
+                    VideoForUpload(
+                        bytes = bytes,
+                        mediaType = mime,
+                        fileName = displayName,
+                        width = width,
+                        height = height,
+                        thumbhash = thumbhash,
+                    ),
                 )
             } finally {
                 runCatching { mmr.release() }

@@ -5650,15 +5650,21 @@ private fun ConversationScreen(
                         val mime = context.contentResolver.getType(uri).orEmpty()
                         val attachment =
                             if (mime.startsWith("video/", ignoreCase = true)) {
-                                val video =
-                                    MediaPipeline.readVideoForUpload(context, uri, remaining) ?: continue
-                                PendingAttachment(
-                                    plaintextBytes = video.bytes,
-                                    mediaType = video.mediaType,
-                                    fileName = video.fileName,
-                                    dim = "${video.width}x${video.height}",
-                                    thumbhash = video.thumbhash,
-                                )
+                                when (val r = MediaPipeline.readVideoForUpload(context, uri, remaining)) {
+                                    is MediaPipeline.VideoReadResult.Success ->
+                                        PendingAttachment(
+                                            plaintextBytes = r.video.bytes,
+                                            mediaType = r.video.mediaType,
+                                            fileName = r.video.fileName,
+                                            dim = "${r.video.width}x${r.video.height}",
+                                            thumbhash = r.video.thumbhash,
+                                        )
+                                    MediaPipeline.VideoReadResult.TooLarge -> {
+                                        overflowed = true
+                                        continue
+                                    }
+                                    MediaPipeline.VideoReadResult.Failed -> continue
+                                }
                             } else {
                                 val jpeg =
                                     MediaPipeline.readDownscaledJpeg(context.contentResolver, uri) ?: continue
@@ -5811,14 +5817,21 @@ private fun ConversationScreen(
                         // Thread the remaining album budget into the video read so a
                         // multi-video pick can't accumulate hundreds of MB in heap
                         // before the cap downstream would reject the tail.
-                        val video = MediaPipeline.readVideoForUpload(context, uri, remaining) ?: continue
-                        PendingAttachment(
-                            plaintextBytes = video.bytes,
-                            mediaType = video.mediaType,
-                            fileName = video.fileName,
-                            dim = "${video.width}x${video.height}",
-                            thumbhash = video.thumbhash,
-                        )
+                        when (val r = MediaPipeline.readVideoForUpload(context, uri, remaining)) {
+                            is MediaPipeline.VideoReadResult.Success ->
+                                PendingAttachment(
+                                    plaintextBytes = r.video.bytes,
+                                    mediaType = r.video.mediaType,
+                                    fileName = r.video.fileName,
+                                    dim = "${r.video.width}x${r.video.height}",
+                                    thumbhash = r.video.thumbhash,
+                                )
+                            MediaPipeline.VideoReadResult.TooLarge -> {
+                                overflowed = true
+                                continue
+                            }
+                            MediaPipeline.VideoReadResult.Failed -> continue
+                        }
                     } else {
                         val jpeg = MediaPipeline.readDownscaledJpeg(context.contentResolver, uri) ?: continue
                         val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
