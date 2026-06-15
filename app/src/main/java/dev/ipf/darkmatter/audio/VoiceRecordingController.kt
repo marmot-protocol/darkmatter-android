@@ -26,7 +26,11 @@ class VoiceRecordingController(
     private val onError: (Throwable) -> Unit,
 ) {
     companion object {
-        const val MAX_RECORDING_MS: Long = 60_000L
+        // Safety cap to prevent runaway recordings if the hold gesture leaks
+        // (e.g. parent intercepts the up event). Five minutes is well past
+        // the comfortable-voice-note range; longer payloads should be sent
+        // as audio file attachments, not held-mic captures.
+        const val MAX_RECORDING_MS: Long = 5L * 60L * 1000L
     }
 
     var isRecording: Boolean by mutableStateOf(false)
