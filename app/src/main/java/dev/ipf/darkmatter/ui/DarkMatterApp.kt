@@ -271,6 +271,7 @@ import dev.ipf.darkmatter.core.RecentEmojiList
 import dev.ipf.darkmatter.core.RecipientReference
 import dev.ipf.darkmatter.core.ReplySwipe
 import dev.ipf.darkmatter.core.TimelineProjector
+import dev.ipf.darkmatter.core.replyMediaKindFromMime
 import dev.ipf.darkmatter.media.DuckDuckGoImageSearchClient
 import dev.ipf.darkmatter.media.ImageSearchClient
 import dev.ipf.darkmatter.media.ImageSearchException
@@ -2193,6 +2194,118 @@ private val UriListSaver: Saver<List<android.net.Uri>, String> =
             }
         },
     )
+
+private fun senderTitleForReply(
+    senderPubkey: String,
+    appState: DarkMatterAppState,
+): String = appState.displayName(senderPubkey)
+
+private fun isOwnReplySender(
+    senderPubkey: String,
+    appState: DarkMatterAppState,
+): Boolean {
+    val active = appState.activeAccount?.accountIdHex ?: return false
+    return senderPubkey.equals(active, ignoreCase = true)
+}
+
+@Composable
+private fun ReplyPreviewCard(
+    senderTitle: String,
+    isOwn: Boolean,
+    body: String,
+    mediaKind: dev.ipf.darkmatter.core.ReplyMediaKind,
+    onClick: (() -> Unit)?,
+    onDismiss: (() -> Unit)?,
+) {
+    val title = if (isOwn) stringResource(R.string.reply_you) else senderTitle
+    val mediaLabel =
+        when (mediaKind) {
+            dev.ipf.darkmatter.core.ReplyMediaKind.Photo -> stringResource(R.string.reply_media_photo)
+            dev.ipf.darkmatter.core.ReplyMediaKind.Video -> stringResource(R.string.reply_media_video)
+            dev.ipf.darkmatter.core.ReplyMediaKind.Voice -> stringResource(R.string.reply_media_voice)
+            dev.ipf.darkmatter.core.ReplyMediaKind.Document -> stringResource(R.string.reply_media_document)
+            dev.ipf.darkmatter.core.ReplyMediaKind.None -> null
+        }
+    val mediaIcon =
+        when (mediaKind) {
+            dev.ipf.darkmatter.core.ReplyMediaKind.Photo -> Icons.Default.Image
+            dev.ipf.darkmatter.core.ReplyMediaKind.Video -> Icons.Default.Movie
+            dev.ipf.darkmatter.core.ReplyMediaKind.Voice -> Icons.Default.Mic
+            dev.ipf.darkmatter.core.ReplyMediaKind.Document -> Icons.Default.Description
+            dev.ipf.darkmatter.core.ReplyMediaKind.None -> null
+        }
+    val bodyText = mediaLabel ?: body
+    val accent =
+        if (isOwn) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.tertiary
+        }
+    val container = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
+    Surface(
+        color = container,
+        shape = RoundedCornerShape(10.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+    ) {
+        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            Box(
+                modifier =
+                    Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(accent),
+            )
+            Row(
+                modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = accent,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (mediaIcon != null) {
+                            Icon(
+                                mediaIcon,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            bodyText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (onDismiss != null) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = stringResource(R.string.cancel_reply),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun MediaImageBubble(
@@ -5343,6 +5456,7 @@ private fun ConversationScreen(
                             documentPickerLauncher.launch(arrayOf("*/*"))
                         },
                         voiceRecordingController = voiceRecordingController,
+                        appState = appState,
                     )
                 }
             }
@@ -6927,21 +7041,15 @@ private fun MessageBubble(
                             } else {
                                 controller.replyPreview(item, messageTextCopy)
                             }
-                        replyPreview?.let { (replySender, body) ->
-                            Surface(
-                                modifier = Modifier.clickable { onReplyPreviewClick(item) },
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
-                                shape = RoundedCornerShape(10.dp),
-                            ) {
-                                Column(Modifier.padding(8.dp)) {
-                                    Text(
-                                        appState.displayName(replySender),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                    Text(body, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
+                        replyPreview?.let { preview ->
+                            ReplyPreviewCard(
+                                senderTitle = senderTitleForReply(preview.sender, appState),
+                                isOwn = isOwnReplySender(preview.sender, appState),
+                                body = preview.body,
+                                mediaKind = preview.mediaKind,
+                                onClick = { onReplyPreviewClick(item) },
+                                onDismiss = null,
+                            )
                         }
                         // Prefer the controller's listMedia cache — it carries
                         // the receive-side `sourceEpoch`, which the imeta-tag
@@ -8028,6 +8136,7 @@ private fun ComposerBar(
     editingMessageId: String? = null,
     editingInitialText: String? = null,
     onCancelEdit: () -> Unit = {},
+    appState: DarkMatterAppState? = null,
 ) {
     var attachMenuOpen by remember { mutableStateOf(false) }
     // Field state is a TextFieldValue (not a bare String) so the caret can
@@ -8094,26 +8203,21 @@ private fun ComposerBar(
                 }
             }
         } else if (replyingTo != null) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    MessageProjector.displayBody(replyingTo, messageTextCopy),
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                IconButton(onClick = onCancelReply, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cancel_reply), modifier = Modifier.size(18.dp))
-                }
-            }
+            val refs = remember(replyingTo.tags) { MediaReferenceParser.parseAllImetaTags(replyingTo.tags) }
+            val mediaKind = remember(refs) { replyMediaKindFromMime(refs.firstOrNull()?.mediaType) }
+            ReplyPreviewCard(
+                senderTitle =
+                    if (replyingTo.direction == "sent") {
+                        stringResource(R.string.reply_you)
+                    } else {
+                        appState?.displayName(replyingTo.sender) ?: replyingTo.sender.take(8)
+                    },
+                isOwn = replyingTo.direction == "sent",
+                body = MessageProjector.displayBody(replyingTo, messageTextCopy),
+                mediaKind = mediaKind,
+                onClick = null,
+                onDismiss = onCancelReply,
+            )
         }
         val isRecordingVoice = voiceRecordingController?.isRecording == true
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

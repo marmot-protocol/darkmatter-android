@@ -123,6 +123,11 @@ class LocalizationResourceTest {
                 "voice_message_pause",
                 "voice_message_failed",
                 "voice_message_locked",
+                "reply_you",
+                "reply_media_photo",
+                "reply_media_video",
+                "reply_media_voice",
+                "reply_media_document",
             )
     }
 }

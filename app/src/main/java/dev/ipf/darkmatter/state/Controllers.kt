@@ -15,7 +15,9 @@ import dev.ipf.darkmatter.core.MessageTextCopy
 import dev.ipf.darkmatter.core.ReactionTally
 import dev.ipf.darkmatter.core.ReplyNavigation
 import dev.ipf.darkmatter.core.TimelineProjector
+import dev.ipf.darkmatter.core.TimelineReplyDisplay
 import dev.ipf.darkmatter.core.aggregateEdits
+import dev.ipf.darkmatter.core.replyMediaKindFromMime
 import dev.ipf.darkmatter.media.BlossomRedirectResolver
 import dev.ipf.darkmatter.media.MediaPipeline
 import dev.ipf.darkmatter.media.MediaReferenceParser
@@ -2552,15 +2554,19 @@ class ConversationController(
     fun replyPreview(
         item: TimelineMessage,
         copy: MessageTextCopy = MessageTextCopy.Default,
-    ): Pair<String, String>? {
+    ): TimelineReplyDisplay? {
         item.projected?.let { record ->
-            TimelineProjector.replyPreview(record, copy)?.let { preview ->
-                return preview.sender to preview.body
-            }
+            TimelineProjector.replyPreview(record, copy)?.let { preview -> return preview }
         }
         val targetMessageId = MessageProjector.replyTargetMessageId(item.record) ?: return null
         val target = messageById[targetMessageId] ?: return null
-        return target.sender to MessageProjector.displayBody(target, copy)
+        val refs = MediaReferenceParser.parseAllImetaTags(target.tags)
+        val mediaKind = replyMediaKindFromMime(refs.firstOrNull()?.mediaType)
+        return TimelineReplyDisplay(
+            sender = target.sender,
+            body = MessageProjector.displayBody(target, copy),
+            mediaKind = mediaKind,
+        )
     }
 
     private fun applyTimelinePage(
