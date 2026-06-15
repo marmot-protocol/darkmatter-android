@@ -8384,6 +8384,11 @@ private fun MicHoldButton(controller: dev.ipf.darkmatter.audio.VoiceRecordingCon
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val started = controller.start()
                         if (!started) return@awaitEachGesture
+                        // Consume the down so the FAB's internal clickable
+                        // doesn't ALSO interpret this press as a tap and fire
+                        // its accessibility onClick after our hold gesture
+                        // already handled stop/send/cancel.
+                        down.consume()
                         haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                         var canceled = false
                         var locked = false
@@ -8398,6 +8403,7 @@ private fun MicHoldButton(controller: dev.ipf.darkmatter.audio.VoiceRecordingCon
                                     terminated = true
                                     break
                                 }
+                                change.consume()
                                 val deltaX = change.position.x - down.position.x
                                 val deltaY = change.position.y - down.position.y
                                 controller.updateDrag(deltaX, deltaY, cancelThresholdPx, lockThresholdPx)
