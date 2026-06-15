@@ -7054,24 +7054,33 @@ private fun MessageBubble(
                     modifier =
                         Modifier
                             .offset { IntOffset(animatedSwipeOffset.roundToInt(), 0) }
-                            .pointerInput(record.messageIdHex, replySwipeThresholdPx, maxSwipeOffsetPx) {
-                                detectHorizontalDragGestures(
-                                    onHorizontalDrag = { change, dragAmount ->
-                                        val next = ReplySwipe.visualOffset(swipeDrag + dragAmount, maxSwipeOffsetPx)
-                                        if (next != swipeDrag || dragAmount > 0f) change.consume()
-                                        swipeDrag = next
-                                    },
-                                    onDragEnd = {
-                                        if (ReplySwipe.shouldTriggerReply(swipeDrag, totalY = 0f, threshold = replySwipeThresholdPx)) {
-                                            beginReply()
-                                        }
-                                        swipeDrag = 0f
-                                    },
-                                    onDragCancel = { swipeDrag = 0f },
-                                )
-                            }.combinedClickable(
+                            .then(
+                                // A deleted message has no actionable content, so
+                                // disable swipe-to-reply entirely: no drag, no trigger.
+                                if (deleted) {
+                                    Modifier
+                                } else {
+                                    Modifier.pointerInput(record.messageIdHex, replySwipeThresholdPx, maxSwipeOffsetPx) {
+                                        detectHorizontalDragGestures(
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                val next = ReplySwipe.visualOffset(swipeDrag + dragAmount, maxSwipeOffsetPx)
+                                                if (next != swipeDrag || dragAmount > 0f) change.consume()
+                                                swipeDrag = next
+                                            },
+                                            onDragEnd = {
+                                                if (ReplySwipe.shouldTriggerReply(swipeDrag, totalY = 0f, threshold = replySwipeThresholdPx)) {
+                                                    beginReply()
+                                                }
+                                                swipeDrag = 0f
+                                            },
+                                            onDragCancel = { swipeDrag = 0f },
+                                        )
+                                    }
+                                },
+                            ).combinedClickable(
                                 onClick = {},
-                                onLongClick = { menuOpen = true },
+                                // No action menu (react/reply/copy/info) on a deleted message.
+                                onLongClick = { if (!deleted) menuOpen = true },
                             ),
                     color = bubbleColor,
                     shape = RoundedCornerShape(18.dp),
@@ -7087,7 +7096,7 @@ private fun MessageBubble(
                                 modifier =
                                     Modifier.combinedClickable(
                                         onClick = { appState.presentProfile(appState.npub(record.sender)) },
-                                        onLongClick = { menuOpen = true },
+                                        onLongClick = { if (!deleted) menuOpen = true },
                                     ),
                             )
                         }
