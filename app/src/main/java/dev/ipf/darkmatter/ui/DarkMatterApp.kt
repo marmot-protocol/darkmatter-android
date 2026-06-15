@@ -2338,6 +2338,7 @@ private fun MediaImageBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    uploading: Boolean = false,
 ) {
     val record = item.record
     val key = record.messageIdHex
@@ -2470,6 +2471,21 @@ private fun MediaImageBubble(
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+            }
+            if (uploading) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.5.dp,
+                            color = Color.White,
+                        )
+                    }
+                }
             }
         }
     }
@@ -2654,6 +2670,7 @@ private fun MediaVisualGridBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    uploading: Boolean = false,
 ) {
     val record = item.record
     val visible = attachments.take(6)
@@ -2674,6 +2691,7 @@ private fun MediaVisualGridBubble(
                 onTap = { _ -> viewerOpenAt = tileIndex },
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
+                uploading = uploading,
             )
         } else {
             MediaImageGridTile(
@@ -2686,6 +2704,7 @@ private fun MediaVisualGridBubble(
                 onTap = { viewerOpenAt = tileIndex },
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
+                uploading = uploading,
             )
         }
     }
@@ -2734,6 +2753,7 @@ private fun MediaVideoGridTile(
     onTap: (java.io.File) -> Unit,
     overflowCount: Int,
     modifier: Modifier = Modifier,
+    uploading: Boolean = false,
 ) {
     val context = LocalContext.current
     val epoch = reference.sourceEpoch
@@ -2872,6 +2892,18 @@ private fun MediaVideoGridTile(
                 )
             }
         }
+        if (uploading) {
+            Box(
+                modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    strokeWidth = 2.5.dp,
+                    color = Color.White,
+                )
+            }
+        }
     }
 }
 
@@ -2892,6 +2924,7 @@ private fun MediaImageGridTile(
     onTap: () -> Unit,
     overflowCount: Int,
     modifier: Modifier = Modifier,
+    uploading: Boolean = false,
 ) {
     // Two-bucket key model (mirrors `MediaImageBubble`):
     //   - `decodeKey` includes `sourceEpoch`, scoped to bytes-level state
@@ -3022,6 +3055,18 @@ private fun MediaImageGridTile(
                     color = Color.White,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        if (uploading) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    strokeWidth = 2.5.dp,
+                    color = Color.White,
                 )
             }
         }
@@ -8206,6 +8251,7 @@ private fun MessageBubble(
                                         controller = controller,
                                         appState = appState,
                                         mine = true,
+                                        uploading = !uploadFailed,
                                     )
                                 }
                             } else {
@@ -8215,6 +8261,7 @@ private fun MessageBubble(
                                     controller = controller,
                                     appState = appState,
                                     mine = true,
+                                    uploading = !uploadFailed,
                                 )
                             }
                         }
