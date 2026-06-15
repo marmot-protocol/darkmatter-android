@@ -2646,8 +2646,7 @@ private fun MediaVisualGridBubble(
     val record = item.record
     val visible = attachments.take(6)
     val overflow = (attachments.size - visible.size).coerceAtLeast(0)
-    var imageViewerOpenAt by remember(record.messageIdHex) { mutableStateOf<Int?>(null) }
-    var videoPlayerFile by remember(record.messageIdHex) { mutableStateOf<java.io.File?>(null) }
+    var viewerOpenAt by remember(record.messageIdHex) { mutableStateOf<Int?>(null) }
 
     val tileAt: @Composable (Int, Modifier) -> Unit = { tileIndex, tileModifier ->
         val entry = visible[tileIndex]
@@ -2660,15 +2659,11 @@ private fun MediaVisualGridBubble(
                 controller = controller,
                 appState = appState,
                 mine = mine,
-                onTap = { file -> videoPlayerFile = file },
+                onTap = { _ -> viewerOpenAt = tileIndex },
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
             )
         } else {
-            // For mixed albums the image viewer's swipe-between-tiles only
-            // makes sense if all the attachments it walks are images; pass
-            // the image-only subset so a swipe doesn't try to render a
-            // video as an image.
             MediaImageGridTile(
                 messageIdHex = record.messageIdHex,
                 attachmentIndex = entry.index,
@@ -2676,7 +2671,7 @@ private fun MediaVisualGridBubble(
                 controller = controller,
                 appState = appState,
                 mine = mine,
-                onTap = { imageViewerOpenAt = tileIndex },
+                onTap = { viewerOpenAt = tileIndex },
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
             )
@@ -2691,20 +2686,18 @@ private fun MediaVisualGridBubble(
         MasonryImageLayout(visibleCount = visible.size, tile = tileAt)
     }
 
-    imageViewerOpenAt?.let { tileIndex ->
-        val imageOnly = attachments.filter { !MediaReferenceParser.isVideoMedia(it.value) }
-        val imageStart = imageOnly.indexOfFirst { it.index == visible[tileIndex].index }.coerceAtLeast(0)
+    viewerOpenAt?.let { tileIndex ->
+        // Unified viewer walks the full attachments list — each page picks
+        // its renderer (image vs video) by MIME, swipes between siblings
+        // regardless of type.
         FullScreenImageViewer(
             controller = controller,
             appState = appState,
             messageIdHex = record.messageIdHex,
-            attachments = imageOnly,
-            startIndex = imageStart,
-            onDismiss = { imageViewerOpenAt = null },
+            attachments = attachments,
+            startIndex = tileIndex,
+            onDismiss = { viewerOpenAt = null },
         )
-    }
-    videoPlayerFile?.let { file ->
-        FullscreenVideoPlayer(file = file, onDismiss = { videoPlayerFile = null })
     }
 }
 
@@ -4337,16 +4330,26 @@ private fun FullScreenImageViewer(
                 userScrollEnabled = scale <= 1f,
             ) { page ->
                 val pageEntry = attachments[page]
-                ViewerPage(
-                    controller = controller,
-                    messageIdHex = messageIdHex,
-                    attachmentIndex = pageEntry.index,
-                    reference = pageEntry.value,
-                    scale = if (page == pagerState.currentPage) scale else 1f,
-                    offset = if (page == pagerState.currentPage) offset else Offset.Zero,
-                    onScaleChange = { if (page == pagerState.currentPage) scale = it },
-                    onOffsetChange = { if (page == pagerState.currentPage) offset = it },
-                )
+                if (MediaReferenceParser.isVideoMedia(pageEntry.value)) {
+                    VideoViewerPage(
+                        controller = controller,
+                        messageIdHex = messageIdHex,
+                        attachmentIndex = pageEntry.index,
+                        reference = pageEntry.value,
+                        isCurrent = page == pagerState.currentPage,
+                    )
+                } else {
+                    ViewerPage(
+                        controller = controller,
+                        messageIdHex = messageIdHex,
+                        attachmentIndex = pageEntry.index,
+                        reference = pageEntry.value,
+                        scale = if (page == pagerState.currentPage) scale else 1f,
+                        offset = if (page == pagerState.currentPage) offset else Offset.Zero,
+                        onScaleChange = { if (page == pagerState.currentPage) scale = it },
+                        onOffsetChange = { if (page == pagerState.currentPage) offset = it },
+                    )
+                }
             }
             Row(
                 modifier =
@@ -4381,7 +4384,11 @@ private fun FullScreenImageViewer(
                                 val ok =
                                     data != null &&
                                         withContext(Dispatchers.IO) {
-                                            saveImageToGallery(context, data, ref.fileName, ref.mediaType)
+                                            if (MediaReferenceParser.isVideoMedia(ref)) {
+                                                saveVideoToGallery(context, data, ref.fileName, ref.mediaType)
+                                            } else {
+                                                saveImageToGallery(context, data, ref.fileName, ref.mediaType)
+                                            }
                                         }
                                 snackbarHostState.showSnackbar(if (ok) savedMessage else saveFailedMessage)
                             }
@@ -4423,6 +4430,73 @@ private fun FullScreenImageViewer(
  * `LaunchedEffect` doesn't need to wait for "page becomes visible" — it
  * downloads as soon as the page composes.
  */
+@Composable
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun VideoViewerPage(
+    controller: ConversationController,
+    messageIdHex: String,
+    attachmentIndex: Int,
+    reference: MediaAttachmentReferenceFfi,
+    isCurrent: Boolean,
+) {
+    val context = LocalContext.current
+    var localFile by remember(messageIdHex, attachmentIndex, reference.sourceEpoch) {
+        mutableStateOf<java.io.File?>(null)
+    }
+    LaunchedEffect(messageIdHex, attachmentIndex, reference.sourceEpoch) {
+        if (localFile != null) return@LaunchedEffect
+        if (reference.sourceEpoch == 0uL) return@LaunchedEffect
+        runCatching {
+            materializeVideoAttachment(
+                context = context,
+                controller = controller,
+                messageIdHex = messageIdHex,
+                attachmentIndex = attachmentIndex,
+                reference = reference,
+                mine = false,
+            )
+        }.onSuccess { localFile = it }
+    }
+    val file = localFile
+    if (file == null) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+        }
+        return
+    }
+    val exo =
+        remember(file) {
+            androidx.media3.exoplayer.ExoPlayer
+                .Builder(context)
+                .build()
+                .apply {
+                    setMediaItem(
+                        androidx.media3.common.MediaItem
+                            .fromUri(android.net.Uri.fromFile(file)),
+                    )
+                    prepare()
+                }
+        }
+    DisposableEffect(exo) { onDispose { exo.release() } }
+    // Pre-composed neighbour pages must NOT play audio — only the visible
+    // one autoplays. Pause when the page scrolls off-screen.
+    LaunchedEffect(isCurrent, exo) {
+        if (isCurrent) exo.playWhenReady = true else exo.pause()
+    }
+    androidx.compose.ui.viewinterop.AndroidView(
+        modifier = Modifier.fillMaxSize().background(Color.Black),
+        factory = { ctx ->
+            androidx.media3.ui.PlayerView(ctx).apply {
+                player = exo
+                useController = true
+                setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                controllerShowTimeoutMs = 2500
+            }
+        },
+    )
+}
+
 @Composable
 private fun ViewerPage(
     controller: ConversationController,
@@ -4628,6 +4702,41 @@ private fun saveImageToGallery(
         true
     } catch (_: Throwable) {
         resolver.delete(uri, null, null) // don't leave a pending orphan
+        false
+    }
+}
+
+/** Persist a decrypted video to the public Movies/DarkMatter folder via the
+ *  Video MediaStore so it shows up in the system gallery. Mirrors the image
+ *  save flow's IS_PENDING dance. */
+private fun saveVideoToGallery(
+    context: android.content.Context,
+    bytes: ByteArray,
+    fileName: String,
+    mediaType: String,
+): Boolean {
+    val resolver = context.contentResolver
+    val values =
+        android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, MediaPipeline.safeDisplayName(fileName))
+            put(android.provider.MediaStore.Video.Media.MIME_TYPE, mediaType.ifBlank { "video/mp4" })
+            put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/DarkMatter")
+            put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+        }
+    val uri =
+        resolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            ?: return false
+    return try {
+        resolver.openOutputStream(uri).use { out ->
+            if (out == null) throw java.io.IOException("null output stream")
+            out.write(bytes)
+        }
+        values.clear()
+        values.put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        true
+    } catch (_: Throwable) {
+        resolver.delete(uri, null, null)
         false
     }
 }
