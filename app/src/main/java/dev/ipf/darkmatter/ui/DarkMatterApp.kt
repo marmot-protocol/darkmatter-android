@@ -2631,6 +2631,236 @@ private fun MediaImageGridBubble(
 }
 
 /**
+ * Mixed image + video album bubble. Each tile picks its renderer based on
+ * MIME — image tiles open the image viewer, video tiles tap-to-play in the
+ * fullscreen ExoPlayer. Layout is the same masonry as MediaImageGridBubble.
+ */
+@Composable
+private fun MediaVisualGridBubble(
+    item: TimelineMessage,
+    attachments: List<IndexedValue<MediaAttachmentReferenceFfi>>,
+    controller: ConversationController,
+    appState: DarkMatterAppState,
+    mine: Boolean,
+) {
+    val record = item.record
+    val visible = attachments.take(6)
+    val overflow = (attachments.size - visible.size).coerceAtLeast(0)
+    var imageViewerOpenAt by remember(record.messageIdHex) { mutableStateOf<Int?>(null) }
+    var videoPlayerFile by remember(record.messageIdHex) { mutableStateOf<java.io.File?>(null) }
+
+    val tileAt: @Composable (Int, Modifier) -> Unit = { tileIndex, tileModifier ->
+        val entry = visible[tileIndex]
+        val showOverflow = tileIndex == visible.lastIndex && overflow > 0
+        if (MediaReferenceParser.isVideoMedia(entry.value)) {
+            MediaVideoGridTile(
+                messageIdHex = record.messageIdHex,
+                attachmentIndex = entry.index,
+                reference = entry.value,
+                controller = controller,
+                appState = appState,
+                mine = mine,
+                onTap = { file -> videoPlayerFile = file },
+                overflowCount = if (showOverflow) overflow else 0,
+                modifier = tileModifier,
+            )
+        } else {
+            // For mixed albums the image viewer's swipe-between-tiles only
+            // makes sense if all the attachments it walks are images; pass
+            // the image-only subset so a swipe doesn't try to render a
+            // video as an image.
+            MediaImageGridTile(
+                messageIdHex = record.messageIdHex,
+                attachmentIndex = entry.index,
+                reference = entry.value,
+                controller = controller,
+                appState = appState,
+                mine = mine,
+                onTap = { imageViewerOpenAt = tileIndex },
+                overflowCount = if (showOverflow) overflow else 0,
+                modifier = tileModifier,
+            )
+        }
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        MasonryImageLayout(visibleCount = visible.size, tile = tileAt)
+    }
+
+    imageViewerOpenAt?.let { tileIndex ->
+        val imageOnly = attachments.filter { !MediaReferenceParser.isVideoMedia(it.value) }
+        val imageStart = imageOnly.indexOfFirst { it.index == visible[tileIndex].index }.coerceAtLeast(0)
+        FullScreenImageViewer(
+            controller = controller,
+            appState = appState,
+            messageIdHex = record.messageIdHex,
+            attachments = imageOnly,
+            startIndex = imageStart,
+            onDismiss = { imageViewerOpenAt = null },
+        )
+    }
+    videoPlayerFile?.let { file ->
+        FullscreenVideoPlayer(file = file, onDismiss = { videoPlayerFile = null })
+    }
+}
+
+/**
+ * Single video tile in an album grid. Auto-materialises on first
+ * composition (mine + cached short-circuit; otherwise FFI download honoring
+ * the auto-download policy), decodes a scaled poster, overlays a centered
+ * play affordance. Tap delivers the materialised file to the parent so
+ * the bubble can open the fullscreen player.
+ */
+@Composable
+private fun MediaVideoGridTile(
+    messageIdHex: String,
+    attachmentIndex: Int,
+    reference: MediaAttachmentReferenceFfi,
+    controller: ConversationController,
+    appState: DarkMatterAppState,
+    mine: Boolean,
+    onTap: (java.io.File) -> Unit,
+    overflowCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val epoch = reference.sourceEpoch
+    var localFile by remember(messageIdHex, attachmentIndex, epoch) { mutableStateOf<java.io.File?>(null) }
+    var posterBitmap by remember(messageIdHex, attachmentIndex, epoch) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var failed by remember(messageIdHex, attachmentIndex, epoch) { mutableStateOf(false) }
+    val thumbhashImage = rememberThumbhashImage(reference.thumbhash)
+    val autoDownload =
+        remember(messageIdHex, attachmentIndex, appState.mediaAutoDownloadPolicy) {
+            mine || appState.shouldAutoDownloadMedia()
+        }
+
+    LaunchedEffect(messageIdHex, attachmentIndex, epoch, autoDownload) {
+        if (localFile != null) return@LaunchedEffect
+        if (!autoDownload) return@LaunchedEffect
+        if (!mine && epoch == 0uL) return@LaunchedEffect
+        runCatching {
+            materializeVideoAttachment(
+                context = context,
+                controller = controller,
+                messageIdHex = messageIdHex,
+                attachmentIndex = attachmentIndex,
+                reference = reference,
+                mine = mine,
+            )
+        }.onSuccess { f ->
+            localFile = f
+            failed = false
+        }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            failed = true
+        }
+    }
+
+    LaunchedEffect(localFile) {
+        val f = localFile ?: return@LaunchedEffect
+        if (posterBitmap != null) return@LaunchedEffect
+        posterBitmap =
+            withContext(Dispatchers.IO) {
+                val mmr = android.media.MediaMetadataRetriever()
+                try {
+                    mmr.setDataSource(f.absolutePath)
+                    val edge = MediaPipeline.THUMBNAIL_MAX_EDGE_PX
+                    mmr
+                        .getScaledFrameAtTime(
+                            0L,
+                            android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            edge,
+                            edge,
+                        )?.asImageBitmap()
+                } catch (t: Throwable) {
+                    null
+                } finally {
+                    runCatching { mmr.release() }
+                }
+            }
+    }
+
+    Box(
+        modifier =
+            modifier.clickable(enabled = localFile != null) {
+                localFile?.let(onTap)
+            },
+    ) {
+        val poster = posterBitmap
+        when {
+            poster != null ->
+                Image(
+                    bitmap = poster,
+                    contentDescription = stringResource(R.string.reply_media_video),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            thumbhashImage != null ->
+                Image(
+                    bitmap = thumbhashImage,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            else ->
+                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
+        }
+        Surface(
+            color = Color.Black.copy(alpha = 0.55f),
+            shape = CircleShape,
+            modifier =
+                Modifier
+                    .align(Alignment.Center)
+                    .size(40.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                when {
+                    failed ->
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = stringResource(R.string.voice_message_failed),
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    localFile == null ->
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White,
+                        )
+                    else ->
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = stringResource(R.string.reply_media_video),
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                }
+            }
+        }
+        if (overflowCount > 0) {
+            Box(
+                modifier =
+                    Modifier
+                        .matchParentSize()
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "+$overflowCount",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            }
+        }
+    }
+}
+
+/**
  * One tile of the album grid: square thumbnail + per-tile download state.
  * The thumbnail-cache lookup is keyed on `(messageId, attachmentIndex)` so
  * tiles never clobber each other. Tap fires [onTap] (the parent opens the
@@ -7585,21 +7815,40 @@ private fun MessageBubble(
                                     ?.values
                                     ?.getOrNull(1)
                             }
-                        if (!deleted && !invalidated && imageAttachments.isNotEmpty()) {
-                            if (imageAttachments.size == 1) {
-                                val entry = imageAttachments.first()
-                                MediaImageBubble(
-                                    item = item,
-                                    reference = entry.value,
-                                    attachmentIndex = entry.index,
-                                    controller = controller,
-                                    appState = appState,
-                                    mine = mine,
-                                )
+                        // Visual attachments (image + video) ride one bubble:
+                        // a singleton routes to its dedicated bubble, a multi
+                        // goes to MediaVisualGridBubble which mixes image
+                        // and video tiles in pick order.
+                        val visualAttachments =
+                            remember(imageAttachments, videoAttachments) {
+                                (imageAttachments + videoAttachments).sortedBy { it.index }
+                            }
+                        if (!deleted && !invalidated && visualAttachments.isNotEmpty()) {
+                            if (visualAttachments.size == 1) {
+                                val entry = visualAttachments.first()
+                                if (MediaReferenceParser.isVideoMedia(entry.value)) {
+                                    MediaVideoBubble(
+                                        messageIdHex = record.messageIdHex,
+                                        attachmentIndex = entry.index,
+                                        reference = entry.value,
+                                        mine = mine,
+                                        controller = controller,
+                                        appState = appState,
+                                    )
+                                } else {
+                                    MediaImageBubble(
+                                        item = item,
+                                        reference = entry.value,
+                                        attachmentIndex = entry.index,
+                                        controller = controller,
+                                        appState = appState,
+                                        mine = mine,
+                                    )
+                                }
                             } else {
-                                MediaImageGridBubble(
+                                MediaVisualGridBubble(
                                     item = item,
-                                    attachments = imageAttachments,
+                                    attachments = visualAttachments,
                                     controller = controller,
                                     appState = appState,
                                     mine = mine,
@@ -7609,18 +7858,6 @@ private fun MessageBubble(
                         if (!deleted && !invalidated && audioAttachments.isNotEmpty()) {
                             audioAttachments.forEach { entry ->
                                 MediaVoiceBubble(
-                                    messageIdHex = record.messageIdHex,
-                                    attachmentIndex = entry.index,
-                                    reference = entry.value,
-                                    mine = mine,
-                                    controller = controller,
-                                    appState = appState,
-                                )
-                            }
-                        }
-                        if (!deleted && !invalidated && videoAttachments.isNotEmpty()) {
-                            videoAttachments.forEach { entry ->
-                                MediaVideoBubble(
                                     messageIdHex = record.messageIdHex,
                                     attachmentIndex = entry.index,
                                     reference = entry.value,
