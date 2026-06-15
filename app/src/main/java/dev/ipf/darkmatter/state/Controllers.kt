@@ -2323,6 +2323,7 @@ class ConversationController(
         return runCatching {
             appState.marmotIo { declineGroupInvite(account, group.groupIdHex) }
             group = group.copy(pendingConfirmation = false, archived = true)
+            appState.applyLocalGroupUpdate(group)
             appState.present(R.string.toast_invite_declined)
             true
         }.getOrElse {
