@@ -5283,13 +5283,11 @@ private fun ConversationScreen(
     val imeIsOpen = imeBottom > 0
     LaunchedEffect(imeIsOpen, chat.id) {
         if (!imeIsOpen || !initialTimelineAnchored || !nearBottom) return@LaunchedEffect
-        Log.d("ImeScroll", "open nearBottom=true totalItems=${listState.layoutInfo.totalItemsCount}")
         repeat(24) {
             withFrameNanos { }
             val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
             runCatching { listState.scrollToItem(last) }
         }
-        Log.d("ImeScroll", "settled firstVisible=${listState.firstVisibleItemIndex}")
     }
     LaunchedEffect(latestTimelineItemId) {
         if (renderedTimeline.isNotEmpty()) {

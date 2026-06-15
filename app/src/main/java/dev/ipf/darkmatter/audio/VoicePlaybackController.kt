@@ -166,7 +166,7 @@ object VoicePlaybackController {
                         setDataSource(file.absolutePath)
                         prepare()
                     }
-                }.onFailure { Log.w(TAG, "MediaPlayer prepare failed for ${file.name}", it) }
+                }.onFailure { Log.w(TAG, "MediaPlayer prepare failed", it) }
                     .getOrNull()
             } ?: run {
                 _state.value = PlaybackState()

@@ -27,7 +27,8 @@ internal object BlossomRedirectResolver {
                     val raw = location ?: return null
                     val next = runCatching { current.resolve(raw) }.getOrNull() ?: return null
                     if (!isAllowed(next)) {
-                        Log.w(TAG, "rejected redirect to $next (failed SSRF check)")
+                        // Log host only — the path / query may carry signed tokens.
+                        Log.w(TAG, "rejected redirect to host=${next.host} (failed SSRF check)")
                         return null
                     }
                     current = next

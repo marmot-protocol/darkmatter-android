@@ -31,7 +31,7 @@ object AudioWaveformExtractor {
         val result =
             withContext(Dispatchers.IO) {
                 runCatching { decodeBlocking(file) }
-                    .onFailure { Log.w(TAG, "decode failed for ${file.name}", it) }
+                    .onFailure { Log.w(TAG, "decode failed", it) }
                     .getOrNull()
             }
         if (result != null) cache[file.absolutePath] = result
@@ -135,7 +135,6 @@ object AudioWaveformExtractor {
                 val norm = (hybrid[i] / maxV).coerceIn(0f, 1f)
                 FLOOR + (1f - FLOOR) * kotlin.math.sqrt(norm)
             }
-        Log.d(TAG, "decoded ${file.name}: bars=$BARS sample=${result.take(8).joinToString { "%.2f".format(it) }}")
         return result
     }
 }
