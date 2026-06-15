@@ -61,14 +61,15 @@ internal object BlossomRedirectResolver {
         }
     }
 
-    // Per-hop SSRF check: HTTPS only, no IP literals, no loopback hosts.
+    // Per-hop SSRF check. Delegate to the project-shared `HostSafety` which
+    // already covers all IPv4/IPv6 private + loopback + link-local ranges,
+    // non-dotted IPv4 encodings, and loopback hostnames — so the same
+    // guarantees the avatar / profile pipeline get apply here too.
     private fun isAllowed(uri: URI): Boolean {
         if (!uri.scheme.equals("https", ignoreCase = true)) return false
-        val host = uri.host?.lowercase() ?: return false
+        val host = uri.host ?: return false
         if (host.isEmpty()) return false
-        if (host.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$"))) return false
-        if (host.startsWith("[")) return false
-        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) return false
-        return true
+        return !dev.ipf.darkmatter.core.HostSafety
+            .isPrivateOrLoopbackHost(host)
     }
 }

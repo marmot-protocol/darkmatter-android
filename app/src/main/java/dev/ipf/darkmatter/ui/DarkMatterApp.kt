@@ -4816,11 +4816,12 @@ private fun ConversationScreen(
     }
 
     val voiceRecordingController =
-        // Re-key on the controller too: when appState.runtimeGeneration
-        // changes, a fresh ConversationController replaces this one and
-        // the recorder's closure would otherwise keep dispatching sends
-        // through the stale controller.
-        remember(chat.id, controller) {
+        // Re-key on every captured dependency: chat.id (basic), controller
+        // (avoids dispatching through a stale ConversationController when
+        // appState.runtimeGeneration changes), and voiceOutputDir (a fresh
+        // File reference if context/cacheDir flips — also future-proofs an
+        // account-scoped dir).
+        remember(chat.id, controller, voiceOutputDir) {
             dev.ipf.darkmatter.audio.VoiceRecordingController(
                 context = context,
                 outputDirectory = voiceOutputDir,
