@@ -298,4 +298,109 @@ object MediaPipeline {
         }
         return sample
     }
+
+    /** 50 MB per video — matches the shipped iOS cap. */
+    const val VIDEO_MAX_BYTES: Long = 50L * 1024L * 1024L
+
+    data class VideoForUpload(
+        val bytes: ByteArray,
+        val mediaType: String,
+        val fileName: String,
+        val width: Int,
+        val height: Int,
+        val thumbhash: String?,
+    )
+
+    /**
+     * Read the picked video URI as-is — no transcoding, matching the
+     * darkmatter-ios and darkmatter-desktop behavior. Extracts dimensions
+     * and a thumbhash from the poster frame so receivers paint a blurred
+     * preview before the full payload downloads. Returns null on read
+     * failure or when the source exceeds [VIDEO_MAX_BYTES].
+     */
+    fun readVideoForUpload(
+        context: android.content.Context,
+        uri: Uri,
+    ): VideoForUpload? {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri)?.takeIf { it.startsWith("video/", ignoreCase = true) } ?: return null
+        val displayName = queryDisplayNameFromResolver(resolver, uri) ?: "video.mp4"
+
+        val bytes =
+            runCatching {
+                resolver.openInputStream(uri)?.use { stream ->
+                    val out = ByteArrayOutputStream()
+                    val buf = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val n = stream.read(buf)
+                        if (n < 0) break
+                        total += n.toLong()
+                        if (total > VIDEO_MAX_BYTES) return null
+                        out.write(buf, 0, n)
+                    }
+                    out.toByteArray()
+                }
+            }.getOrNull() ?: return null
+
+        // MediaMetadataRetriever needs a seekable source — write to a temp
+        // file. Sloppier alternatives (FileDescriptor from URI) work only
+        // for some providers; the temp file path is universal.
+        val tmp = java.io.File.createTempFile("vidmeta-", null, context.cacheDir)
+        try {
+            tmp.writeBytes(bytes)
+            val mmr = android.media.MediaMetadataRetriever()
+            try {
+                mmr.setDataSource(tmp.absolutePath)
+                val width =
+                    mmr
+                        .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                        ?.toIntOrNull() ?: 0
+                val height =
+                    mmr
+                        .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                        ?.toIntOrNull() ?: 0
+                val poster = mmr.getFrameAtTime(0L)
+                val thumbhash =
+                    poster?.let { bm ->
+                        // ThumbHash needs an opaque RGB bitmap; matches the
+                        // image-pipeline convention.
+                        val opaque =
+                            Bitmap.createBitmap(bm.width, bm.height, Bitmap.Config.ARGB_8888).apply {
+                                val canvas = Canvas(this)
+                                canvas.drawColor(Color.BLACK)
+                                canvas.drawBitmap(bm, 0f, 0f, null)
+                            }
+                        runCatching { Thumbhash.encodeFromBitmap(opaque) }
+                            .also { opaque.recycle() }
+                            .getOrNull()
+                    }
+                poster?.recycle()
+                return VideoForUpload(
+                    bytes = bytes,
+                    mediaType = mime,
+                    fileName = displayName,
+                    width = width,
+                    height = height,
+                    thumbhash = thumbhash,
+                )
+            } finally {
+                runCatching { mmr.release() }
+            }
+        } finally {
+            runCatching { tmp.delete() }
+        }
+    }
+
+    private fun queryDisplayNameFromResolver(
+        resolver: ContentResolver,
+        uri: Uri,
+    ): String? =
+        runCatching {
+            resolver
+                .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+        }.getOrNull()
 }
