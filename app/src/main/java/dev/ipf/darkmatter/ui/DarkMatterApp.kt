@@ -6941,6 +6941,9 @@ private fun MessageBubble(
         }
     val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
+    // Dismiss an already-open action menu if the message is deleted out from
+    // under it (optimistic or remote delete): a deleted message is inert.
+    LaunchedEffect(deleted) { if (deleted) menuOpen = false }
     var swipeDrag by remember(record.messageIdHex) { mutableStateOf(0f) }
     val animatedSwipeOffset by animateFloatAsState(targetValue = swipeDrag, label = "replySwipeOffset")
     val clipboard = LocalClipboardManager.current
@@ -7390,8 +7393,10 @@ private fun MessageBubble(
                                 }
                             }
                             MessageActionMenu(
-                                expanded = menuOpen,
-                                canDelete = mine && record.messageIdHex.isNotBlank(),
+                                // Never render the menu for a deleted message, even
+                                // if it was open when the delete landed.
+                                expanded = menuOpen && !deleted,
+                                canDelete = mine && record.messageIdHex.isNotBlank() && !deleted,
                                 canEdit = mine && record.kind == 9uL && record.messageIdHex.isNotBlank() && !deleted,
                                 quickReactionEmojis = quickReactionEmojis,
                                 onDismissRequest = { menuOpen = false },
