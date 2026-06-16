@@ -11010,17 +11010,20 @@ private fun ProfileEditScreen(
                         onClick = {
                             busy = true
                             appState.launchMutation {
-                                appState.publishProfile(
-                                    UserProfileMetadataFfi(
-                                        name = displayName.trim().ifBlank { null },
-                                        displayName = displayName.trim().ifBlank { null },
-                                        about = about.trim().ifBlank { null },
-                                        picture = picture.trim().ifBlank { null },
-                                        nip05 = nip05.trim().ifBlank { null },
-                                        lud16 = lud16.trim().ifBlank { null },
-                                    ),
-                                )
-                                busy = false
+                                try {
+                                    appState.publishProfile(
+                                        UserProfileMetadataFfi(
+                                            name = displayName.trim().ifBlank { null },
+                                            displayName = displayName.trim().ifBlank { null },
+                                            about = about.trim().ifBlank { null },
+                                            picture = picture.trim().ifBlank { null },
+                                            nip05 = nip05.trim().ifBlank { null },
+                                            lud16 = lud16.trim().ifBlank { null },
+                                        ),
+                                    )
+                                } finally {
+                                    busy = false
+                                }
                             }
                         },
                         enabled = !busy && active != null && pictureValid && nip05Valid,
@@ -11298,8 +11301,11 @@ private fun RelaysScreen(
                                 onClick = {
                                     saving = true
                                     appState.launchMutation {
-                                        lists = appState.setAccountRelays(selectedKind, currentRelays - relay) ?: appState.accountRelayLists()
-                                        saving = false
+                                        try {
+                                            lists = appState.setAccountRelays(selectedKind, currentRelays - relay) ?: appState.accountRelayLists()
+                                        } finally {
+                                            saving = false
+                                        }
                                     }
                                 },
                                 enabled = !saving && currentRelays.size > 1,
@@ -11328,9 +11334,12 @@ private fun RelaysScreen(
                                 val trimmed = pendingUrl.trim()
                                 saving = true
                                 appState.launchMutation {
-                                    lists = appState.setAccountRelays(selectedKind, currentRelays + trimmed) ?: appState.accountRelayLists()
-                                    pendingUrl = ""
-                                    saving = false
+                                    try {
+                                        lists = appState.setAccountRelays(selectedKind, currentRelays + trimmed) ?: appState.accountRelayLists()
+                                        pendingUrl = ""
+                                    } finally {
+                                        saving = false
+                                    }
                                 }
                             },
                             modifier = Modifier.size(48.dp),
