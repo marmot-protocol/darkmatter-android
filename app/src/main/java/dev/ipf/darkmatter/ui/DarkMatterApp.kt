@@ -11009,7 +11009,7 @@ private fun ProfileEditScreen(
                     Button(
                         onClick = {
                             busy = true
-                            scope.launch {
+                            appState.launchMutation {
                                 appState.publishProfile(
                                     UserProfileMetadataFfi(
                                         name = displayName.trim().ifBlank { null },
@@ -11297,7 +11297,7 @@ private fun RelaysScreen(
                             IconButton(
                                 onClick = {
                                     saving = true
-                                    scope.launch {
+                                    appState.launchMutation {
                                         lists = appState.setAccountRelays(selectedKind, currentRelays - relay) ?: appState.accountRelayLists()
                                         saving = false
                                     }
@@ -11327,7 +11327,7 @@ private fun RelaysScreen(
                             onClick = {
                                 val trimmed = pendingUrl.trim()
                                 saving = true
-                                scope.launch {
+                                appState.launchMutation {
                                     lists = appState.setAccountRelays(selectedKind, currentRelays + trimmed) ?: appState.accountRelayLists()
                                     pendingUrl = ""
                                     saving = false
@@ -11472,7 +11472,7 @@ private fun KeyPackagesScreen(
                         OutlinedButton(
                             onClick = {
                                 working = true
-                                scope.launch {
+                                appState.launchMutation {
                                     try {
                                         appState.republishKeyPackage()
                                         reload(refreshFromNetwork = true)
@@ -11491,7 +11491,7 @@ private fun KeyPackagesScreen(
                         Button(
                             onClick = {
                                 working = true
-                                scope.launch {
+                                appState.launchMutation {
                                     try {
                                         appState.publishNewKeyPackage()
                                         reload(refreshFromNetwork = true)
