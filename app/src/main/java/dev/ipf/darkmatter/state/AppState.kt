@@ -755,9 +755,24 @@ class DarkMatterAppState(
      */
     private suspend fun wipeDecryptedMediaFromDisk() {
         withContext(Dispatchers.IO) {
-            diskMediaCache.clear()
+            // Each target holds decrypted plaintext, so wipe them independently
+            // and best-effort: a failure in one (IO error, locked file) must not
+            // skip the others, and a swallowed failure should still be visible.
+            runCatching { diskMediaCache.clear() }
+                .onFailure {
+                    rethrowIfCancellation(it)
+                    appStateDebug { "disk media cache wipe failed: ${it.readableMessage()}" }
+                }
             runCatching { java.io.File(appContext.cacheDir, "voice_attachments").deleteRecursively() }
+                .onFailure {
+                    rethrowIfCancellation(it)
+                    appStateDebug { "voice attachment wipe failed: ${it.readableMessage()}" }
+                }
             runCatching { java.io.File(appContext.cacheDir, "video_attachments").deleteRecursively() }
+                .onFailure {
+                    rethrowIfCancellation(it)
+                    appStateDebug { "video attachment wipe failed: ${it.readableMessage()}" }
+                }
         }
     }
 
@@ -812,9 +827,11 @@ class DarkMatterAppState(
             accounts.firstOrNull { it.label == label }?.accountIdHex?.let { warmProfile(it) }
         }
         notificationScope.launch {
-            // Wipe the on-disk decrypted-media footprint first and await it, so
-            // the session's plaintext is gone before any later work and isn't
-            // left to an orphaned background task.
+            // Wipe the on-disk decrypted-media footprint before the rest of the
+            // work in THIS coroutine (push-deregistration, settings refresh), and
+            // as a tracked task rather than an orphaned launch. Note: sign-out's
+            // callers do not await this launch, so a fast re-sign-in can still
+            // race the wipe — fully closing that window is a larger change.
             wipeDecryptedMediaFromDisk()
             // Tell the runtime to forget the signed-out account's push
             // registration before refreshing visible settings. Otherwise the
