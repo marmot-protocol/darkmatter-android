@@ -1371,6 +1371,10 @@ class DarkMatterAppState(
             val settings = marmotIo { setNativePushEnabled(account, enabled) }
             localNotificationSettings = settings
             if (enabled) {
+                // An explicit re-enable wins over a queued sign-out disable for
+                // this account: drop the stale intent so the sync neither skips
+                // it nor a later drain re-disables it.
+                pushTokenStore.clearPendingDisable(account)
                 syncNativePushRegistrationIfEnabled()
             } else {
                 clearPushRegistrationForAccount(account)
