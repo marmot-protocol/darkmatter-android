@@ -118,7 +118,16 @@ class LocalNotificationPresenter(
                 .setName(content.selfName)
                 .setKey(content.selfKey)
                 .build()
-        val style = existingMessagingStyle(content.notificationTag) ?: NotificationCompat.MessagingStyle(self)
+        // Carry forward only the most recent messages. The extracted history
+        // is otherwise re-appended and re-serialized across the Binder boundary
+        // on every post, growing without bound for a busy conversation and
+        // risking TransactionTooLargeException. The shade only renders
+        // the last handful anyway, so a small cap is lossless to the user.
+        val style = NotificationCompat.MessagingStyle(self)
+        existingMessagingStyle(content.notificationTag)
+            ?.messages
+            ?.takeLast(MAX_MESSAGE_HISTORY - 1)
+            ?.forEach { style.addMessage(it) }
         style.isGroupConversation = content.isGroupConversation
         // Prefer the caller-resolved title (chat-list parity, e.g. "Group of N
         // people" for unnamed groups) over the often-empty payload group name.
@@ -171,6 +180,11 @@ class LocalNotificationPresenter(
         // Per-conversation cards share id 0; the per-conversation tag keeps them
         // distinct, so reusing (tag, 0) updates the right conversation's card.
         private const val MESSAGE_NOTIFICATION_ID = 0
+
+        // Cap on the MessagingStyle history carried across posts. The
+        // notification shade only surfaces the last few lines, so trimming
+        // older messages is invisible to the user but bounds the Binder payload.
+        private const val MAX_MESSAGE_HISTORY = 25
     }
 }
 
