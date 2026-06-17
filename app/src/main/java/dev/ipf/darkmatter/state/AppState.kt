@@ -740,15 +740,25 @@ class DarkMatterAppState(
     }
 
     /**
-     * Wipe in-memory caches, the avatar LRU, and the L2 disk cache. Used
-     * at sign-out, when we treat the device-side decrypted-media footprint
-     * as ending with the session. Re-opening a chat after the next sign-in
-     * re-downloads from Blossom.
+     * Wipe the device-side decrypted-media footprint that outlives the
+     * in-memory caches: the L2 disk cache (cacheDir/decrypted-media) and the
+     * decrypted voice/video plaintext the conversation UI materializes under
+     * cacheDir. Used at sign-out, when we treat that footprint as ending with
+     * the session. Re-opening a chat after the next sign-in re-downloads from
+     * Blossom.
+     *
+     * Suspends so the sign-out flow can await completion rather than racing a
+     * fast re-sign-in against an unfinished wipe. `shared_media` is left to its
+     * age-based janitor on purpose: those files can back a live external
+     * "open with"/share reader and deleting them out from under it would break
+     * an in-progress share.
      */
-    private fun clearAllMediaCaches() {
-        clearInMemoryMediaCaches()
-        AvatarImageLoader.clear()
-        notificationScope.launch(Dispatchers.IO) { diskMediaCache.clear() }
+    private suspend fun wipeDecryptedMediaFromDisk() {
+        withContext(Dispatchers.IO) {
+            diskMediaCache.clear()
+            runCatching { java.io.File(appContext.cacheDir, "voice_attachments").deleteRecursively() }
+            runCatching { java.io.File(appContext.cacheDir, "video_attachments").deleteRecursively() }
+        }
     }
 
     /**
@@ -779,7 +789,12 @@ class DarkMatterAppState(
         // session, so we wipe both in-memory and disk caches. Account switch
         // (setActiveAccount) is *not* a sign-out — it keeps the L2 disk cache
         // so re-entry into the same account doesn't re-download every image.
-        clearAllMediaCaches()
+        //
+        // In-memory plaintext is dropped synchronously here; the on-disk wipe
+        // is awaited inside the sign-out coroutine below so it isn't an
+        // orphaned, unsequenced background task.
+        clearInMemoryMediaCaches()
+        AvatarImageLoader.clear()
         clearCrossAccountCaches()
         val signedOutRef = activeAccountRef
         val outcome = signOutOutcome(accounts.map { it.label }, activeAccountRef)
@@ -797,6 +812,10 @@ class DarkMatterAppState(
             accounts.firstOrNull { it.label == label }?.accountIdHex?.let { warmProfile(it) }
         }
         notificationScope.launch {
+            // Wipe the on-disk decrypted-media footprint first and await it, so
+            // the session's plaintext is gone before any later work and isn't
+            // left to an orphaned background task.
+            wipeDecryptedMediaFromDisk()
             // Tell the runtime to forget the signed-out account's push
             // registration before refreshing visible settings. Otherwise the
             // MIP-05 server keeps wrapping wake messages for an account that
