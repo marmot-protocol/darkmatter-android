@@ -11699,6 +11699,9 @@ private fun DiagnosticsScreen(
                 entries = (entries + DiagnosticLogEntry(text = DiagnosticFormatter.describe(event))).takeLast(500)
             }
         } catch (throwable: Throwable) {
+            // A re-key (account/runtime change) cancels this effect; let that
+            // propagate instead of logging it as a stream failure.
+            if (throwable is CancellationException) throw throwable
             entries = (entries + DiagnosticLogEntry(text = "event stream failed: ${throwable.message ?: throwable.javaClass.simpleName}")).takeLast(500)
         } finally {
             streaming = false
