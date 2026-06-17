@@ -11021,6 +11021,7 @@ private fun ProfileEditScreen(
                     // — or an SSRF-prone avatar URL — to relays. See #69.
                     val pictureValid = ProfileFieldValidation.isAcceptablePictureUrl(picture)
                     val nip05Valid = ProfileFieldValidation.isAcceptableNip05(nip05)
+                    val lud16Valid = ProfileFieldValidation.isAcceptableLud16(lud16)
                     TextField(
                         colors = profileFieldColors,
                         value = picture,
@@ -11066,7 +11067,14 @@ private fun ProfileEditScreen(
                         onValueChange = { lud16 = it },
                         label = { Text(stringResource(R.string.lightning)) },
                         singleLine = true,
-                        supportingText = { Text(stringResource(R.string.profile_lightning_hint)) },
+                        isError = !lud16Valid,
+                        supportingText = {
+                            Text(
+                                stringResource(
+                                    if (lud16Valid) R.string.profile_lightning_hint else R.string.profile_lightning_invalid,
+                                ),
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                     )
@@ -11093,7 +11101,7 @@ private fun ProfileEditScreen(
                                 }
                             }
                         },
-                        enabled = !busy && active != null && pictureValid && nip05Valid,
+                        enabled = !busy && active != null && pictureValid && nip05Valid && lud16Valid,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (busy) {
