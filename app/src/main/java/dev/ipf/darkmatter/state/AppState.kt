@@ -718,6 +718,18 @@ class DarkMatterAppState(
             activeUploadKeysByConversation.clear()
             pendingProjectionsAwaitingBridgeByConversation.values.forEach { it.clear() }
             pendingProjectionsAwaitingBridgeByConversation.clear()
+            // The optimistic message map holds decrypted outgoing records
+            // (AppMessageRecordFfi plaintext); the override maps hold its
+            // ordering keys. They were previously pruned only per-key by the
+            // LRU, so a signed-out account's sent plaintext lingered in memory.
+            optimisticMessagesByConversation.values.forEach { it.clear() }
+            optimisticMessagesByConversation.clear()
+            projectedMessageIdsByConversation.values.forEach { it.clear() }
+            projectedMessageIdsByConversation.clear()
+            timelineOrderOverridesByConversation.values.forEach { it.clear() }
+            timelineOrderOverridesByConversation.clear()
+            timelineTimestampOverridesByConversation.values.forEach { it.clear() }
+            timelineTimestampOverridesByConversation.clear()
         }
         // Cancel any in-flight downloads (their Deferred holds the plaintext
         // result) and drop the index so the next session starts cold.
