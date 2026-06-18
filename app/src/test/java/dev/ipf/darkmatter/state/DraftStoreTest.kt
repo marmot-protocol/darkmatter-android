@@ -136,6 +136,7 @@ class DraftStoreTest {
         var legacyWiped = false
         migrateDrafts(
             legacy = mapOf(draftKey("a", "g1") to "one", draftKey("a", "g2") to "two"),
+            existingSecureKeys = emptySet(),
             persistSecure = { drafts ->
                 secure.putAll(drafts)
                 true
@@ -157,10 +158,50 @@ class DraftStoreTest {
         var legacyWiped = false
         migrateDrafts(
             legacy = mapOf(draftKey("a", "g1") to "one"),
+            existingSecureKeys = emptySet(),
             persistSecure = { false },
             clearLegacy = { legacyWiped = true },
         )
         assertFalse("legacy plaintext must survive a failed durable write", legacyWiped)
+    }
+
+    @Test
+    fun migrationDoesNotOverwriteDraftsAlreadyInEncryptedStore() {
+        // A plaintext file that outlived a failed wipe must never clobber a
+        // newer encrypted edit: keys already present in the secure store are
+        // skipped, and the superseded plaintext is still wiped.
+        val persisted = mutableMapOf<String, String>()
+        var legacyWiped = false
+        migrateDrafts(
+            legacy = mapOf(draftKey("a", "g1") to "stale", draftKey("a", "g2") to "fresh"),
+            existingSecureKeys = setOf(draftKey("a", "g1")),
+            persistSecure = { drafts ->
+                persisted.putAll(drafts)
+                true
+            },
+            clearLegacy = { legacyWiped = true },
+        )
+        assertEquals(mapOf(draftKey("a", "g2") to "fresh"), persisted)
+        assertTrue("superseded plaintext should still be wiped", legacyWiped)
+    }
+
+    @Test
+    fun migrationWipesPlaintextWithoutWritingWhenAllKeysAlreadyEncrypted() {
+        // Every legacy key already has an encrypted (newer) value: nothing is
+        // written, but the redundant plaintext is wiped.
+        var persistCalled = false
+        var legacyWiped = false
+        migrateDrafts(
+            legacy = mapOf(draftKey("a", "g1") to "stale"),
+            existingSecureKeys = setOf(draftKey("a", "g1")),
+            persistSecure = {
+                persistCalled = true
+                true
+            },
+            clearLegacy = { legacyWiped = true },
+        )
+        assertFalse("no encrypted write when all keys are superseded", persistCalled)
+        assertTrue("redundant plaintext should be wiped", legacyWiped)
     }
 
     private fun draftKey(

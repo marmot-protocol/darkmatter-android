@@ -2,6 +2,7 @@ package dev.ipf.darkmatter.state
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -129,6 +130,7 @@ internal class EncryptedDraftPersistence(
     }
 
     private companion object {
+        const val TAG = "DraftStore"
         const val SECURE_FILE = "darkmatter.drafts.secure"
         const val LEGACY_FILE = "darkmatter.drafts"
 
@@ -176,14 +178,22 @@ internal class EncryptedDraftPersistence(
             if (legacyDrafts.isEmpty()) return
             migrateDrafts(
                 legacy = legacyDrafts,
+                existingSecureKeys = secure.all.keys,
                 persistSecure = { drafts ->
                     val editor = secure.edit()
                     drafts.forEach { (key, value) -> editor.putString(key, value) }
                     editor.commit()
                 },
                 clearLegacy = {
-                    legacy.edit().clear().commit()
-                    context.deleteSharedPreferences(LEGACY_FILE)
+                    val cleared = legacy.edit().clear().commit()
+                    val deleted = context.deleteSharedPreferences(LEGACY_FILE)
+                    if (!cleared || !deleted) {
+                        // The plaintext drafts survived the wipe. The collision
+                        // guard keeps them from clobbering newer encrypted edits
+                        // on the next launch, but the plaintext copy lingers on
+                        // disk — surface it rather than swallowing the failure.
+                        Log.w(TAG, "legacy plaintext draft wipe incomplete (cleared=$cleared deleted=$deleted)")
+                    }
                 },
             )
         }
@@ -191,19 +201,29 @@ internal class EncryptedDraftPersistence(
 }
 
 /**
- * One-way migration: copy every legacy plaintext draft into the encrypted
- * store, then wipe the plaintext source. The plaintext is wiped only once
- * [persistSecure] confirms the encrypted copy is durably committed — a
- * non-durable write lost to process death would otherwise take the drafts
- * with it. Pure over its collaborators so the durability-before-wipe
- * guarantee can be unit-tested without an Android Keystore.
+ * One-way migration: copy legacy plaintext drafts into the encrypted store,
+ * then wipe the plaintext source. Two guarantees:
+ *
+ *  - Encrypted values win: a key already present in [existingSecureKeys] is
+ *    never re-migrated, so a plaintext file that outlived a failed wipe can't
+ *    clobber a newer encrypted edit on a later launch.
+ *  - Durability before wipe: the plaintext is cleared only once [persistSecure]
+ *    confirms the encrypted copy is durably committed — a non-durable write
+ *    lost to process death would otherwise take the drafts with it.
+ *
+ * Pure over its collaborators so both guarantees can be unit-tested without an
+ * Android Keystore.
  */
 internal fun migrateDrafts(
     legacy: Map<String, String>,
+    existingSecureKeys: Set<String>,
     persistSecure: (Map<String, String>) -> Boolean,
     clearLegacy: () -> Unit,
 ) {
-    if (persistSecure(legacy)) {
+    val toMigrate = legacy.filterKeys { it !in existingSecureKeys }
+    // Nothing fresh to copy means the plaintext is fully superseded; still wipe
+    // it. Otherwise wipe only after the encrypted copy durably commits.
+    if (toMigrate.isEmpty() || persistSecure(toMigrate)) {
         clearLegacy()
     }
 }
