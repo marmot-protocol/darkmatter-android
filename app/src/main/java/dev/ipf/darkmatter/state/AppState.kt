@@ -1083,6 +1083,17 @@ class DarkMatterAppState(
         }
     }
 
+    fun dismissConversationNotifications(
+        accountRef: String,
+        groupIdHex: String,
+    ) {
+        runCatching {
+            localNotificationPresenter.dismissConversationMessages(accountRef, groupIdHex)
+        }.onFailure {
+            appStateDebug { "notification dismiss failed group=${groupIdHex.take(8)}" }
+        }
+    }
+
     fun refreshLocalNotificationPermission() {
         localNotificationPermissionGranted = localNotificationPresenter.canPostNotifications()
     }
