@@ -1127,7 +1127,6 @@ private fun ChatsScreen(
         topBar = {
             ChatListTopBar(
                 appState = appState,
-                showArchived = showArchived,
                 searchOpen = searchOpen,
                 searchQuery = searchQuery,
                 searchFocusRequester = searchFocusRequester,
@@ -1153,12 +1152,11 @@ private fun ChatsScreen(
                         appState.present(R.string.chat_list_voice_unavailable)
                     }
                 },
-                onArchivedBack = { filter = ChatListFilter.All },
                 onOpenSettings = onOpenSettings,
             )
         },
         floatingActionButton = {
-            if (!showArchived && !searchOpen) {
+            if (!searchOpen) {
                 QuickActionFabMenu(
                     expanded = quickActionsExpanded,
                     onExpandedChange = { quickActionsExpanded = it },
@@ -1186,7 +1184,7 @@ private fun ChatsScreen(
                 ChatListFilterChips(
                     filter = filter,
                     onChange = { filter = it },
-                    activeHasUnread = controller.items.any { it.hasUnread },
+                    activeUnreadCount = controller.items.count { it.hasUnread },
                     hasArchived = controller.archivedItems.isNotEmpty(),
                     archivedUnreadCount = archivedUnreadCount,
                 )
@@ -1355,7 +1353,6 @@ private fun chatListItemDisplayTitle(
 @Composable
 private fun ChatListTopBar(
     appState: DarkMatterAppState,
-    showArchived: Boolean,
     searchOpen: Boolean,
     searchQuery: String,
     searchFocusRequester: FocusRequester,
@@ -1363,7 +1360,6 @@ private fun ChatListTopBar(
     onSearchOpen: () -> Unit,
     onSearchClose: () -> Unit,
     onMic: () -> Unit,
-    onArchivedBack: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     TopAppBar(
@@ -1392,7 +1388,6 @@ private fun ChatListTopBar(
                                 imeAction = ImeAction.Search,
                             ),
                     )
-                showArchived -> Text(stringResource(R.string.archived))
                 else -> Unit
             }
         },
@@ -1400,13 +1395,6 @@ private fun ChatListTopBar(
             when {
                 searchOpen ->
                     IconButton(onClick = onSearchClose) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                        )
-                    }
-                showArchived ->
-                    IconButton(onClick = onArchivedBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back),
@@ -1455,7 +1443,7 @@ private fun ChatListTopBar(
 private fun ChatListFilterChips(
     filter: ChatListFilter,
     onChange: (ChatListFilter) -> Unit,
-    activeHasUnread: Boolean,
+    activeUnreadCount: Int,
     hasArchived: Boolean,
     archivedUnreadCount: Int,
 ) {
@@ -1472,7 +1460,7 @@ private fun ChatListFilterChips(
             ChatListFilter.Unread,
             R.string.chat_list_filter_unread,
             onChange,
-            enabled = activeHasUnread || filter == ChatListFilter.Unread,
+            trailingCount = activeUnreadCount,
         )
         ChatListFilterChip(filter, ChatListFilter.Groups, R.string.chat_list_filter_groups, onChange)
         if (hasArchived || filter == ChatListFilter.Archived) {
