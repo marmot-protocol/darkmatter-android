@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.text.format.DateUtils
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -336,8 +337,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -5353,6 +5357,66 @@ private fun UnreadMessagesDivider(count: Int) {
     }
 }
 
+/** True when two epoch-second timestamps fall on different calendar days in the device zone. */
+private fun differentDay(
+    a: ULong,
+    b: ULong,
+): Boolean {
+    val zone = ZoneId.systemDefault()
+    return Instant.ofEpochSecond(a.toLong()).atZone(zone).toLocalDate() !=
+        Instant.ofEpochSecond(b.toLong()).atZone(zone).toLocalDate()
+}
+
+/**
+ * Relative day label for a transcript date ribbon: "Today"/"Yesterday" for the
+ * last two days, the weekday name within the past week, then a locale-medium
+ * date. All strings come from the platform, so no new translation keys.
+ */
+private fun messageDayLabel(
+    epochSeconds: ULong,
+    locale: Locale,
+): String {
+    if (epochSeconds == 0uL) return ""
+    val zone = ZoneId.systemDefault()
+    val date = Instant.ofEpochSecond(epochSeconds.toLong()).atZone(zone).toLocalDate()
+    val days = ChronoUnit.DAYS.between(date, LocalDate.now(zone))
+    return when {
+        days <= 0L || days == 1L ->
+            DateUtils
+                .getRelativeTimeSpanString(
+                    epochSeconds.toLong() * 1000L,
+                    System.currentTimeMillis(),
+                    DateUtils.DAY_IN_MILLIS,
+                ).toString()
+        days in 2L..6L -> date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, locale)
+        else -> date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale))
+    }
+}
+
+/** Centered date pill for the transcript day ribbon (mirrors [UnreadMessagesDivider]'s pill, sans dividers). */
+@Composable
+private fun DaySeparator(label: String) {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier =
+                Modifier
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(12.dp),
+                    ).padding(horizontal = 12.dp, vertical = 4.dp),
+        )
+    }
+}
+
 /**
  * Centered one-line row for a kind-1210 group system event ("%s changed the
  * group avatar", membership changes, renames). Rendered from `system_type` +
@@ -6251,6 +6315,7 @@ private fun ConversationScreen(
             controller.timeline.filterNot { MessageProjector.isEdit(it.record) }
         }
     val latestTimelineItemId = renderedTimeline.lastOrNull()?.id
+    val transcriptLocale = LocalConfiguration.current.locales[0]
     val olderHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
     val bottomTimelineIndex = renderedTimeline.size + 1 + olderHeaderCount
     // Capture the unread boundary at chat open. Stays fixed for the lifetime
@@ -6548,17 +6613,26 @@ private fun ConversationScreen(
                                     }
                                 }
                             }
-                            items(
+                            itemsIndexed(
                                 renderedTimeline,
-                                key = { it.id },
+                                key = { _, item -> item.id },
                                 // Pool layouts by category so Compose can reuse
                                 // the heavier MessageBubble slot across scroll
                                 // without recreating layout nodes for the
                                 // simpler centered group-system rows.
-                                contentType = { item ->
+                                contentType = { _, item ->
                                     if (MessageProjector.isGroupSystem(item.record)) "groupSystem" else "message"
                                 },
-                            ) { item ->
+                            ) { index, item ->
+                                // Date ribbon: header above the first message of
+                                // each calendar day (list is oldest→newest, so the
+                                // older neighbour is index-1). Rendered inside the
+                                // slot, not as its own item, to keep the anchor
+                                // index math (#155) untouched.
+                                val older = renderedTimeline.getOrNull(index - 1)
+                                if (older == null || differentDay(older.record.recordedAt, item.record.recordedAt)) {
+                                    DaySeparator(messageDayLabel(item.record.recordedAt, transcriptLocale))
+                                }
                                 if (entryUnreadCount > 0 && item.record.messageIdHex == entryFirstUnreadMessageId) {
                                     UnreadMessagesDivider(count = entryUnreadCount)
                                 }
@@ -6567,7 +6641,7 @@ private fun ConversationScreen(
                                 // never a bubble with the raw JSON content.
                                 if (MessageProjector.isGroupSystem(item.record)) {
                                     GroupSystemRow(record = item.record, appState = appState)
-                                    return@items
+                                    return@itemsIndexed
                                 }
                                 MessageBubble(
                                     item = item,
