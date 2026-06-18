@@ -1050,7 +1050,6 @@ private fun ChatsScreen(
     var newChatTitle by remember { mutableStateOf(R.string.new_chat) }
     var newChatDirect by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
-    var showArchived by remember { mutableStateOf(false) }
     var quickActionsExpanded by remember { mutableStateOf(false) }
     // Search expand/collapse + live query. The search input is anchored in
     // the top bar; tapping the magnifier swaps the chrome (account avatar
@@ -1060,6 +1059,9 @@ private fun ChatsScreen(
     var searchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(ChatListFilter.All) }
+    // The Archived filter is a view switch, not a row predicate: it swaps the
+    // source list to archived chats (replacing the old dedicated Archived row).
+    val showArchived = filter == ChatListFilter.Archived
     val searchFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
 
@@ -1115,6 +1117,11 @@ private fun ChatsScreen(
         remember(controller.archivedItems) {
             controller.archivedItems.count { it.hasUnread }
         }
+    // Leave the archived view if its last chat is unarchived — the chip is then
+    // hidden, so don't strand the selection on it.
+    LaunchedEffect(controller.archivedItems.isEmpty(), filter) {
+        if (filter == ChatListFilter.Archived && controller.archivedItems.isEmpty()) filter = ChatListFilter.All
+    }
 
     Scaffold(
         topBar = {
@@ -1146,7 +1153,7 @@ private fun ChatsScreen(
                         appState.present(R.string.chat_list_voice_unavailable)
                     }
                 },
-                onArchivedBack = { showArchived = false },
+                onArchivedBack = { filter = ChatListFilter.All },
                 onOpenSettings = onOpenSettings,
             )
         },
@@ -1175,35 +1182,14 @@ private fun ChatsScreen(
             // in the active and archived lists. They're sticky above the
             // list rather than sticky inside the LazyColumn so they survive
             // an empty-state swap without flicker.
-            if (sourceList.isNotEmpty()) {
+            if (controller.items.isNotEmpty() || controller.archivedItems.isNotEmpty()) {
                 ChatListFilterChips(
                     filter = filter,
                     onChange = { filter = it },
-                    activeHasUnread =
-                        if (showArchived) {
-                            archivedUnreadCount > 0
-                        } else {
-                            controller.items.any { it.hasUnread }
-                        },
+                    activeHasUnread = controller.items.any { it.hasUnread },
+                    hasArchived = controller.archivedItems.isNotEmpty(),
+                    archivedUnreadCount = archivedUnreadCount,
                 )
-            }
-            // Archived folder tile hoisted out of the LazyColumn so it
-            // survives the empty-active-list case (when every chat has
-            // been archived, the LazyColumn never mounts and an
-            // in-list tile would vanish with it). Same gating as
-            // before: hidden in the archived view, while search is
-            // open, and when the Unread filter is on.
-            if (
-                !showArchived &&
-                !searchOpen &&
-                filter == ChatListFilter.All &&
-                controller.archivedItems.isNotEmpty()
-            ) {
-                ArchivedFolderRow(
-                    unreadCount = archivedUnreadCount,
-                    onClick = { showArchived = true },
-                )
-                HorizontalDivider()
             }
             Box(Modifier.fillMaxSize()) {
                 when {
@@ -1296,7 +1282,7 @@ private fun ChatsScreen(
 /** Three-way filter state for the chat list. `Groups` is held back from
  *  v1 because the direct-vs-group distinction is partly inferred from
  *  `memberCount`, which isn't always populated for archived rows. */
-private enum class ChatListFilter { All, Unread, Groups }
+private enum class ChatListFilter { All, Unread, Groups, Archived }
 
 private fun applyChatListSearchAndFilter(
     source: List<ChatListItem>,
@@ -1307,7 +1293,9 @@ private fun applyChatListSearchAndFilter(
 ): List<ChatListItem> {
     val byFilter =
         when (filter) {
-            ChatListFilter.All -> source
+            // Archived swaps the source list upstream, so there's nothing extra
+            // to filter here — show every archived chat.
+            ChatListFilter.All, ChatListFilter.Archived -> source
             ChatListFilter.Unread -> source.filter { it.hasUnread }
             ChatListFilter.Groups -> source.filter { it.memberCount > 2 }
         }
@@ -1468,6 +1456,8 @@ private fun ChatListFilterChips(
     filter: ChatListFilter,
     onChange: (ChatListFilter) -> Unit,
     activeHasUnread: Boolean,
+    hasArchived: Boolean,
+    archivedUnreadCount: Int,
 ) {
     Row(
         modifier =
@@ -1485,6 +1475,15 @@ private fun ChatListFilterChips(
             enabled = activeHasUnread || filter == ChatListFilter.Unread,
         )
         ChatListFilterChip(filter, ChatListFilter.Groups, R.string.chat_list_filter_groups, onChange)
+        if (hasArchived || filter == ChatListFilter.Archived) {
+            ChatListFilterChip(
+                filter,
+                ChatListFilter.Archived,
+                R.string.archived,
+                onChange,
+                trailingCount = archivedUnreadCount,
+            )
+        }
     }
 }
 
@@ -1495,6 +1494,7 @@ private fun ChatListFilterChip(
     @StringRes labelRes: Int,
     onChange: (ChatListFilter) -> Unit,
     enabled: Boolean = true,
+    trailingCount: Int = 0,
 ) {
     val selected = current == value
     FilterChip(
@@ -1502,6 +1502,17 @@ private fun ChatListFilterChip(
         onClick = { onChange(value) },
         enabled = enabled,
         label = { Text(stringResource(labelRes)) },
+        trailingIcon =
+            if (trailingCount > 0) {
+                {
+                    Text(
+                        text = if (trailingCount > 99) "99+" else trailingCount.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            } else {
+                null
+            },
         shape = RoundedCornerShape(percent = 50),
         border = null,
         colors =
@@ -1540,41 +1551,6 @@ private fun ChatListNoResults(
                 copy,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ArchivedFolderRow(
-    unreadCount: Int,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Default.Archive,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(24.dp))
-        Text(
-            stringResource(R.string.archived),
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        Spacer(Modifier.weight(1f))
-        if (unreadCount > 0) {
-            Text(
-                if (unreadCount > 99) "99+" else unreadCount.toString(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
             )
         }
     }
