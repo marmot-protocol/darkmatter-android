@@ -40,6 +40,7 @@ class ImageSearchClientTest {
         )
 
         assertNull(sanitizeDuckDuckGoFetchUrl("https://example.com/i.js?q=marmot"))
+        assertNull(sanitizeDuckDuckGoFetchUrl("https://evilduckduckgo.com/i.js?q=marmot"))
         assertNull(sanitizeDuckDuckGoFetchUrl("https://duckduckgo.com.evil.example/i.js?q=marmot"))
         assertNull(sanitizeDuckDuckGoFetchUrl("https://duckduckgo.com@evil.example/i.js?q=marmot"))
         assertNull(sanitizeDuckDuckGoFetchUrl("http://duckduckgo.com/i.js?q=marmot"))
