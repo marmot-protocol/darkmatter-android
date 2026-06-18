@@ -1849,7 +1849,12 @@ class ConversationController(
                 // event; the FFI unreact is target-only and clears the latest
                 // reaction, so it would drop the wrong emoji when a user holds
                 // more than one on the same message.
-                val me = appState.activeAccount?.accountIdHex
+                // activeAccountRef can be set while the account row hasn't loaded
+                // into `accounts` yet; surface that distinctly from an ambiguous
+                // reaction so the failure reason isn't misleading.
+                val me =
+                    appState.activeAccount?.accountIdHex
+                        ?: error("no active account to retract reaction")
                 val ownReactions =
                     timelineRecords[target]
                         ?.reactions
