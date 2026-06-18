@@ -8831,6 +8831,8 @@ private fun ReactionSummaryChip(
     Surface(
         modifier =
             Modifier
+                // Expose the "you reacted" state to TalkBack, not just via color.
+                .semantics { selected = mine }
                 .minimumInteractiveComponentSize()
                 .clip(RoundedCornerShape(percent = 50))
                 .clickable(role = Role.Button, onClick = onClick, onClickLabel = viewReactorsLabel),
