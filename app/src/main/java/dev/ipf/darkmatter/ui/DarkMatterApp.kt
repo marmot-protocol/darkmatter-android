@@ -215,6 +215,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -241,6 +242,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -8606,72 +8608,76 @@ private fun MessageBubble(
                                     (editState?.latestText ?: record.plaintext).takeIf { it.isNotBlank() }
                                 else -> displayedBody
                             }
-                        if (bodyTextToRender != null) {
-                            // Markdown only when the tokens describe exactly
-                            // the text we're about to show: tombstone copy,
-                            // imeta-filename fallbacks, etc. all diverge from
-                            // record.plaintext and must stay plain. An empty
-                            // document (legacy record, parse failure) falls
-                            // through to the unchanged plain-text path.
-                            val markdownDocument = record.contentTokens
-                            if (!deleted &&
-                                !invalidated &&
-                                markdownDocument.blocks.isNotEmpty() &&
-                                bodyTextToRender == record.plaintext
-                            ) {
-                                // Mention names resolve through the profile
-                                // cache; npub taps stay in-app via the
-                                // profile sheet (never an external nostr:
-                                // intent).
-                                MarkdownMessageBody(
-                                    markdownDocument,
-                                    mentionDisplayName =
-                                        remember(appState) {
-                                            { bech32: String -> appState.mentionDisplayName(bech32) }
-                                        },
-                                    onNostrProfileTap =
-                                        remember(appState) {
-                                            { bech32: String -> appState.presentNostrProfile(bech32) }
-                                        },
-                                )
+                        val editedLabel =
+                            if (editState != null && record.kind == 9uL && !deleted && !invalidated) {
+                                if (editState.count > 1) {
+                                    stringResource(R.string.edited_count, editState.count)
+                                } else {
+                                    stringResource(R.string.edited)
+                                }
                             } else {
-                                Text(
-                                    bodyTextToRender,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
+                                null
+                            }
+                        val inlineFooter: @Composable () -> Unit = {
+                            MessageInlineFooter(
+                                timeText = rememberedRelativeTime(record.recordedAt),
+                                color = timestampColor,
+                                showStatus = mine && !deleted && !invalidated,
+                                status = item.status,
+                                editedLabel = editedLabel,
+                                onEditedClick = if (editState != null) ({ editHistoryOpen = true }) else null,
+                            )
+                        }
+                        if (bodyTextToRender != null) {
+                            BubbleFooterLayout(
+                                footer = inlineFooter,
+                                modifier = Modifier.align(if (mine) Alignment.End else Alignment.Start),
+                            ) {
+                                // Markdown only when the tokens describe exactly
+                                // the text we're about to show: tombstone copy,
+                                // imeta-filename fallbacks, etc. all diverge from
+                                // record.plaintext and must stay plain. An empty
+                                // document (legacy record, parse failure) falls
+                                // through to the unchanged plain-text path.
+                                val markdownDocument = record.contentTokens
+                                if (!deleted &&
+                                    !invalidated &&
+                                    markdownDocument.blocks.isNotEmpty() &&
+                                    bodyTextToRender == record.plaintext
+                                ) {
+                                    // Mention names resolve through the profile
+                                    // cache; npub taps stay in-app via the
+                                    // profile sheet (never an external nostr:
+                                    // intent).
+                                    MarkdownMessageBody(
+                                        markdownDocument,
+                                        mentionDisplayName =
+                                            remember(appState) {
+                                                { bech32: String -> appState.mentionDisplayName(bech32) }
+                                            },
+                                        onNostrProfileTap =
+                                            remember(appState) {
+                                                { bech32: String -> appState.presentNostrProfile(bech32) }
+                                            },
+                                    )
+                                } else {
+                                    Text(
+                                        bodyTextToRender,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                }
+                            }
+                        } else {
+                            Box(modifier = Modifier.align(if (mine) Alignment.End else Alignment.Start)) {
+                                inlineFooter()
                             }
                         }
-                        Row(
-                            modifier = Modifier.align(if (mine) Alignment.End else Alignment.Start),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                rememberedRelativeTime(record.recordedAt),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = timestampColor,
-                            )
-                            // "(edited · N)" affordance. Renders only on
-                            // unedited rows whose original is still a
-                            // displayable chat kind (kind 9). Tap opens the
-                            // history modal listing each version + timestamp.
-                            if (editState != null && record.kind == 9uL && !deleted && !invalidated) {
-                                Text(
-                                    text =
-                                        if (editState.count > 1) {
-                                            stringResource(R.string.edited_count, editState.count)
-                                        } else {
-                                            stringResource(R.string.edited)
-                                        },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = timestampColor,
-                                    modifier = Modifier.clickable { editHistoryOpen = true },
-                                )
-                            }
-                            if (mine) {
-                                OutgoingMessageStatusIcon(item.status, tint = timestampColor)
-                            }
-                            if (mine && item.status == MessageStatus.Failed) {
+                        if (mine && item.status == MessageStatus.Failed) {
+                            Row(
+                                modifier = Modifier.align(Alignment.End),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 IconButton(
                                     onClick = { appState.launchMutation { controller.retryFailedSend(item) } },
                                     modifier = Modifier.size(24.dp),
@@ -8695,45 +8701,45 @@ private fun MessageBubble(
                                     )
                                 }
                             }
-                            MessageActionMenu(
-                                // Never render the menu for a deleted message, even
-                                // if it was open when the delete landed.
-                                expanded = menuOpen && !deleted,
-                                canDelete = mine && record.messageIdHex.isNotBlank() && !deleted,
-                                canEdit = mine && record.kind == 9uL && record.messageIdHex.isNotBlank() && !deleted,
-                                quickReactionEmojis = quickReactionEmojis,
-                                onDismissRequest = { menuOpen = false },
-                                onReact = { emoji ->
-                                    menuOpen = false
-                                    reactWithEmoji(emoji)
-                                },
-                                onOpenEmojiPicker = {
-                                    menuOpen = false
-                                    emojiPickerOpen = true
-                                },
-                                onReply = ::beginReply,
-                                onEdit = {
-                                    menuOpen = false
-                                    // Cancel any reply-in-progress: reply and
-                                    // edit modes are mutually exclusive in the
-                                    // composer banner.
-                                    controller.replyingTo = null
-                                    controller.editingMessageId = record.messageIdHex
-                                },
-                                onCopyText = ::copyMessageText,
-                                onInfo = ::openInfoSheet,
-                                onDelete = {
-                                    menuOpen = false
-                                    // launchMutation so the MLS commit + Nostr publish
-                                    // survive navigating away from the conversation —
-                                    // the optimistic tombstone is already set in the
-                                    // controller's state and the FFI write needs to
-                                    // complete regardless of whether this bubble is
-                                    // still in composition.
-                                    appState.launchMutation { controller.deleteMessage(record) }
-                                },
-                            )
                         }
+                        MessageActionMenu(
+                            // Never render the menu for a deleted message, even
+                            // if it was open when the delete landed.
+                            expanded = menuOpen && !deleted,
+                            canDelete = mine && record.messageIdHex.isNotBlank() && !deleted,
+                            canEdit = mine && record.kind == 9uL && record.messageIdHex.isNotBlank() && !deleted,
+                            quickReactionEmojis = quickReactionEmojis,
+                            onDismissRequest = { menuOpen = false },
+                            onReact = { emoji ->
+                                menuOpen = false
+                                reactWithEmoji(emoji)
+                            },
+                            onOpenEmojiPicker = {
+                                menuOpen = false
+                                emojiPickerOpen = true
+                            },
+                            onReply = ::beginReply,
+                            onEdit = {
+                                menuOpen = false
+                                // Cancel any reply-in-progress: reply and
+                                // edit modes are mutually exclusive in the
+                                // composer banner.
+                                controller.replyingTo = null
+                                controller.editingMessageId = record.messageIdHex
+                            },
+                            onCopyText = ::copyMessageText,
+                            onInfo = ::openInfoSheet,
+                            onDelete = {
+                                menuOpen = false
+                                // launchMutation so the MLS commit + Nostr publish
+                                // survive navigating away from the conversation —
+                                // the optimistic tombstone is already set in the
+                                // controller's state and the FFI write needs to
+                                // complete regardless of whether this bubble is
+                                // still in composition.
+                                appState.launchMutation { controller.deleteMessage(record) }
+                            },
+                        )
                     }
                 }
                 if (emojiPickerOpen) {
@@ -9494,6 +9500,83 @@ private fun OutgoingMessageStatusIcon(
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.error,
             )
+    }
+}
+
+// Gap between a bubble's text and its trailing inline footer.
+private val BubbleFooterGap = 8.dp
+
+/**
+ * Bottom-end footer for a message bubble: an optional "edited" affordance, the
+ * time, and (outgoing only) the send-status icon, in a subtle tint.
+ */
+@Composable
+private fun MessageInlineFooter(
+    timeText: String,
+    color: Color,
+    showStatus: Boolean,
+    status: MessageStatus,
+    editedLabel: String?,
+    onEditedClick: (() -> Unit)?,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (editedLabel != null) {
+            Text(
+                text = editedLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                modifier = if (onEditedClick != null) Modifier.clickable(onClick = onEditedClick) else Modifier,
+            )
+        }
+        Text(
+            text = timeText,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+        )
+        if (showStatus) {
+            OutgoingMessageStatusIcon(status, tint = color)
+        }
+    }
+}
+
+/**
+ * Lays [content] with [footer] pinned bottom-end. The footer joins the last
+ * line when the widest content line leaves room for it; otherwise it drops to
+ * its own line below — so it is always right of the text and never overlaps.
+ */
+@Composable
+private fun BubbleFooterLayout(
+    footer: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Layout(
+        modifier = modifier,
+        content = {
+            Box { content() }
+            Box { footer() }
+        },
+    ) { measurables, constraints ->
+        val footerPlaceable = measurables[1].measure(Constraints())
+        val contentPlaceable = measurables[0].measure(constraints.copy(minWidth = 0))
+        val gap = BubbleFooterGap.roundToPx()
+        val inline = contentPlaceable.width + gap + footerPlaceable.width <= constraints.maxWidth
+        if (inline) {
+            val width = contentPlaceable.width + gap + footerPlaceable.width
+            layout(width, contentPlaceable.height) {
+                contentPlaceable.place(0, 0)
+                footerPlaceable.place(width - footerPlaceable.width, contentPlaceable.height - footerPlaceable.height)
+            }
+        } else {
+            val width = maxOf(contentPlaceable.width, footerPlaceable.width).coerceAtMost(constraints.maxWidth)
+            layout(width, contentPlaceable.height + footerPlaceable.height) {
+                contentPlaceable.place(0, 0)
+                footerPlaceable.place(width - footerPlaceable.width, contentPlaceable.height)
+            }
+        }
     }
 }
 
