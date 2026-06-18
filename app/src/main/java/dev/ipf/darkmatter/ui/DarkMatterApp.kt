@@ -37,11 +37,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -8092,6 +8092,7 @@ private fun MessageBubble(
     var swipeDrag by remember(record.messageIdHex) { mutableStateOf(0f) }
     val animatedSwipeOffset by animateFloatAsState(targetValue = swipeDrag, label = "replySwipeOffset")
     val clipboard = LocalClipboardManager.current
+    val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
     val replySwipeThresholdPx = with(density) { 64.dp.toPx() }
     val maxSwipeOffsetPx = with(density) { 72.dp.toPx() }
@@ -8194,9 +8195,12 @@ private fun MessageBubble(
             // bubble) triggers the same action as one starting on the bubble.
             // See #204. The visual slide stays on the Surface below via
             // `.offset`; only gesture detection lives on the row. Nested
-            // handlers (avatar, sender name, media, reaction chips) are
-            // children and still win for their own areas. The long-press uses
-            // `indication = null` so no ripple flashes across the full row.
+            // handlers (avatar, sender name, reaction chips) are children and
+            // still win for their own SHORT taps. Long-press is detected with a
+            // raw pointerInput (below) rather than combinedClickable so it wins
+            // over inner media `clickable` children for the long-press while
+            // leaving their single-tap behavior intact (#262). The detector
+            // raises no ripple, matching the previous full-row behavior.
             modifier =
                 Modifier
                     .fillMaxWidth()
@@ -8223,12 +8227,40 @@ private fun MessageBubble(
                                 )
                             }
                         },
-                    ).combinedClickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                        // No action menu (react/reply/copy/info) on a deleted message.
-                        onLongClick = { if (!deleted) menuOpen = true },
+                    ).then(
+                        // Long-press lives in a raw pointerInput, not
+                        // combinedClickable, so it WINS over inner media
+                        // children (image/video/file/voice) that install their
+                        // own tap `clickable`. Those children sit deeper in the
+                        // hit-test tree and would otherwise swallow the press
+                        // before a row-level combinedClickable saw the
+                        // long-press — which is why long-press did nothing on a
+                        // media bubble while it worked on a text bubble (#262).
+                        // awaitLongPressOrCancellation observes the down WITHOUT
+                        // consuming it (so a quick tap still reaches the child's
+                        // viewer/player) and only fires once the press is held
+                        // past the long-press timeout, at which point it wins
+                        // the gesture and opens the actions menu. It self-cancels
+                        // on movement beyond touch slop, so swipe-to-reply above
+                        // is unaffected.
+                        if (deleted) {
+                            // A deleted message has no actions menu.
+                            Modifier
+                        } else {
+                            Modifier.pointerInput(record.messageIdHex) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val longPress = awaitLongPressOrCancellation(down.id)
+                                    if (longPress != null) {
+                                        longPress.consume()
+                                        haptics.performHapticFeedback(
+                                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
+                                        )
+                                        menuOpen = true
+                                    }
+                                }
+                            }
+                        },
                     ),
             horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
         ) {
