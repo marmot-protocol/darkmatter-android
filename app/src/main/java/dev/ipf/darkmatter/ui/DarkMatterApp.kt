@@ -6660,6 +6660,39 @@ private fun ConversationScreen(
                             }
                             item { Spacer(Modifier.height(8.dp)) }
                         }
+                        // Sticky date ribbon: the day of the topmost visible
+                        // message, floated over the transcript and faded in only
+                        // while scrolling (the inline separators carry it at rest).
+                        val stickyTimelineIndex =
+                            (listState.firstVisibleItemIndex - 1 - olderHeaderCount)
+                                .coerceIn(0, (renderedTimeline.size - 1).coerceAtLeast(0))
+                        val stickyDayLabel =
+                            renderedTimeline
+                                .getOrNull(stickyTimelineIndex)
+                                ?.record
+                                ?.recordedAt
+                                ?.let { messageDayLabel(it, transcriptLocale) }
+                                .orEmpty()
+                        val stickyAlpha by animateFloatAsState(
+                            targetValue = if (listState.isScrollInProgress && stickyDayLabel.isNotEmpty()) 1f else 0f,
+                            label = "stickyDayRibbon",
+                        )
+                        if (initialTimelineAnchored && stickyAlpha > 0.01f) {
+                            Text(
+                                text = stickyDayLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 8.dp)
+                                        .alpha(stickyAlpha)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = RoundedCornerShape(12.dp),
+                                        ).padding(horizontal = 12.dp, vertical = 4.dp),
+                            )
+                        }
                         if (!initialTimelineAnchored) {
                             LoadingScreen()
                         }
