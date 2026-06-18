@@ -176,9 +176,13 @@ internal class EncryptedDraftPersistence(
             if (legacyDrafts.isEmpty()) return
             migrateDrafts(
                 legacy = legacyDrafts,
-                writeSecure = { key, value -> secure.edit().putString(key, value).apply() },
+                persistSecure = { drafts ->
+                    val editor = secure.edit()
+                    drafts.forEach { (key, value) -> editor.putString(key, value) }
+                    editor.commit()
+                },
                 clearLegacy = {
-                    legacy.edit().clear().apply()
+                    legacy.edit().clear().commit()
                     context.deleteSharedPreferences(LEGACY_FILE)
                 },
             )
@@ -188,14 +192,18 @@ internal class EncryptedDraftPersistence(
 
 /**
  * One-way migration: copy every legacy plaintext draft into the encrypted
- * store, then wipe the plaintext source. Pure over its collaborators so the
- * copy-then-clear guarantee can be unit-tested without an Android Keystore.
+ * store, then wipe the plaintext source. The plaintext is wiped only once
+ * [persistSecure] confirms the encrypted copy is durably committed — a
+ * non-durable write lost to process death would otherwise take the drafts
+ * with it. Pure over its collaborators so the durability-before-wipe
+ * guarantee can be unit-tested without an Android Keystore.
  */
 internal fun migrateDrafts(
     legacy: Map<String, String>,
-    writeSecure: (String, String) -> Unit,
+    persistSecure: (Map<String, String>) -> Boolean,
     clearLegacy: () -> Unit,
 ) {
-    legacy.forEach { (key, value) -> writeSecure(key, value) }
-    clearLegacy()
+    if (persistSecure(legacy)) {
+        clearLegacy()
+    }
 }

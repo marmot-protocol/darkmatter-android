@@ -2,6 +2,7 @@ package dev.ipf.darkmatter.state
 
 import androidx.compose.runtime.snapshots.Snapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -135,7 +136,10 @@ class DraftStoreTest {
         var legacyWiped = false
         migrateDrafts(
             legacy = mapOf(draftKey("a", "g1") to "one", draftKey("a", "g2") to "two"),
-            writeSecure = { key, value -> secure[key] = value },
+            persistSecure = { drafts ->
+                secure.putAll(drafts)
+                true
+            },
             clearLegacy = { legacyWiped = true },
         )
         assertEquals(
@@ -143,6 +147,20 @@ class DraftStoreTest {
             secure,
         )
         assertTrue("legacy plaintext must be wiped after migration", legacyWiped)
+    }
+
+    @Test
+    fun migrationKeepsLegacyPlaintextWhenDurableWriteFails() {
+        // If the encrypted copy did not durably commit, the plaintext source
+        // must survive — wiping it on a non-durable write would lose drafts to
+        // process death between the queued write and its disk commit.
+        var legacyWiped = false
+        migrateDrafts(
+            legacy = mapOf(draftKey("a", "g1") to "one"),
+            persistSecure = { false },
+            clearLegacy = { legacyWiped = true },
+        )
+        assertFalse("legacy plaintext must survive a failed durable write", legacyWiped)
     }
 
     private fun draftKey(
