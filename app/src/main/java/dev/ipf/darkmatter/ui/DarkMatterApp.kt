@@ -1288,7 +1288,7 @@ private fun ChatsScreen(
 /** Three-way filter state for the chat list. `Groups` is held back from
  *  v1 because the direct-vs-group distinction is partly inferred from
  *  `memberCount`, which isn't always populated for archived rows. */
-private enum class ChatListFilter { All, Unread }
+private enum class ChatListFilter { All, Unread, Groups }
 
 private fun applyChatListSearchAndFilter(
     source: List<ChatListItem>,
@@ -1301,6 +1301,7 @@ private fun applyChatListSearchAndFilter(
         when (filter) {
             ChatListFilter.All -> source
             ChatListFilter.Unread -> source.filter { it.hasUnread }
+            ChatListFilter.Groups -> source.filter { it.memberCount > 2 }
         }
     val needle = rawQuery.trim()
     if (needle.isEmpty()) return byFilter
@@ -1477,6 +1478,11 @@ private fun ChatListFilterChips(
             onClick = { onChange(ChatListFilter.Unread) },
             label = { Text(stringResource(R.string.chat_list_filter_unread)) },
             enabled = activeHasUnread || filter == ChatListFilter.Unread,
+        )
+        FilterChip(
+            selected = filter == ChatListFilter.Groups,
+            onClick = { onChange(ChatListFilter.Groups) },
+            label = { Text(stringResource(R.string.chat_list_filter_groups)) },
         )
     }
 }
