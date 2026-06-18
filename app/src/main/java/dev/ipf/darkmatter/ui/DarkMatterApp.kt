@@ -230,6 +230,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -349,6 +350,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private enum class MainSection {
@@ -8628,10 +8630,17 @@ private fun MessageBubble(
                                 onEditedClick = if (editState != null) ({ editHistoryOpen = true }) else null,
                             )
                         }
+                        // Last-line geometry of the body so the footer can sit on
+                        // that line when it fits, not merely when the widest line does.
+                        var lastLineLayout by remember(record.messageIdHex) { mutableStateOf<TextLayoutResult?>(null) }
                         if (bodyTextToRender != null) {
                             BubbleFooterLayout(
                                 footer = inlineFooter,
                                 modifier = Modifier.align(if (mine) Alignment.End else Alignment.Start),
+                                lastLineWidth =
+                                    lastLineLayout?.let { layout ->
+                                        if (layout.lineCount > 0) ceil(layout.getLineRight(layout.lineCount - 1)).toInt() else null
+                                    },
                             ) {
                                 // Markdown only when the tokens describe exactly
                                 // the text we're about to show: tombstone copy,
@@ -8659,11 +8668,13 @@ private fun MessageBubble(
                                             remember(appState) {
                                                 { bech32: String -> appState.presentNostrProfile(bech32) }
                                             },
+                                        onLastTextLayout = { lastLineLayout = it },
                                     )
                                 } else {
                                     Text(
                                         bodyTextToRender,
                                         style = MaterialTheme.typography.bodyLarge,
+                                        onTextLayout = { lastLineLayout = it },
                                     )
                                 }
                             }
@@ -9544,13 +9555,15 @@ private fun MessageInlineFooter(
 
 /**
  * Lays [content] with [footer] pinned bottom-end. The footer joins the last
- * line when the widest content line leaves room for it; otherwise it drops to
- * its own line below — so it is always right of the text and never overlaps.
+ * line when it leaves room ([lastLineWidth], the real last-line right edge when
+ * the caller can supply it; otherwise the widest line); else it drops to its
+ * own line below. Either way it stays right of the text and never overlaps.
  */
 @Composable
 private fun BubbleFooterLayout(
     footer: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    lastLineWidth: Int? = null,
     content: @Composable () -> Unit,
 ) {
     Layout(
@@ -9563,9 +9576,10 @@ private fun BubbleFooterLayout(
         val footerPlaceable = measurables[1].measure(Constraints())
         val contentPlaceable = measurables[0].measure(constraints.copy(minWidth = 0))
         val gap = BubbleFooterGap.roundToPx()
-        val inline = contentPlaceable.width + gap + footerPlaceable.width <= constraints.maxWidth
+        val lastRight = (lastLineWidth ?: contentPlaceable.width).coerceIn(0, contentPlaceable.width)
+        val inline = lastRight + gap + footerPlaceable.width <= constraints.maxWidth
         if (inline) {
-            val width = contentPlaceable.width + gap + footerPlaceable.width
+            val width = maxOf(contentPlaceable.width, lastRight + gap + footerPlaceable.width)
             layout(width, contentPlaceable.height) {
                 contentPlaceable.place(0, 0)
                 footerPlaceable.place(width - footerPlaceable.width, contentPlaceable.height - footerPlaceable.height)
