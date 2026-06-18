@@ -5484,6 +5484,9 @@ private fun GroupSystemRow(
     }
 }
 
+// How many rows from the top to begin prefetching the next older page.
+private const val OLDER_PAGE_PREFETCH_ROWS = 4
+
 /**
  * Shared definition of "user is at (or near) the newest message". Used both
  * by the auto-scroll LaunchedEffect (issue #59) and the jump-to-newest FAB
@@ -5586,10 +5589,10 @@ private fun ConversationScreen(
     var confirmLeaveFromTopBar by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var initialTimelineAnchored by remember(chat.id) { mutableStateOf(false) }
-    // Set while a load-older is restoring scroll position, so the bottom-follow
-    // effect doesn't fight it: replaceWindow can cap-trim the newest rows and
-    // change the last id, which would otherwise snap the reader to the bottom.
-    var restoringOlderScroll by remember(chat.id) { mutableStateOf(false) }
+    // Newest timestamp the bottom-follow has reacted to. Only a strictly newer
+    // value is a real append; older-page loads trim the newest rows (the last
+    // id changes downward), so they never trigger a follow.
+    var lastFollowedLatestAt by remember(chat.id) { mutableStateOf(0uL) }
     var initialTimelineLoadStarted by remember(chat.id) { mutableStateOf(false) }
     var highlightedMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
     var navigateReplyJob by remember(chat.id) { mutableStateOf<Job?>(null) }
@@ -6337,29 +6340,23 @@ private fun ConversationScreen(
     val olderHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
     val bottomTimelineIndex = renderedTimeline.size + 1 + olderHeaderCount
 
-    // Anchor on the topmost visible message, paginate, then restore it to the
-    // same pixel offset so the reader stays put instead of snapping to newest.
-    fun loadOlderKeepingPosition() {
-        scope.launch {
-            val olderHeader = olderHeaderCount
-            val firstMsg = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index >= 1 + olderHeader }
-            val anchorId = firstMsg?.let { renderedTimeline.getOrNull(it.index - 1 - olderHeader)?.id }
-            val anchorOffset = firstMsg?.offset ?: 0
-            restoringOlderScroll = true
-            try {
-                controller.loadOlder()
-                if (anchorId != null) {
-                    val newRendered = controller.timeline.filterNot { MessageProjector.isEdit(it.record) }
-                    val newIdx = newRendered.indexOfFirst { it.id == anchorId }
-                    if (newIdx >= 0) {
-                        val newOlderHeader = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-                        listState.scrollToItem(1 + newOlderHeader + newIdx, (-anchorOffset).coerceAtLeast(0))
-                    }
+    // Extend history a few rows before the reader reaches the top, while a
+    // keyed message is still the anchor. Compose's keyed prepend then holds
+    // those messages at the same offset in the same measure pass — the new
+    // page lands above the fold and the reader scrolls up into it with no jump
+    // or blink (no post-hoc scroll, which is what caused the flip).
+    LaunchedEffect(listState, controller) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { firstIndex ->
+                if (
+                    initialTimelineAnchored &&
+                    controller.hasMoreBefore &&
+                    !controller.isLoadingOlder &&
+                    firstIndex <= olderHeaderCount + OLDER_PAGE_PREFETCH_ROWS
+                ) {
+                    controller.loadOlder()
                 }
-            } finally {
-                restoringOlderScroll = false
             }
-        }
     }
     // Capture the unread boundary at chat open. Stays fixed for the lifetime
     // of this composable (per chat.id) so the "N unread messages" divider
@@ -6423,13 +6420,17 @@ private fun ConversationScreen(
                     }
                 listState.scrollToItem(targetIndex)
                 initialTimelineAnchored = true
-            } else if (nearBottom && !restoringOlderScroll) {
-                // User is still pinned to the newest message; follow new
-                // incoming messages down. Reading older history isn't
-                // interrupted by this branch (see issue #59). Suppressed during
-                // a load-older restore so a cap-trim of the newest rows doesn't
-                // yank the reader back to the bottom.
-                listState.scrollToItem(bottomTimelineIndex)
+                lastFollowedLatestAt = renderedTimeline.lastOrNull()?.record?.recordedAt ?: 0uL
+            } else {
+                val latestAt = renderedTimeline.lastOrNull()?.record?.recordedAt ?: 0uL
+                val isAppend = latestAt > lastFollowedLatestAt
+                lastFollowedLatestAt = maxOf(lastFollowedLatestAt, latestAt)
+                // Follow only a genuinely new message at the bottom; older-page
+                // loads trim the newest rows, so they never qualify and the
+                // reader's place is left untouched.
+                if (isAppend && nearBottom) {
+                    listState.scrollToItem(bottomTimelineIndex)
+                }
             }
         }
     }
@@ -6641,7 +6642,7 @@ private fun ConversationScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = 8.dp),
                         ) {
-                            item { Spacer(Modifier.height(4.dp)) }
+                            item(key = "top-spacer") { Spacer(Modifier.height(4.dp)) }
                             if (controller.hasMoreBefore || controller.isLoadingOlder) {
                                 item(key = "older-messages-loading") {
                                     Box(
@@ -6651,7 +6652,7 @@ private fun ConversationScreen(
                                         if (controller.isLoadingOlder) {
                                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                                         } else {
-                                            IconButton(onClick = { loadOlderKeepingPosition() }) {
+                                            IconButton(onClick = { scope.launch { controller.loadOlder() } }) {
                                                 Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
                                             }
                                         }
@@ -6700,7 +6701,7 @@ private fun ConversationScreen(
                                     onReplyPreviewClick = { navigateToReplyTarget(it) },
                                 )
                             }
-                            item { Spacer(Modifier.height(8.dp)) }
+                            item(key = "bottom-spacer") { Spacer(Modifier.height(8.dp)) }
                         }
                         // Day of the topmost visible message, shown only while
                         // scrolling — the inline separators carry it at rest.
