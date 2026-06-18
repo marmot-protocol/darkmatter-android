@@ -8837,7 +8837,7 @@ private fun ReactionTallyChip(
         tonalElevation = 1.dp,
     ) {
         Text(
-            text = "${tally.emoji} ${tally.count}",
+            text = if (tally.count > 1) "${tally.emoji} ${tally.count}" else tally.emoji,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelLarge,
         )
