@@ -721,6 +721,14 @@ class ChatsController(
                 runCatching { chatListSubscription?.close() }
                 runCatching { chatsSubscription?.close() }
             }
+            // Subscription lifecycle is observable here for the issue #6
+            // freshness model: this fires both on account re-bind and when
+            // MainShell pauses the chat-list stream on conversation open
+            // (the LaunchedEffect re-keys, cancelling this coroutine). Pairing
+            // it with the "bind account=" log at entry lets a navigation trace
+            // confirm the account-wide streams are torn down while a chat is
+            // foregrounded rather than running alongside ConversationController.
+            chatsDebug { "unbind account=${accountRef?.take(8) ?: "<none>"} (chat-list + chats subscriptions closed)" }
         }
     }
 

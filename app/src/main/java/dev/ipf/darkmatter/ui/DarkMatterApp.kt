@@ -877,7 +877,32 @@ private fun MainShell(
         onDispose { appState.attachChatsController(null) }
     }
 
-    LaunchedEffect(chatsController, appState.activeAccountRef, appState.runtimeGeneration) {
+    // Freshness model (issue #6): pause the account-wide chat-list stream
+    // while a conversation is foregrounded, resume it on back-nav. Keying
+    // this effect on `selectedChat == null` means opening a chat cancels the
+    // `bind()` coroutine — which closes both the chat-list and chats
+    // subscriptions in its `finally` — so we no longer run account-wide
+    // chat/group projections concurrently with the conversation's own
+    // `ConversationController` streams on the heaviest navigation path.
+    //
+    // Returning to the list re-runs `bind()`, which re-snapshots fresh state
+    // (and re-converges via `catchUpAccounts()`), so unread/latest stay
+    // correct after back-nav — they're rebuilt from the source of truth, not
+    // an Android-side cache (see AGENTS.md). The trade-off is a brief reload
+    // on return instead of a kept-warm projection; chosen as the
+    // lowest-contention option per the maintainer's freshness-model question
+    // on the issue (option 1: pause-on-foreground).
+    //
+    // The controller stays *attached* across the pause (the DisposableEffect
+    // above is keyed on `chatsController`, not `selectedChat`), so local group
+    // updates forwarded via `appState.applyLocalGroupUpdate` still land
+    // in-memory and the next `bind()` snapshot supersedes them with fresh
+    // state. Notification routing is unaffected: a cross-account tap clears
+    // `selectedChat` (un-pausing bind for the new account) before it needs the
+    // list, and a same-account tap reads the list that was already loaded.
+    val chatListStreamPaused = selectedChat != null
+    LaunchedEffect(chatsController, appState.activeAccountRef, appState.runtimeGeneration, chatListStreamPaused) {
+        if (chatListStreamPaused) return@LaunchedEffect
         chatsController.bind(appState.activeAccountRef)
     }
 
