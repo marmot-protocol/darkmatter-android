@@ -11,11 +11,34 @@ plugins {
 // `zapstore` build ships without Firebase), so the config is looked up in the
 // play source set as well as the app-module root. Without the file, Firebase
 // stays uninitialized at runtime and the push runtime reports unavailable; the
-// app still compiles and runs, falling back to local notifications. The plugin
-// only generates tasks for variants whose flavor provides the JSON, so a
-// `zapstore` build is unaffected even when a play config is present.
+// app still compiles and runs, falling back to local notifications.
+//
+// Caveat the plugin does NOT scope itself by flavor: GoogleServicesPlugin
+// registers a `process<Variant>GoogleServices` task for *every* Android
+// variant (play and zapstore alike), and missingGoogleServicesStrategy
+// defaults to ERROR. So a play-scoped `src/play/google-services.json` would
+// still make `assembleZapstore*` fail (no zapstore JSON to process), and a
+// root `app/google-services.json` would make zapstore process/package the
+// Firebase resources. Either way zapstore would not be truly Firebase-free.
+// We therefore disable the GoogleServices task on any non-`play` variant
+// below, so the no-FCM flavor contract holds regardless of where the JSON
+// lives. The `play` variant keeps the default ERROR strategy, so a genuinely
+// missing play config still fails loudly.
 if (file("google-services.json").exists() || file("src/play/google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+
+    // Keep google-services processing confined to the `play` flavor. The task
+    // name is `process<Variant>GoogleServices` (e.g. processPlayReleaseGoogle-
+    // Services, processZapstoreDebugGoogleServices); disable every one whose
+    // variant is not a `play` build so zapstore never requires — or packages —
+    // Firebase config.
+    tasks.matching {
+        it.name.startsWith("process") && it.name.endsWith("GoogleServices")
+    }.configureEach {
+        if (!name.removePrefix("process").startsWith("Play")) {
+            enabled = false
+        }
+    }
 }
 
 val localProperties =

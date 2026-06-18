@@ -13,11 +13,14 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: scripts/release.sh [--skip-bindings] [--abi <ABI>] [--help]
+Usage: scripts/release.sh [--skip-bindings] [--abi <ABI>] [--flavor <FLAVOR>] [--help]
 
   --skip-bindings   Don't rebuild the Rust .so libs (use whatever's checked in)
   --abi <ABI>       Build only a specific ABI APK, then print its path
                     (arm64-v8a | armeabi-v7a | x86 | x86_64 | universal)
+  --flavor <FLAVOR> Product flavor to build (default: play)
+                    play     — Google Play build with Firebase/FCM
+                    zapstore — no-Firebase build; native push inert (issue #140)
   --help            Show this help
 
 Signing creds (in local.properties or env):
@@ -34,6 +37,7 @@ EOF
 
 SKIP_BINDINGS=false
 TARGET_ABI=""
+FLAVOR="play"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-bindings) SKIP_BINDINGS=true; shift ;;
@@ -46,10 +50,31 @@ while [[ $# -gt 0 ]]; do
       TARGET_ABI="$2"
       shift 2
       ;;
+    --flavor)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo "error: --flavor requires a value" >&2
+        usage
+        exit 1
+      fi
+      FLAVOR="$2"
+      shift 2
+      ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 1 ;;
   esac
 done
+
+case "$FLAVOR" in
+  play|zapstore) ;;
+  *)
+    echo "error: unsupported flavor: $FLAVOR (expected play | zapstore)" >&2
+    usage
+    exit 1
+    ;;
+esac
+
+# Capitalized flavor for Gradle task names (assemblePlayRelease / assembleZapstoreRelease).
+FLAVOR_CAP="$(tr '[:lower:]' '[:upper:]' <<<"${FLAVOR:0:1}")${FLAVOR:1}"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 MARMOT_DIR="${DARKMATTER_MARMOT_DIR:-$(cd "$REPO_DIR/../darkmatter" 2>/dev/null && pwd || true)}"
@@ -155,21 +180,21 @@ fi
 cd "$REPO_DIR"
 
 # The Play Store channel ships the `play` product flavor (Firebase/FCM
-# included). The `zapstore` flavor is the no-Firebase build and is produced
-# separately; this script targets `play` to preserve the existing release
-# pipeline. See issue #140.
-APK_DIR="$REPO_DIR/app/build/outputs/apk/play/release"
-INTERMEDIATE_APK_DIR="$REPO_DIR/app/build/intermediates/apk/play/release"
+# included); the Zapstore channel ships the no-Firebase `zapstore` flavor.
+# Defaults to `play` to preserve the existing release pipeline; pass
+# `--flavor zapstore` for the no-FCM artifact. See issue #140.
+APK_DIR="$REPO_DIR/app/build/outputs/apk/$FLAVOR/release"
+INTERMEDIATE_APK_DIR="$REPO_DIR/app/build/intermediates/apk/$FLAVOR/release"
 mkdir -p "$APK_DIR"
 
 if [[ -n "$TARGET_ABI" && "$TARGET_ABI" != "universal" ]]; then
-  echo "==> Assembling release APK for $TARGET_ABI"
+  echo "==> Assembling $FLAVOR release APK for $TARGET_ABI"
   rm -f "$APK_DIR"/*.apk
-  ./gradlew :app:assemblePlayRelease \
+  ./gradlew ":app:assemble${FLAVOR_CAP}Release" \
     -Pandroid.injected.build.abi="$TARGET_ABI" \
     -Pandroid.injected.testOnly=false
 
-  gradle_apk_name="app-play-${TARGET_ABI}-release.apk"
+  gradle_apk_name="app-${FLAVOR}-${TARGET_ABI}-release.apk"
   selected_apk="$APK_DIR/$gradle_apk_name"
   intermediate_apk="$INTERMEDIATE_APK_DIR/$gradle_apk_name"
   if [[ ! -f "$selected_apk" && -f "$intermediate_apk" ]]; then
@@ -181,14 +206,21 @@ if [[ -n "$TARGET_ABI" && "$TARGET_ABI" != "universal" ]]; then
   fi
 
   if [[ "$TARGET_ABI" == "arm64-v8a" ]]; then
-    selected_apk="$APK_DIR/darkmatter-v8a-release-$(date +%F).apk"
+    # Keep the historical play artifact name (darkmatter-v8a-release-DATE.apk)
+    # so existing recipes/tooling keep resolving it; tag other flavors so the
+    # no-FCM artifact is distinguishable side by side.
+    if [[ "$FLAVOR" == "play" ]]; then
+      selected_apk="$APK_DIR/darkmatter-v8a-release-$(date +%F).apk"
+    else
+      selected_apk="$APK_DIR/darkmatter-${FLAVOR}-v8a-release-$(date +%F).apk"
+    fi
     mv "$APK_DIR/$gradle_apk_name" "$selected_apk"
   fi
 
   assert_not_test_only "$selected_apk"
 else
-  echo "==> Assembling release APKs"
-  ./gradlew :app:assemblePlayRelease
+  echo "==> Assembling $FLAVOR release APKs"
+  ./gradlew ":app:assemble${FLAVOR_CAP}Release"
 fi
 
 echo ""

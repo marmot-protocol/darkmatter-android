@@ -21,6 +21,7 @@ DEBUG_PKG := "dev.ipf.darkmatter.debug"
 RELEASE_PKG := "dev.ipf.darkmatter"
 MAIN_ACTIVITY := "dev.ipf.darkmatter.MainActivity"
 RELEASE_APK_DIR := "app/build/outputs/apk/play/release"
+RELEASE_APK_DIR_ZAPSTORE := "app/build/outputs/apk/zapstore/release"
 
 _default:
     @just --list
@@ -85,6 +86,22 @@ apk:
 # are already checked in.
 release-fast:
     ./scripts/release.sh --skip-bindings
+
+# Build signed no-Firebase (zapstore) release APKs. Same pipeline as `release`
+# but targets the `zapstore` flavor, so the artifact ships without Firebase/FCM
+# (native push is inert; local notifications only). See issue #140.
+release-zapstore:
+    ./scripts/release.sh --flavor zapstore
+
+# Build the zapstore (no-FCM) arm64-v8a release APK immediately using the
+# checked-in Marmot bindings + native libs, then print the release folder.
+apk-zapstore:
+    ./scripts/release.sh --flavor zapstore --skip-bindings --abi arm64-v8a
+    @printf '%s\n' "$PWD/{{RELEASE_APK_DIR_ZAPSTORE}}"
+
+# Same as `release-zapstore` but skip the (slow) Rust rebuild.
+release-fast-zapstore:
+    ./scripts/release.sh --flavor zapstore --skip-bindings
 
 # Install the arm64-v8a release APK on the connected device. Useful for
 # sanity-checking a release build on your own phone.

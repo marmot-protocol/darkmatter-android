@@ -33,7 +33,10 @@ Firebase / FCM dependencies ship only where they're used (issue #140):
 
 - **`play`** — Google Play build. Bundles Firebase Messaging + Play Services
   Base and (when `google-services.json` is present) applies the
-  google-services plugin, so MIP-05 native push works.
+  google-services plugin, so MIP-05 native push works. The google-services
+  task is scoped to `play` variants only (the build disables
+  `process<Variant>GoogleServices` for `zapstore`), so the no-FCM contract
+  holds even when a Firebase config is present.
 - **`zapstore`** — Zapstore / no-Firebase build. Ships none of the Firebase
   SDKs; the runtime push gate reports native push unavailable and the app
   falls back to local notifications over the existing foreground-stream
@@ -84,6 +87,19 @@ just release
 ```
 
 Use `just release-fast` when the checked-in Marmot bindings and native libraries are already current.
+
+For the no-Firebase (Zapstore) channel, use the `*-zapstore` release recipes,
+which target the `zapstore` flavor and emit to
+`app/build/outputs/apk/zapstore/release/`:
+
+```bash
+just release-zapstore       # full signed zapstore release (rebuilds bindings)
+just release-fast-zapstore  # skip the Rust rebuild
+just apk-zapstore           # arm64-v8a only, prints the release folder
+```
+
+These wrap `./scripts/release.sh --flavor zapstore` (the script defaults to
+`--flavor play`).
 
 ## Device Testing
 
