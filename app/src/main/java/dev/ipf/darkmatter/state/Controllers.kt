@@ -724,10 +724,18 @@ class ChatsController(
             isLoading = false
             error = throwable.message ?: throwable.javaClass.simpleName
         } finally {
-            withContext(Dispatchers.IO) {
+            // NonCancellable: bind() is cancelled on teardown (account switch,
+            // dispose, runtime-generation change). A cancelled coroutine skips
+            // cancellable suspensions in finally, so a plain
+            // withContext(Dispatchers.IO) here would throw before close() runs
+            // and leak the account-wide chat-list/chats subscriptions.
+            // NonCancellable guarantees the close() calls run. (Originally
+            // surfaced in #270.)
+            withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { chatListSubscription?.close() }
                 runCatching { chatsSubscription?.close() }
             }
+            chatsDebug { "unbind account=${accountRef?.take(8) ?: "<none>"} (chat-list + chats subscriptions closed)" }
         }
     }
 
