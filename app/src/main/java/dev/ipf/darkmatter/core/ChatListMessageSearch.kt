@@ -46,6 +46,25 @@ object ChatListMessageSearch {
     ): Boolean = ciNeedle.isNotEmpty() && plaintext.lowercase().contains(ciNeedle)
 
     /**
+     * Whether a row's match is fully explained by its title or last-message
+     * preview (the synchronous match the chat-list filter already performs).
+     * When true, the body-match snippet line and tap-to-message focus must be
+     * suppressed: the issue/PR contract restricts the secondary snippet and
+     * scroll-to-message tap-through to rows that matched *only* on an older
+     * message body, so a chat surfacing on its title/preview keeps the normal
+     * single-line row and a normal conversation open. Tokenized identically to
+     * the title/preview match in `applyChatListSearchAndFilter` (lowercase +
+     * substring containment).
+     */
+    fun titleOrPreviewMatches(
+        displayTitle: String,
+        previewText: String,
+        ciNeedle: String,
+    ): Boolean =
+        ciNeedle.isNotEmpty() &&
+            (displayTitle.lowercase().contains(ciNeedle) || previewText.lowercase().contains(ciNeedle))
+
+    /**
      * Build the snippet to show under a matched chat row. Centers a window of
      * up to [maxLength] characters on the first occurrence of the needle so
      * the match is visible even in a long message, collapsing internal
@@ -111,6 +130,41 @@ object ChatListMessageSearch {
             highlightEnd = hlEnd,
         )
     }
+
+    /**
+     * The minimal view of a timeline record this object needs to pick a body
+     * match. Mirrors the relevant `TimelineMessageRecordFfi` fields so the
+     * selection logic can be unit-tested without the FFI type.
+     */
+    interface SearchableRecord {
+        val kind: ULong
+        val deleted: Boolean
+        val plaintext: String
+        val messageIdHex: String
+    }
+
+    /**
+     * The first record in [records] (engine order, newest-first) that is both
+     * an eligible searchable body ([isSearchableBody]) and contains the needle
+     * ([bodyMatches]). Returns null when none qualify.
+     *
+     * This is the per-page selection used by the chat-list body search. The
+     * engine's `search` field pre-filters to needle-matching rows but cannot
+     * filter by kind/deleted, so a page can be full of excluded rows
+     * (reactions, deletes, kind:1210 system events) ahead of an eligible body.
+     * Critically, selection scans the *entire* list — it does not stop at the
+     * page-size cap — so an older eligible body that sits behind several newer
+     * excluded hits in the same page is still found, and the caller's backward
+     * paging continues across pages until one surfaces (issue #290).
+     */
+    fun firstEligibleBodyMatch(
+        records: List<SearchableRecord>,
+        ciNeedle: String,
+    ): SearchableRecord? =
+        records.firstOrNull { record ->
+            isSearchableBody(record.kind, record.deleted, record.plaintext) &&
+                bodyMatches(record.plaintext, ciNeedle)
+        }
 
     const val DEFAULT_SNIPPET_LENGTH: Int = 80
     private const val ELLIPSIS = "\u2026"

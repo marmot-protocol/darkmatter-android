@@ -123,4 +123,93 @@ class ChatListMessageSearchTest {
         assertEquals(0, s.highlightStart)
         assertEquals(5, s.highlightEnd)
     }
+
+    // ---- titleOrPreviewMatches (issue #290, blocking review #1) --------------
+
+    @Test
+    fun titleOrPreviewMatchesWhenTitleContainsNeedle() {
+        // A row whose title already matches must be classified as title/preview
+        // so the UI suppresses the body snippet + tap-to-message focus.
+        assertTrue(ChatListMessageSearch.titleOrPreviewMatches("Project Marmot", "no needle here", "marmot"))
+    }
+
+    @Test
+    fun titleOrPreviewMatchesWhenPreviewContainsNeedle() {
+        assertTrue(ChatListMessageSearch.titleOrPreviewMatches("Some chat", "see you at the cafe", "cafe"))
+    }
+
+    @Test
+    fun titleOrPreviewDoesNotMatchWhenOnlyBodyWouldMatch() {
+        // Neither title nor preview contains the needle: this is a body-only
+        // match, so the UI keeps the snippet + focus.
+        assertFalse(ChatListMessageSearch.titleOrPreviewMatches("Some chat", "latest preview line", "marmot"))
+    }
+
+    @Test
+    fun titleOrPreviewMatchIsCaseInsensitive() {
+        assertTrue(ChatListMessageSearch.titleOrPreviewMatches("Project MARMOT", "preview", "marmot"))
+    }
+
+    @Test
+    fun titleOrPreviewBlankNeedleNeverMatches() {
+        assertFalse(ChatListMessageSearch.titleOrPreviewMatches("anything", "anything", ""))
+    }
+
+    // ---- firstEligibleBodyMatch (issue #290, blocking review #2) -------------
+
+    private data class Rec(
+        override val kind: ULong,
+        override val deleted: Boolean,
+        override val plaintext: String,
+        override val messageIdHex: String,
+    ) : ChatListMessageSearch.SearchableRecord
+
+    @Test
+    fun excludedNewerRowsDoNotHideAnOlderEligibleBodyMatch() {
+        // Regression for blocking review #2: the engine `search` field returns
+        // needle-matching rows but can't filter by kind/deleted. Place five
+        // excluded matching rows (reaction, delete tombstone, edit, stream-start,
+        // group-system) NEWER than a single eligible kind:9 body, all in one page.
+        // Selection must scan past the excluded rows and still find the body.
+        val records =
+            listOf(
+                Rec(kind = 7uL, deleted = false, plaintext = "marmot reaction", messageIdHex = "a1"),
+                Rec(kind = 9uL, deleted = true, plaintext = "marmot deleted", messageIdHex = "a2"),
+                Rec(kind = 1009uL, deleted = false, plaintext = "marmot edit", messageIdHex = "a3"),
+                Rec(kind = 1200uL, deleted = false, plaintext = "marmot stream start", messageIdHex = "a4"),
+                Rec(kind = 1210uL, deleted = false, plaintext = "marmot joined", messageIdHex = "a5"),
+                Rec(kind = 9uL, deleted = false, plaintext = "the real marmot message", messageIdHex = "a6"),
+            )
+        val match = ChatListMessageSearch.firstEligibleBodyMatch(records, "marmot")
+        assertEquals("a6", match?.messageIdHex)
+    }
+
+    @Test
+    fun firstEligibleBodyMatchPicksNewestEligibleWhenSeveralQualify() {
+        val records =
+            listOf(
+                Rec(kind = 7uL, deleted = false, plaintext = "marmot reaction", messageIdHex = "n1"),
+                Rec(kind = 9uL, deleted = false, plaintext = "newest marmot body", messageIdHex = "n2"),
+                Rec(kind = 1uL, deleted = false, plaintext = "older marmot body", messageIdHex = "n3"),
+            )
+        // Engine order is newest-first, so the first eligible row wins.
+        assertEquals("n2", ChatListMessageSearch.firstEligibleBodyMatch(records, "marmot")?.messageIdHex)
+    }
+
+    @Test
+    fun firstEligibleBodyMatchReturnsNullWhenNoEligibleRows() {
+        val records =
+            listOf(
+                Rec(kind = 7uL, deleted = false, plaintext = "marmot reaction", messageIdHex = "x1"),
+                Rec(kind = 9uL, deleted = true, plaintext = "marmot deleted", messageIdHex = "x2"),
+            )
+        assertNull(ChatListMessageSearch.firstEligibleBodyMatch(records, "marmot"))
+    }
+
+    @Test
+    fun firstEligibleBodyMatchRequiresTheNeedle() {
+        // An eligible kind whose body does NOT contain the needle is skipped.
+        val records = listOf(Rec(kind = 9uL, deleted = false, plaintext = "no needle present", messageIdHex = "y1"))
+        assertNull(ChatListMessageSearch.firstEligibleBodyMatch(records, "marmot"))
+    }
 }

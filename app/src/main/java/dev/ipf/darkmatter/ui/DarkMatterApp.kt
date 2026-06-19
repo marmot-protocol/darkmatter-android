@@ -273,6 +273,7 @@ import dev.ipf.darkmatter.BuildConfig
 import dev.ipf.darkmatter.R
 import dev.ipf.darkmatter.core.ArchiveSwipe
 import dev.ipf.darkmatter.core.AvatarImageLoader
+import dev.ipf.darkmatter.core.ChatListMessageSearch
 import dev.ipf.darkmatter.core.DiagnosticFormatter
 import dev.ipf.darkmatter.core.EditState
 import dev.ipf.darkmatter.core.GroupProjector
@@ -1312,7 +1313,24 @@ private fun ChatsScreen(
                     else ->
                         LazyColumn(Modifier.fillMaxSize()) {
                             items(visibleItems, key = { it.id }) { item ->
-                                val bodyMatch = bodyMatches[item.id]
+                                // Body-match snippet + tap-to-message focus are
+                                // for rows that matched ONLY on an older message
+                                // body. A row that also matches its title or
+                                // current preview keeps the normal single-line
+                                // layout and a normal conversation open, so drop
+                                // its body match here (issue #290 contract). The
+                                // title/preview test mirrors the synchronous
+                                // match in applyChatListSearchAndFilter so the
+                                // classification can't drift from the filter.
+                                val rawBodyMatch = bodyMatches[item.id]
+                                val bodyMatch =
+                                    rawBodyMatch?.takeUnless {
+                                        ChatListMessageSearch.titleOrPreviewMatches(
+                                            displayTitle = chatListItemDisplayTitle(item, appState, groupTitleCopy),
+                                            previewText = item.projectedPreviewText(),
+                                            ciNeedle = trimmedQuery.lowercase(),
+                                        )
+                                    }
                                 SwipeableChatRow(
                                     item = item,
                                     appState = appState,
