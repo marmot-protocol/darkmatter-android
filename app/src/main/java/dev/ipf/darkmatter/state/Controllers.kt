@@ -386,6 +386,73 @@ internal fun optimisticMessageIdForProjection(
         ?.messageIdHex
 }
 
+/**
+ * Keys of Failed optimistic rows that are unambiguously the same outgoing
+ * message as [confirmed] — the Failed-only counterpart to
+ * [optimisticMessageIdForProjection], which reconciles Pending/Sent only and so
+ * leaves a confirmed-after-failure send rendering its stale red bubble forever.
+ * Strict by design: it refuses on any ambiguity rather than risk deleting a
+ * distinct message the user might still retry. [requireRecordedAt], when set,
+ * pins a match to one original timestamp (the retry/confirm paths know it).
+ */
+internal fun failedOptimisticKeysForConfirmation(
+    optimisticMessages: Collection<TimelineMessage>,
+    confirmed: AppMessageRecordFfi,
+    requireRecordedAt: ULong? = null,
+): List<String> {
+    val confirmedIsMedia = confirmed.tags.any { it.values.firstOrNull() == "imeta" }
+    // A media projection landing while uploads are still pending belongs to one
+    // of them (the bridge resolves it), never to an unrelated Failed row.
+    if (confirmedIsMedia &&
+        optimisticMessages.any { optimistic ->
+            optimistic.status == MessageStatus.Pending &&
+                optimistic.record.tags.any { it.values.firstOrNull() == "_media_pending" }
+        }
+    ) {
+        return emptyList()
+    }
+    val confirmedReply = MessageProjector.replyTargetMessageId(confirmed)
+    val matches =
+        optimisticMessages.filter { optimistic ->
+            if (optimistic.status != MessageStatus.Failed) return@filter false
+            val record = optimistic.record
+            if (record.direction != confirmed.direction) return@filter false
+            if (record.groupIdHex != confirmed.groupIdHex) return@filter false
+            if (record.sender != confirmed.sender) return@filter false
+            if (record.kind != confirmed.kind) return@filter false
+            if (requireRecordedAt != null && record.recordedAt != requireRecordedAt) return@filter false
+            if (MessageProjector.replyTargetMessageId(record) != confirmedReply) return@filter false
+            val isMediaPending = record.tags.any { it.values.firstOrNull() == "_media_pending" }
+            if (confirmedIsMedia || isMediaPending) {
+                confirmedIsMedia && isMediaPending && mediaAttachmentsCorrelate(record, confirmed)
+            } else {
+                record.plaintext == confirmed.plaintext && record.tags == confirmed.tags
+            }
+        }
+    return if (matches.size == 1) matches.map { it.id } else emptyList()
+}
+
+/**
+ * Whether a `_media_pending` Failed row and an `imeta` confirmation describe the
+ * same album: equal attachment count and the same multiset of (filename, mime).
+ * Filenames survive the `_media_pending` → `imeta` round-trip, so distinct photos
+ * never correlate even when sender/group/kind match.
+ */
+private fun mediaAttachmentsCorrelate(
+    failed: AppMessageRecordFfi,
+    confirmed: AppMessageRecordFfi,
+): Boolean {
+    val failedAttachments =
+        failed.tags
+            .filter { it.values.firstOrNull() == "_media_pending" }
+            .map { it.values.getOrNull(1).orEmpty() to it.values.getOrNull(2).orEmpty() }
+    if (failedAttachments.isEmpty()) return false
+    val confirmedAttachments = MediaReferenceParser.parseAllImetaTags(confirmed.tags).map { it.fileName to it.mediaType }
+    if (confirmedAttachments.size != failedAttachments.size) return false
+    val sortKey = compareBy<Pair<String, String>>({ it.first }, { it.second })
+    return failedAttachments.sortedWith(sortKey) == confirmedAttachments.sortedWith(sortKey)
+}
+
 private fun timestampsAreNear(
     left: ULong,
     right: ULong,
@@ -1856,6 +1923,11 @@ class ConversationController(
                         MessageStatus.Sent,
                         timelineOrder = order,
                     )
+                // The bridge claims this projection via exact-id match, so the
+                // projection path's Failed sweep never fires for own media. Sweep
+                // a stale Failed twin of this same album here instead — scoped by
+                // the original recordedAt so a different failed media survives.
+                clearFailedOptimisticForConfirmation(confirmedRecord, requireRecordedAt = optimistic.recordedAt)
                 // Stamp the position overrides up front so the projection's
                 // timeline position matches the optimistic order. Drain any
                 // projection echo that arrived while this send was still
@@ -2310,6 +2382,9 @@ class ConversationController(
                 publishTimelineFromIndexes()
                 return
             }
+            // Scoped by recordedAt so an unrelated identical-body send keeps its
+            // own Failed bubble; sweeps only a duplicate twin of this original.
+            clearFailedOptimisticForConfirmation(confirmed, requireRecordedAt = refreshedRecord.recordedAt)
             if (confirmedId.isNotEmpty()) messageById[confirmedId] = confirmed
             if (shouldInsertSentOptimisticMessage(confirmedId, projectedMessageIds)) {
                 optimisticMessages["msg:$confirmedId"] =
@@ -3027,30 +3102,50 @@ class ConversationController(
         projectedMessageIds.add(record.messageIdHex)
         val actionRecord = draftAction
         preserveOptimisticDisplayPosition(record.messageIdHex, record.messageIdHex)
-        optimisticMessageIdForProjection(
-            optimisticMessages.values,
-            actionRecord,
-            allowDelayedProjection = allowDelayedProjection,
-        )?.takeIf { reconcileOptimistic }
-            ?.let { optimisticId ->
-                preserveOptimisticDisplayPosition(record.messageIdHex, optimisticId)
-                val optimisticKey = "msg:$optimisticId"
-                // Hand off own-sent media bytes from the pending optimistic to
-                // the projection's cache key BEFORE the bubble's LaunchedEffect
-                // can fire and ask Blossom for them. Without this, the projected
-                // bubble starts rendering, finds the thumbnail/plaintext caches
-                // empty for the confirmed messageIdHex, and triggers an FFI
-                // downloadMedia round-trip — re-downloading bytes we literally
-                // just uploaded.
-                handoffOwnMediaCacheOnReconcile(optimisticKey, record.messageIdHex)
-                optimisticMessages.remove(optimisticKey)
-                messageById.remove(optimisticId)
-            }
+        val reconciledOptimisticId =
+            optimisticMessageIdForProjection(
+                optimisticMessages.values,
+                actionRecord,
+                allowDelayedProjection = allowDelayedProjection,
+            )?.takeIf { reconcileOptimistic }
+        if (reconciledOptimisticId != null) {
+            preserveOptimisticDisplayPosition(record.messageIdHex, reconciledOptimisticId)
+            val optimisticKey = "msg:$reconciledOptimisticId"
+            // Hand off own-sent media bytes from the pending optimistic to
+            // the projection's cache key BEFORE the bubble's LaunchedEffect
+            // can fire and ask Blossom for them. Without this, the projected
+            // bubble starts rendering, finds the thumbnail/plaintext caches
+            // empty for the confirmed messageIdHex, and triggers an FFI
+            // downloadMedia round-trip — re-downloading bytes we literally
+            // just uploaded.
+            handoffOwnMediaCacheOnReconcile(optimisticKey, record.messageIdHex)
+            optimisticMessages.remove(optimisticKey)
+            messageById.remove(reconciledOptimisticId)
+        } else if (reconcileOptimistic) {
+            // No Pending/Sent row owns this projection: a send that failed in the
+            // UI but reached the relay. Drop its stale Failed bubble (text sends,
+            // and media sends whose throw skipped the bridge) so it can't render
+            // beside the confirmed row or resurrect on reopen.
+            clearFailedOptimisticForConfirmation(actionRecord)
+        }
         messageById[record.messageIdHex] = actionRecord
         val item = timelineMessageFromProjection(record, actionRecord)
         timelineItemsById[item.id] = item
         insertTimelineItemId(item.id)
         return actionRecord
+    }
+
+    /** Drop stale Failed rows matching [confirmed], freeing their retained bytes too. */
+    private fun clearFailedOptimisticForConfirmation(
+        confirmed: AppMessageRecordFfi,
+        requireRecordedAt: ULong? = null,
+    ) {
+        failedOptimisticKeysForConfirmation(optimisticMessages.values, confirmed, requireRecordedAt)
+            .forEach { key ->
+                optimisticMessages.remove(key)?.let { messageById.remove(it.record.messageIdHex) }
+                retainedMediaUploads.remove(key)
+                activeUploadKeys.remove(key)
+            }
     }
 
     private fun preserveOptimisticDisplayPosition(
