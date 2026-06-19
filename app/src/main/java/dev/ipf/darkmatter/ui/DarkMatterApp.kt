@@ -13057,6 +13057,10 @@ private fun IdentityScreen(
     var showSignOutSheet by remember { mutableStateOf(false) }
     var showWipeSheet by remember { mutableStateOf(false) }
     var showWipeConfirm by remember { mutableStateOf(false) }
+    // Type-to-confirm input for the destructive wipe (#348). Reset whenever the
+    // confirm dialog is dismissed so a previous match can't carry over into a
+    // later open.
+    var wipeConfirmInput by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -13153,6 +13157,7 @@ private fun IdentityScreen(
         SignOutAndWipeSheet(
             onConfirm = {
                 showWipeSheet = false
+                wipeConfirmInput = ""
                 showWipeConfirm = true
             },
             onDismiss = { showWipeSheet = false },
@@ -13160,28 +13165,71 @@ private fun IdentityScreen(
     }
 
     if (WIPE_ENGINE_FFI_AVAILABLE && showWipeConfirm) {
+        // Type-to-confirm gate (#348): the destructive confirm button stays
+        // disabled until the user types the confirmation keyword. The match is
+        // case-insensitive and ignores surrounding whitespace. This is the last
+        // stop before the engine destroys the local DB, MLS state, keychain
+        // entry, and relay key packages, so a single tap must not be enough.
+        val confirmKeyword = stringResource(R.string.sign_out_and_wipe_confirm_keyword)
+        val wipeConfirmed = wipeConfirmInput.trim().equals(confirmKeyword, ignoreCase = true)
         AlertDialog(
-            onDismissRequest = { showWipeConfirm = false },
+            onDismissRequest = {
+                showWipeConfirm = false
+                wipeConfirmInput = ""
+            },
             title = { Text(stringResource(R.string.sign_out_and_wipe_confirm_title)) },
-            text = { Text(stringResource(R.string.sign_out_and_wipe_confirm_body)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(stringResource(R.string.sign_out_and_wipe_confirm_body))
+                    Text(
+                        stringResource(R.string.sign_out_and_wipe_confirm_instruction, confirmKeyword),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = wipeConfirmInput,
+                        onValueChange = { wipeConfirmInput = it },
+                        label = { Text(stringResource(R.string.sign_out_and_wipe_confirm_field_label)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions =
+                            KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Characters,
+                                autoCorrectEnabled = false,
+                            ),
+                    )
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showWipeConfirm = false
+                        wipeConfirmInput = ""
                         // Engine FFI not wired yet (WIPE_ENGINE_FFI_AVAILABLE is
                         // false), so this branch is unreachable today. When the
                         // signOutAndWipe binding lands, route it here and present
                         // R.string.toast_signed_out_and_wiped on success.
                     },
+                    enabled = wipeConfirmed,
                 ) {
                     Text(
                         stringResource(R.string.wipe),
-                        color = MaterialTheme.colorScheme.error,
+                        color =
+                            if (wipeConfirmed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            },
                     )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showWipeConfirm = false }) {
+                TextButton(
+                    onClick = {
+                        showWipeConfirm = false
+                        wipeConfirmInput = ""
+                    },
+                ) {
                     Text(stringResource(R.string.cancel))
                 }
             },
@@ -13242,8 +13290,8 @@ private fun SignOutSheet(
 
 /**
  * Destructive "Sign Out & Wipe" sheet (#348). Lists exactly what gets destroyed
- * and that signing back in starts fresh, then hands off to a type/hold-free
- * confirmation dialog via [onConfirm]. Only shown when the engine FFI exists
+ * and that signing back in starts fresh, then hands off to a type-to-confirm
+ * dialog via [onConfirm]. Only shown when the engine FFI exists
  * ([WIPE_ENGINE_FFI_AVAILABLE]); the copy describes the full teardown the engine
  * sub-issue will perform.
  */

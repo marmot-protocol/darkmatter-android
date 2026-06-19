@@ -298,6 +298,11 @@
     <string name="sign_out_and_wipe_sheet_fresh_start">Signing back in with the same key starts fresh: groups are re-fetched and media re-downloaded.</string>
     <string name="sign_out_and_wipe_confirm_title">Wipe this account?</string>
     <string name="sign_out_and_wipe_confirm_body">This cannot be undone from this device. The local database, MLS state, keychain entry, and relay key packages for this account will be removed.</string>
+    <!-- Type-to-confirm gate for the destructive wipe (#348). The keyword is matched
+         case-insensitively; keep it short and unambiguous when translating. -->
+    <string name="sign_out_and_wipe_confirm_keyword" translatable="false">WIPE</string>
+    <string name="sign_out_and_wipe_confirm_instruction">Type %1$s to confirm.</string>
+    <string name="sign_out_and_wipe_confirm_field_label">Confirmation</string>
     <string name="wipe">Wipe</string>
     <string name="toast_signed_out_and_wiped">Account wiped from this device</string>
     <string name="copy">Copy</string>
