@@ -5901,6 +5901,11 @@ private fun ConversationScreen(
     var searchQuery by remember(chat.id) { mutableStateOf("") }
     var searchPinnedMatchId by remember(chat.id) { mutableStateOf<String?>(null) }
     var searchJob by remember(chat.id) { mutableStateOf<Job?>(null) }
+    // Scroll anchor captured the moment search opens, restored verbatim on
+    // close so leaving search returns the list to where the reader was —
+    // #292 requires "Closing search restores the normal top bar and scroll
+    // position." Pair = (firstVisibleItemIndex, firstVisibleItemScrollOffset).
+    var preSearchScrollAnchor by remember(chat.id) { mutableStateOf<Pair<Int, Int>?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
     // Jump-to-newest plumbing.
     //
@@ -6661,24 +6666,33 @@ private fun ConversationScreen(
     // Reactions / deletes / group-system / agent-stream rows carry no
     // user-typed body and are excluded by `MessageSearch.isSearchable`. As
     // older pages load, `renderedTimeline` grows and the match set expands
-    // naturally. Keyed on the latest+oldest ids and size so the derivation
-    // re-runs on append/prepend without recomputing on every recomposition.
+    // naturally. Keyed on `controller.timeline` (not just `renderedTimeline`'s
+    // edges/size) so a kind-1009 edit — which changes the body returned by
+    // `controller.displayedText(...)` without altering the rendered timeline's
+    // first/last id or size — re-runs the derivation and keeps matches fresh.
     val searchMatchIds =
-        remember(searchQuery, renderedTimeline.firstOrNull()?.id, latestTimelineItemId, renderedTimeline.size) {
+        remember(searchQuery, controller.timeline, renderedTimeline) {
             if (searchQuery.isBlank()) {
                 emptyList()
             } else {
                 // Restrict to rows that carry a user-typed body, then run the
                 // shared substring matcher over those bodies and map the hit
                 // indices back to message ids (timeline order preserved).
+                // Snapshot the body once per row so the displayed (post-edit)
+                // text used for matching is the same text used to map hits.
                 val searchable =
-                    renderedTimeline.filter {
-                        MessageSearch.isSearchable(it.record, controller.displayedText(it.record))
+                    renderedTimeline.mapNotNull { item ->
+                        val body = controller.displayedText(item.record)
+                        if (MessageSearch.isSearchable(item.record, body)) {
+                            item.record.messageIdHex to body
+                        } else {
+                            null
+                        }
                     }
-                val bodies = searchable.map { controller.displayedText(it.record) }
+                val bodies = searchable.map { it.second }
                 MessageSearch
                     .matchIndices(bodies, searchQuery)
-                    .map { searchable[it].record.messageIdHex }
+                    .map { searchable[it].first }
             }
         }
     // The active match ordinal, re-anchored to the pinned message id so it
@@ -6732,6 +6746,16 @@ private fun ConversationScreen(
         searchPinnedMatchId = null
         searchJob?.cancel()
         highlightedMessageId = null
+        // Restore the scroll position captured when search opened (#292). The
+        // cancel above stops any in-flight search scroll-jump, so this resolves
+        // to the pre-search anchor without racing the search animation.
+        preSearchScrollAnchor?.let { (index, offset) ->
+            searchJob =
+                scope.launch {
+                    listState.scrollToItem(index, offset)
+                }
+        }
+        preSearchScrollAnchor = null
     }
 
     // Back closes an open search first (restoring the normal bar) before it
@@ -6965,6 +6989,12 @@ private fun ConversationScreen(
                                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                                 onClick = {
                                     menuOpen = false
+                                    // Snapshot the current scroll position before the
+                                    // search auto-scroll effect can move the list, so
+                                    // closing search can restore it (#292).
+                                    preSearchScrollAnchor =
+                                        listState.firstVisibleItemIndex to
+                                        listState.firstVisibleItemScrollOffset
                                     searchOpen = true
                                 },
                             )
