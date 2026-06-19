@@ -329,31 +329,64 @@ internal fun canAcceptTextSend(
  * in the Marmot runtime already retries individual relay sockets, but a publish
  * that begins during a *transient* connectivity gap (doze wake, network change,
  * background-connection toggle mid-reconnect) can see an empty/under-connected
- * pool at the single instant it fans out and fail fast with a connect/publish
- * timeout — even though a relay reconnects a moment later (issue #294). One
- * bounded retry sweep across [SEND_RETRY_ATTEMPTS] gives the pool that moment
- * before we tell the user the send failed, so a momentary gap no longer
- * surfaces as a hard error while a sustained outage (all attempts exhausted)
- * still does.
+ * pool at the single instant it fans out and fail fast with a *connect-phase*
+ * failure — even though a relay reconnects a moment later (issue #294). One
+ * bounded retry sweep across [SEND_RETRY_ATTEMPTS], gated by
+ * [isTransientRelaySendError], gives the pool that moment before we tell the
+ * user the send failed, so a momentary gap no longer surfaces as a hard error
+ * while a sustained outage (all attempts exhausted) still does. Only failures
+ * that prove the event never left the device are retried, so a re-send can
+ * never duplicate a message that actually reached a relay.
  */
 internal const val SEND_RETRY_ATTEMPTS: Int = 3
 internal val SEND_RETRY_BACKOFF_MS: Long = 700L
 
 /**
- * Whether [throwable] looks like a *transient* relay-connectivity failure that
- * is worth one more bounded send attempt, as opposed to a terminal/logic error
- * that should fail the send immediately. Recognizes the publish/connect-timeout
- * reasons the Nostr transport surfaces when the relay pool is momentarily
- * empty or still handshaking at fan-out time (issue #294).
+ * Whether [throwable] is a relay-connectivity failure that proves the event was
+ * **never transmitted to any relay**, and is therefore safe to re-send by
+ * re-entering the high-level FFI send. Recognizes only the *connect-phase*
+ * reasons the Nostr transport surfaces when the relay pool is momentarily empty
+ * or still handshaking at fan-out time (issue #294).
+ *
+ * IDEMPOTENCY IS THE CONTRACT. The bounded retry in [publishTextWithRetry]
+ * retries by calling `sendText` / `replyToMessage` again, and each call builds a
+ * **new** inner app event in the Marmot runtime
+ * (`marmot-app::runtime::send_message`) — there is no caller-supplied
+ * idempotency key. So we may only retry failures that happen *before* the
+ * transport ever calls `send_event_to`; otherwise a relay that accepted the
+ * first event but whose ack was lost/late would receive a second, distinct
+ * event and peers would see a duplicate user message (adversarial review of
+ * PR #299). The deliberately EXCLUDED post-send / ambiguous reasons are:
+ *   - `send event timed out`          — `send_event_to` was called; the frame
+ *                                        may have landed, only the OK ack timed
+ *                                        out (transport-nostr-adapter
+ *                                        `sdk_client.rs` "send event timed out").
+ *   - `relay did not acknowledge event` — the relay returned the event in
+ *                                        `output.failed`; it WAS transmitted.
+ *   - `publish timed out after Ns: accepted X of required Y` /
+ *     `insufficient publish acknowledgements: accepted X of required Y`
+ *                                      — the same string is emitted whether
+ *                                        `accepted` is 0 or > 0, so we cannot
+ *                                        prove nothing landed.
+ *   - `TransportClosed`               — surfaces from BOTH the worker
+ *                                        command-send channel (pre-publish) and
+ *                                        the response channel *after* the worker
+ *                                        may have already published
+ *                                        (`marmot-app::runtime` response await);
+ *                                        the UniFFI variant carries an empty
+ *                                        message so the two are indistinguishable,
+ *                                        hence ambiguous.
+ * A manual retry affordance (a user re-tapping send) is the right place to
+ * recover those ambiguous cases, because the user can see whether the message
+ * actually went through — an automatic re-send cannot.
  *
  * String-matched on the FFI error message + cause chain because the UniFFI
  * surface flattens these into [dev.ipf.marmotkit.MarmotKitException.Publish] /
- * `.TransportClosed` / `.Runtime` without a typed connectivity code. This is a
- * stopgap; keep the matched phrases in sync with the transport-nostr-adapter
- * publish reasons (`connect relay timed out`, `send event timed out`, `publish
- * timed out`, `relay did not acknowledge`) and the `TransportClosed` variant.
- * Over-matching only costs an extra bounded retry; under-matching reverts to
- * today's fail-fast, so the predicate is deliberately inclusive.
+ * `.Runtime` without a typed connectivity code. Keep the matched phrases in sync
+ * with the transport-nostr-adapter connect-phase reasons (`connect relay timed
+ * out`, `connection refused`, `connection reset`, `no relay endpoints`).
+ * Under-matching reverts to fail-fast (the message just isn't auto-retried);
+ * over-matching risks duplicate sends, so the predicate is deliberately narrow.
  */
 internal fun isTransientRelaySendError(throwable: Throwable): Boolean {
     val text =
@@ -361,16 +394,10 @@ internal fun isTransientRelaySendError(throwable: Throwable): Boolean {
             .joinToString(separator = "\n") { error ->
                 listOfNotNull(error.message, error.javaClass.simpleName).joinToString(" ")
             }.lowercase()
-    // TransportClosed is the socket-teardown-mid-reconnect case (#294). It is
-    // transient and retryable. RuntimeStopping is deliberately NOT here: it
-    // means the runtime is shutting down (sign-out/teardown), so retrying would
-    // only delay a send that can never land.
-    if ("transportclosed" in text) return true
-    // Publish/Runtime reasons carry the transport's free-text failure string.
+    // Connect-phase only: the transport raises these before it ever calls
+    // `send_event_to`, so the event provably never reached a relay and a
+    // re-send cannot duplicate it.
     return ("connect relay" in text && ("timed out" in text || "timeout" in text)) ||
-        ("send event timed out" in text) ||
-        ("publish timed out" in text) ||
-        ("did not acknowledge" in text) ||
         ("connection refused" in text) ||
         ("connection reset" in text) ||
         ("no relay endpoints" in text)
@@ -1660,14 +1687,19 @@ class ConversationController(
     }
 
     /**
-     * Publish a text/reply message, retrying across [SEND_RETRY_ATTEMPTS] only
-     * when the failure is a transient relay-connectivity error
-     * ([isTransientRelaySendError]). Terminal errors rethrow immediately on the
-     * first attempt. Between attempts it waits [SEND_RETRY_BACKOFF_MS] to give
-     * the relay pool time to (re)connect, and logs the relay-health snapshot at
-     * the retry decision point — aggregate connection counts only, no relay
-     * URLs/account/group/message ids — so the intermittent failure window from
-     * #294 is diagnosable from logcat without leaking PII.
+     * Publish a text/reply message, re-sending across [SEND_RETRY_ATTEMPTS] only
+     * when the failure proves the event never reached a relay
+     * ([isTransientRelaySendError] — connect-phase failures). Because each
+     * attempt re-enters the high-level FFI send and the runtime builds a fresh
+     * inner app event per call, retrying any ambiguous post-send failure could
+     * duplicate a message; the classifier is narrowed to connect-phase reasons
+     * precisely so this re-send is idempotent. Terminal errors and ambiguous
+     * post-send failures rethrow immediately on the first attempt. Between
+     * attempts it waits [SEND_RETRY_BACKOFF_MS] to give the relay pool time to
+     * (re)connect, and logs the relay-health snapshot at the retry decision
+     * point — aggregate connection counts only, no relay URLs/account/group/
+     * message ids — so the intermittent failure window from #294 is diagnosable
+     * from logcat without leaking PII.
      */
     private suspend fun publishTextWithRetry(
         replyTarget: String?,
