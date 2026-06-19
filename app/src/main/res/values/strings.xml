@@ -68,7 +68,7 @@
     <string name="archive">Archive</string>
     <string name="unarchive">Unarchive</string>
     <!-- Conversation in-chat search (#292) -->
-    <string name="conversation_search_open">Search in chat</string>
+    <string name="conversation_search_open">Search</string>
     <string name="conversation_search_hint">Search this chat</string>
     <string name="conversation_search_clear">Clear search</string>
     <string name="conversation_search_close">Close search</string>

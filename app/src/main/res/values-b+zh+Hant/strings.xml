@@ -515,7 +515,7 @@
     <string name="reaction_tap_to_remove">輕觸以移除</string>
     <string name="chat_list_filter_groups">群組</string>
     <!-- Conversation in-chat search (#292) -->
-    <string name="conversation_search_open">在聊天中搜尋</string>
+    <string name="conversation_search_open">搜尋</string>
     <string name="conversation_search_hint">搜尋此聊天</string>
     <string name="conversation_search_clear">清除搜尋</string>
     <string name="conversation_search_close">關閉搜尋</string>

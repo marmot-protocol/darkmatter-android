@@ -524,7 +524,7 @@
     <string name="reaction_tap_to_remove">Toucher pour retirer</string>
     <string name="chat_list_filter_groups">Groupes</string>
     <!-- Conversation in-chat search (#292) -->
-    <string name="conversation_search_open">Rechercher dans la discussion</string>
+    <string name="conversation_search_open">Rechercher</string>
     <string name="conversation_search_hint">Rechercher dans cette discussion</string>
     <string name="conversation_search_clear">Effacer la recherche</string>
     <string name="conversation_search_close">Fermer la recherche</string>

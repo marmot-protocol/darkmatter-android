@@ -521,7 +521,7 @@
     <string name="reaction_tap_to_remove">Kaldırmak için dokun</string>
     <string name="chat_list_filter_groups">Gruplar</string>
     <!-- Conversation in-chat search (#292) -->
-    <string name="conversation_search_open">Sohbette ara</string>
+    <string name="conversation_search_open">Ara</string>
     <string name="conversation_search_hint">Bu sohbette ara</string>
     <string name="conversation_search_clear">Aramayı temizle</string>
     <string name="conversation_search_close">Aramayı kapat</string>

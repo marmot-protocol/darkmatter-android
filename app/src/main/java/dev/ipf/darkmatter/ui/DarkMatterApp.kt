@@ -253,6 +253,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1530,12 +1531,16 @@ private fun ChatListTopBar(
     )
 }
 
+// Roomier than Material's default menu-item padding so conversation overflow
+// rows read as full lines of text rather than compact cells.
+private val conversationMenuItemPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
+
 /**
- * Inline top-bar search for a single conversation (#292). Mirrors the
- * chat-list search chrome (auto-focus field, ✕ clears) and adds an
- * `N/M` match indicator plus previous/next navigation arrows. The IME
- * "search" action steps to the next match so the on-screen keyboard alone
- * can walk the results.
+ * Inline top-bar search for a single conversation (#292): a back arrow plus an
+ * auto-focused field (✕ clears). The result count and previous/next match
+ * navigation live on the bottom bar above the keyboard
+ * ([ConversationSearchNavBar]); the IME "search" action steps to the next
+ * match so the on-screen keyboard alone can walk the results.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1544,10 +1549,7 @@ private fun ConversationSearchTopBar(
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
     onClose: () -> Unit,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
-    matchCount: Int,
-    activeIndex: Int,
+    onSearchAction: () -> Unit,
     focusRequester: FocusRequester,
 ) {
     val hasQuery = query.isNotBlank()
@@ -1569,28 +1571,16 @@ private fun ConversationSearchTopBar(
                         focusedBorderColor = Color.Transparent,
                         unfocusedBorderColor = Color.Transparent,
                     ),
+                // Clear sits inline in the field; match navigation and the
+                // result count live on the bottom bar above the keyboard.
                 trailingIcon = {
-                    when {
-                        // Live N/M counter once there are results; "No matches"
-                        // when a non-blank query found nothing.
-                        hasQuery && matchCount > 0 ->
-                            Text(
-                                text =
-                                    stringResource(
-                                        R.string.conversation_search_match_count,
-                                        activeIndex + 1,
-                                        matchCount,
-                                    ),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (hasQuery) {
+                        IconButton(onClick = onClear) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.conversation_search_clear),
                             )
-                        hasQuery ->
-                            Text(
-                                text = stringResource(R.string.conversation_search_no_matches),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        else -> Unit
+                        }
                     }
                 },
                 keyboardOptions =
@@ -1598,7 +1588,7 @@ private fun ConversationSearchTopBar(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Search,
                     ),
-                keyboardActions = KeyboardActions(onSearch = { if (matchCount > 0) onNext() }),
+                keyboardActions = KeyboardActions(onSearch = { onSearchAction() }),
             )
         },
         navigationIcon = {
@@ -1609,16 +1599,52 @@ private fun ConversationSearchTopBar(
                 )
             }
         },
-        actions = {
-            if (hasQuery) {
-                IconButton(onClick = onClear) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = stringResource(R.string.conversation_search_clear),
-                    )
-                }
-            }
-            val navEnabled = matchCount > 0
+    )
+}
+
+/**
+ * Search match navigation pinned above the keyboard while in-chat search is
+ * open: a centered result count with previous/next steppers on the trailing
+ * edge. Lives in the conversation `bottomBar` slot in place of the composer,
+ * mirroring the composer's `navigationBarsPadding().imePadding()` so it rides
+ * up with the soft keyboard rather than hiding behind it.
+ */
+@Composable
+private fun ConversationSearchNavBar(
+    matchCount: Int,
+    activeIndex: Int,
+    hasQuery: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val navEnabled = matchCount > 0
+    Surface(tonalElevation = 3.dp) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text =
+                    when {
+                        !hasQuery -> ""
+                        matchCount > 0 ->
+                            stringResource(
+                                R.string.conversation_search_match_count,
+                                activeIndex + 1,
+                                matchCount,
+                            )
+                        else -> stringResource(R.string.conversation_search_no_matches)
+                    },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+            )
             IconButton(onClick = onPrev, enabled = navEnabled) {
                 Icon(
                     Icons.Default.KeyboardArrowUp,
@@ -1631,8 +1657,8 @@ private fun ConversationSearchTopBar(
                     contentDescription = stringResource(R.string.conversation_search_next),
                 )
             }
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -6927,10 +6953,7 @@ private fun ConversationScreen(
                         searchPinnedMatchId = null
                     },
                     onClose = { closeSearch() },
-                    onPrev = { navigateToSearchMatch(forward = false) },
-                    onNext = { navigateToSearchMatch(forward = true) },
-                    matchCount = searchMatchIds.size,
-                    activeIndex = searchActiveIndex,
+                    onSearchAction = { navigateToSearchMatch(forward = true) },
                     focusRequester = searchFocusRequester,
                 )
             } else {
@@ -6982,11 +7005,23 @@ private fun ConversationScreen(
                         DropdownMenu(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            // Inset the panel from the right screen edge instead
+                            // of letting it sit flush against it.
+                            offset = DpOffset(x = (-8).dp, y = 0.dp),
+                            modifier = Modifier.widthIn(min = 232.dp),
                         ) {
+                            // Iconless, roomier rows: each entry reads as a
+                            // full-width tappable line of body-large text rather
+                            // than a compact icon+label cell.
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.conversation_search_open)) },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                text = {
+                                    Text(
+                                        stringResource(R.string.conversation_search_open),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                },
+                                contentPadding = conversationMenuItemPadding,
                                 onClick = {
                                     menuOpen = false
                                     // Snapshot the current scroll position before the
@@ -6999,7 +7034,13 @@ private fun ConversationScreen(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(if (controller.group.archived) R.string.unarchive else R.string.archive)) },
+                                text = {
+                                    Text(
+                                        stringResource(if (controller.group.archived) R.string.unarchive else R.string.archive),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                },
+                                contentPadding = conversationMenuItemPadding,
                                 enabled = !controller.mutationInFlight,
                                 onClick = {
                                     menuOpen = false
@@ -7008,7 +7049,13 @@ private fun ConversationScreen(
                             )
                             if (controller.isSelfMember) {
                                 DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.leave)) },
+                                    text = {
+                                        Text(
+                                            stringResource(R.string.leave),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                        )
+                                    },
+                                    contentPadding = conversationMenuItemPadding,
                                     enabled = !controller.mutationInFlight,
                                     onClick = {
                                         menuOpen = false
@@ -7023,6 +7070,16 @@ private fun ConversationScreen(
         },
         bottomBar = {
             when {
+                // While search is open the composer steps aside for the match
+                // navigation bar pinned above the keyboard.
+                searchOpen ->
+                    ConversationSearchNavBar(
+                        matchCount = searchMatchIds.size,
+                        activeIndex = searchActiveIndex,
+                        hasQuery = searchQuery.isNotBlank(),
+                        onPrev = { navigateToSearchMatch(forward = false) },
+                        onNext = { navigateToSearchMatch(forward = true) },
+                    )
                 controller.error != null || controller.group.pendingConfirmation -> Unit
                 // Only suppress the composer when we've *confirmed* the user
                 // is no longer a member. The kicked-notice branch must lose
