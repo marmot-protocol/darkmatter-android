@@ -323,6 +323,59 @@ internal fun canAcceptTextSend(
     canSend: Boolean,
 ): Boolean = accountRef != null && trimmed.isNotEmpty() && canSend
 
+/**
+ * How many times a text/reply send retries the FFI publish before surfacing a
+ * user-visible failure, and how long it waits between attempts. The send path
+ * in the Marmot runtime already retries individual relay sockets, but a publish
+ * that begins during a *transient* connectivity gap (doze wake, network change,
+ * background-connection toggle mid-reconnect) can see an empty/under-connected
+ * pool at the single instant it fans out and fail fast with a connect/publish
+ * timeout — even though a relay reconnects a moment later (issue #294). One
+ * bounded retry sweep across [SEND_RETRY_ATTEMPTS] gives the pool that moment
+ * before we tell the user the send failed, so a momentary gap no longer
+ * surfaces as a hard error while a sustained outage (all attempts exhausted)
+ * still does.
+ */
+internal const val SEND_RETRY_ATTEMPTS: Int = 3
+internal val SEND_RETRY_BACKOFF_MS: Long = 700L
+
+/**
+ * Whether [throwable] looks like a *transient* relay-connectivity failure that
+ * is worth one more bounded send attempt, as opposed to a terminal/logic error
+ * that should fail the send immediately. Recognizes the publish/connect-timeout
+ * reasons the Nostr transport surfaces when the relay pool is momentarily
+ * empty or still handshaking at fan-out time (issue #294).
+ *
+ * String-matched on the FFI error message + cause chain because the UniFFI
+ * surface flattens these into [dev.ipf.marmotkit.MarmotKitException.Publish] /
+ * `.TransportClosed` / `.Runtime` without a typed connectivity code. This is a
+ * stopgap; keep the matched phrases in sync with the transport-nostr-adapter
+ * publish reasons (`connect relay timed out`, `send event timed out`, `publish
+ * timed out`, `relay did not acknowledge`) and the `TransportClosed` variant.
+ * Over-matching only costs an extra bounded retry; under-matching reverts to
+ * today's fail-fast, so the predicate is deliberately inclusive.
+ */
+internal fun isTransientRelaySendError(throwable: Throwable): Boolean {
+    val text =
+        generateSequence(throwable) { it.cause }
+            .joinToString(separator = "\n") { error ->
+                listOfNotNull(error.message, error.javaClass.simpleName).joinToString(" ")
+            }.lowercase()
+    // TransportClosed is the socket-teardown-mid-reconnect case (#294). It is
+    // transient and retryable. RuntimeStopping is deliberately NOT here: it
+    // means the runtime is shutting down (sign-out/teardown), so retrying would
+    // only delay a send that can never land.
+    if ("transportclosed" in text) return true
+    // Publish/Runtime reasons carry the transport's free-text failure string.
+    return ("connect relay" in text && ("timed out" in text || "timeout" in text)) ||
+        ("send event timed out" in text) ||
+        ("publish timed out" in text) ||
+        ("did not acknowledge" in text) ||
+        ("connection refused" in text) ||
+        ("connection reset" in text) ||
+        ("no relay endpoints" in text)
+}
+
 internal fun optimisticMessageIdForProjection(
     optimisticMessages: Collection<TimelineMessage>,
     projected: AppMessageRecordFfi,
@@ -1568,12 +1621,15 @@ class ConversationController(
         // guard above bailed before this point.
         onAccepted()
         try {
+            // Publish with a bounded retry sweep so a *transient* relay-pool gap
+            // (socket teardown mid-reconnect, doze wake, network change) doesn't
+            // surface as a user-visible "send failed" the instant the pool looks
+            // empty (issue #294). A terminal/logic error fails on the first
+            // attempt; only a sustained connectivity outage — every attempt
+            // exhausted — keeps the hard failure. The optimistic bubble stays
+            // Pending across retries, so the user sees "sending", not "failed".
             val summary =
-                if (replyTarget != null) {
-                    appState.marmotIo { replyToMessage(account, group.groupIdHex, replyTarget, trimmed) }
-                } else {
-                    appState.marmotIo { sendText(account, group.groupIdHex, trimmed) }
-                }
+                publishTextWithRetry(replyTarget, account, trimmed)
             val confirmedId = summary.messageIds.firstOrNull() ?: tempId
             val confirmed = optimistic.copy(messageIdHex = confirmedId)
             if (confirmedId.isNotEmpty()) messageById[confirmedId] = confirmed
@@ -1601,6 +1657,68 @@ class ConversationController(
             publishTimelineFromIndexes()
             appState.present(R.string.toast_send_failed, AppText.Plain(throwable.message ?: throwable.javaClass.simpleName))
         }
+    }
+
+    /**
+     * Publish a text/reply message, retrying across [SEND_RETRY_ATTEMPTS] only
+     * when the failure is a transient relay-connectivity error
+     * ([isTransientRelaySendError]). Terminal errors rethrow immediately on the
+     * first attempt. Between attempts it waits [SEND_RETRY_BACKOFF_MS] to give
+     * the relay pool time to (re)connect, and logs the relay-health snapshot at
+     * the retry decision point — aggregate connection counts only, no relay
+     * URLs/account/group/message ids — so the intermittent failure window from
+     * #294 is diagnosable from logcat without leaking PII.
+     */
+    private suspend fun publishTextWithRetry(
+        replyTarget: String?,
+        account: String,
+        trimmed: String,
+    ): dev.ipf.marmotkit.SendSummaryFfi {
+        var lastTransient: Throwable? = null
+        for (attempt in 1..SEND_RETRY_ATTEMPTS) {
+            try {
+                return if (replyTarget != null) {
+                    appState.marmotIo { replyToMessage(account, group.groupIdHex, replyTarget, trimmed) }
+                } else {
+                    appState.marmotIo { sendText(account, group.groupIdHex, trimmed) }
+                }
+            } catch (throwable: Throwable) {
+                throwable.rethrowIfCancellation()
+                if (!isTransientRelaySendError(throwable)) throw throwable
+                lastTransient = throwable
+                logSendRetry(attempt, throwable)
+                if (attempt < SEND_RETRY_ATTEMPTS) {
+                    kotlinx.coroutines.delay(SEND_RETRY_BACKOFF_MS)
+                }
+            }
+        }
+        // Budget exhausted on a sustained connectivity gap: surface the failure.
+        throw lastTransient ?: IllegalStateException("send retry budget exhausted")
+    }
+
+    /**
+     * Trace a transient send retry with the current relay-health snapshot.
+     * Aggregate connection-state counts only (no relay URLs, account/group/
+     * message ids, or payload) so the #294 failure window is observable without
+     * violating the repo's privacy posture. Best-effort: a failure to read
+     * health must never escalate a send retry into an error.
+     */
+    private suspend fun logSendRetry(
+        attempt: Int,
+        throwable: Throwable,
+    ) {
+        if (!BuildConfig.DEBUG) return
+        val health = runCatching { appState.marmotIo { relayHealth() } }.getOrNull()
+        val healthSummary =
+            health?.let {
+                "total=${it.totalRelays} connected=${it.connected} connecting=${it.connecting} " +
+                    "pending=${it.pending} disconnected=${it.disconnected} terminated=${it.terminated}"
+            } ?: "unavailable"
+        Log.d(
+            "ConversationController",
+            "transient send failure (attempt $attempt/$SEND_RETRY_ATTEMPTS): " +
+                "${throwable.javaClass.simpleName} relayHealth[$healthSummary]",
+        )
     }
 
     /**
