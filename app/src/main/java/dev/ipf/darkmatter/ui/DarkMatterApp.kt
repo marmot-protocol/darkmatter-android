@@ -13034,6 +13034,18 @@ private fun AddIdentitySheet(
     }
 }
 
+/**
+ * Whether the destructive "Sign Out & Wipe" path is wired to a real engine
+ * FFI yet. The relay-side + MLS cleanup (kind:5 KeyPackage deletions, best-effort
+ * group leaves, account/MLS-DB/keychain teardown) lives in the darkmatter engine
+ * sub-issue of #347 and does not exist on the binding surface yet. Per #348 we
+ * gate the visible affordance on FFI availability so the UI never offers an
+ * action the engine can't actually perform. Flip to `true` once
+ * `signOutAndWipe`-style bindings land, then route the confirm-dialog's confirm
+ * button at the new AppState method.
+ */
+private const val WIPE_ENGINE_FFI_AVAILABLE = false
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun IdentityScreen(
@@ -13042,6 +13054,9 @@ private fun IdentityScreen(
 ) {
     val clipboard = LocalClipboardManager.current
     val active = appState.activeAccount
+    var showSignOutSheet by remember { mutableStateOf(false) }
+    var showWipeSheet by remember { mutableStateOf(false) }
+    var showWipeConfirm by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -13087,21 +13102,205 @@ private fun IdentityScreen(
                         stringResource(R.string.sign_out_session_help),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    OutlinedButton(
-                        onClick = {
-                            appState.signOutActiveAccount()
-                            appState.present(R.string.toast_signed_out)
-                        },
+                    // Primary, non-destructive sign-out. Opens an explanatory
+                    // sheet; the sheet's button performs the actual sign-out so
+                    // the user reads what stays vs. changes before committing.
+                    Button(
+                        onClick = { showSignOutSheet = true },
                         enabled = active != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Default.Close, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.sign_out_of_this_account))
+                        Text(stringResource(R.string.sign_out))
+                    }
+                    // Destructive "Sign Out & Wipe". Gated on engine FFI
+                    // availability (#348): the relay + MLS teardown is an engine
+                    // sub-issue that doesn't exist on the binding surface yet, so
+                    // we don't surface an affordance we can't honor.
+                    if (WIPE_ENGINE_FFI_AVAILABLE) {
+                        OutlinedButton(
+                            onClick = { showWipeSheet = true },
+                            enabled = active != null,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors =
+                                ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error,
+                                ),
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.sign_out_and_wipe))
+                        }
                     }
                 }
             }
         }
+    }
+
+    if (showSignOutSheet) {
+        SignOutSheet(
+            onConfirm = {
+                showSignOutSheet = false
+                appState.signOutActiveAccount()
+                appState.present(R.string.toast_signed_out)
+            },
+            onDismiss = { showSignOutSheet = false },
+        )
+    }
+
+    if (WIPE_ENGINE_FFI_AVAILABLE && showWipeSheet) {
+        SignOutAndWipeSheet(
+            onConfirm = {
+                showWipeSheet = false
+                showWipeConfirm = true
+            },
+            onDismiss = { showWipeSheet = false },
+        )
+    }
+
+    if (WIPE_ENGINE_FFI_AVAILABLE && showWipeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showWipeConfirm = false },
+            title = { Text(stringResource(R.string.sign_out_and_wipe_confirm_title)) },
+            text = { Text(stringResource(R.string.sign_out_and_wipe_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showWipeConfirm = false
+                        // Engine FFI not wired yet (WIPE_ENGINE_FFI_AVAILABLE is
+                        // false), so this branch is unreachable today. When the
+                        // signOutAndWipe binding lands, route it here and present
+                        // R.string.toast_signed_out_and_wiped on success.
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.wipe),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWipeConfirm = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Non-destructive sign-out sheet (#348). Explains what stays on device and what
+ * changes, then performs the actual sign-out via [onConfirm]. Copy is
+ * intentionally limited to what the current sign-out path actually does (push
+ * off, in-memory caches cleared, identity retained) — relay-side KeyPackage
+ * deletion is an engine sub-issue of #347 and is not promised here.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SignOutSheet(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(stringResource(R.string.sign_out_sheet_title), style = MaterialTheme.typography.titleLarge)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.sign_out_sheet_stays_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource(R.string.sign_out_sheet_stays_body),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.sign_out_sheet_changes_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource(R.string.sign_out_sheet_changes_body),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Close, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.sign_out))
+            }
+        }
+    }
+}
+
+/**
+ * Destructive "Sign Out & Wipe" sheet (#348). Lists exactly what gets destroyed
+ * and that signing back in starts fresh, then hands off to a type/hold-free
+ * confirmation dialog via [onConfirm]. Only shown when the engine FFI exists
+ * ([WIPE_ENGINE_FFI_AVAILABLE]); the copy describes the full teardown the engine
+ * sub-issue will perform.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SignOutAndWipeSheet(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                stringResource(R.string.sign_out_and_wipe_sheet_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(stringResource(R.string.sign_out_and_wipe_sheet_intro))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.sign_out_and_wipe_sheet_destroyed_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                WipeBullet(stringResource(R.string.sign_out_and_wipe_sheet_destroyed_db))
+                WipeBullet(stringResource(R.string.sign_out_and_wipe_sheet_destroyed_keychain))
+                WipeBullet(stringResource(R.string.sign_out_and_wipe_sheet_destroyed_relays))
+            }
+            Text(
+                stringResource(R.string.sign_out_and_wipe_sheet_fresh_start),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth(),
+                colors =
+                    ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.sign_out_and_wipe))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WipeBullet(text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("\u2022", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
