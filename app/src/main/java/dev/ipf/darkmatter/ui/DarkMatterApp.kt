@@ -1637,24 +1637,27 @@ private fun ChatListNoResults(
 // vertical scroll.
 
 /**
- * Horizontal travel must exceed vertical travel by at least this factor
- * for the swipe gesture to engage. 2× means the thumb has to be moving
- * clearly more sideways than down before archive can trigger.
+ * Axis-dominance factor used by the directional lock-out. The swipe is
+ * only locked out when vertical travel exceeds horizontal by at least
+ * this factor (2×), i.e. the thumb is moving clearly more down than
+ * sideways — an unambiguous scroll. Below this the gesture stays
+ * ambiguous and the swipe box remains enabled.
  */
 private const val AXIS_LOCK_RATIO = 2f
 
 /**
- * On top of [AXIS_LOCK_RATIO], horizontal travel must also lead vertical
- * by at least this absolute margin. Guards the near-origin case where a
- * tiny dx can satisfy the ratio against a tiny dy (e.g. 4px vs 1px) yet
- * is plainly not a deliberate swipe.
+ * On top of [AXIS_LOCK_RATIO], the dominant axis must also lead the
+ * other by at least this absolute margin before the lock-out fires.
+ * Guards the near-origin case where a tiny travel can satisfy the ratio
+ * against a tiny opposite-axis travel (e.g. 4px vs 1px) yet is plainly
+ * just jitter, not a deliberate scroll.
  */
 private const val AXIS_LOCK_MIN_LEAD_DP = 24
 
 /**
- * Cumulative travel (on either axis) at which the axis-lock commits to a
- * dominant-axis decision. Roughly Compose's default touch slop; small
- * enough to decide early, large enough to ignore finger jitter.
+ * Cumulative travel (on either axis) below which the gesture is treated
+ * as ambiguous finger jitter and the lock-out is not even evaluated.
+ * Roughly Compose's default touch slop.
  */
 private const val AXIS_LOCK_SLOP_DP = 8
 
@@ -1688,12 +1691,16 @@ private const val ARCHIVE_POSITIONAL_THRESHOLD_FRACTION = 0.5f
  * Two guards keep a vertical scroll from being read as a swipe-archive:
  *
  * 1. **Directional axis-lock.** A pointer-input watcher on the Initial
- *    pass observes (without consuming) the drag from pointer-down. The
- *    moment cumulative travel clears the slop, it decides the dominant
- *    axis: unless horizontal travel leads vertical by [AXIS_LOCK_RATIO]
- *    *and* by at least [AXIS_LOCK_MIN_LEAD_DP], it disables the swipe
- *    box's gestures for the rest of that gesture so the LazyColumn
- *    scroll wins outright. Reset on pointer-up.
+ *    pass observes (without consuming) the drag from pointer-down. It
+ *    keeps watching the whole gesture and only *permanently* disables
+ *    the swipe box's gestures once vertical travel clearly dominates
+ *    horizontal — by [AXIS_LOCK_RATIO] *and* at least [AXIS_LOCK_MIN_LEAD_DP]
+ *    — i.e. an unambiguous scroll, so the LazyColumn wins outright.
+ *    Crucially it does *not* make a one-way decision the instant travel
+ *    clears the slop: a normal incremental horizontal swipe crosses the
+ *    small slop long before it builds the 24dp horizontal lead, so an
+ *    early decision there would wrongly kill the swipe for the rest of
+ *    the gesture (#296 review). Reset on pointer-up.
  * 2. **High positional threshold.** Even a clean horizontal drag must
  *    travel past 50% of the row width before the dismiss commits (vs.
  *    Material3's default fixed 56dp), so the gesture has to be
@@ -1796,7 +1803,7 @@ private fun SwipeableChatRow(
                 awaitFirstDown(requireUnconsumed = false)
                 var dx = 0f
                 var dy = 0f
-                var decided = false
+                var lockedOut = false
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.firstOrNull() ?: break
@@ -1804,17 +1811,26 @@ private fun SwipeableChatRow(
                     val delta = change.positionChange()
                     dx += delta.x
                     dy += delta.y
-                    if (!decided && ArchiveSwipe.axisDecided(dx, dy, slopPx)) {
-                        decided = true
-                        // Disable the swipe box for the rest of this
-                        // gesture unless horizontal clearly dominates.
-                        swipeGesturesEnabled =
-                            ArchiveSwipe.shouldEngageSwipe(
-                                dx = dx,
-                                dy = dy,
-                                ratio = AXIS_LOCK_RATIO,
-                                minLeadPx = axisLockMinLeadPx,
-                            )
+                    // Don't make a one-way decision at the slop: a normal
+                    // incremental horizontal swipe crosses the small slop
+                    // long before it has built up the 24dp horizontal lead,
+                    // so deciding there would wrongly disable the swipe for
+                    // the rest of the gesture (#296 review). Instead keep
+                    // observing and only PERMANENTLY lock the swipe out once
+                    // vertical travel clearly dominates — a real scroll. Until
+                    // then the swipe box stays enabled and its deliberate
+                    // half-row positional threshold is what gates an archive.
+                    if (!lockedOut &&
+                        ArchiveSwipe.axisDecided(dx, dy, slopPx) &&
+                        ArchiveSwipe.shouldLockOutSwipe(
+                            dx = dx,
+                            dy = dy,
+                            ratio = AXIS_LOCK_RATIO,
+                            minLeadPx = axisLockMinLeadPx,
+                        )
+                    ) {
+                        lockedOut = true
+                        swipeGesturesEnabled = false
                     }
                     if (event.changes.all { it.changedToUp() }) break
                 }

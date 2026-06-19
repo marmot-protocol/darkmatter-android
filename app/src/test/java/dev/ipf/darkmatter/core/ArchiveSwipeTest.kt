@@ -67,4 +67,62 @@ class ArchiveSwipeTest {
         assertTrue(ArchiveSwipe.axisDecided(dx = 0f, dy = 30f, slopPx = slopPx))
         assertTrue(ArchiveSwipe.axisDecided(dx = 30f, dy = 0f, slopPx = slopPx))
     }
+
+    @Test
+    fun clearVerticalScrollLocksOutSwipe() {
+        // Mostly-downward scroll: 10px across, 120px down — lock the swipe out.
+        assertTrue(ArchiveSwipe.shouldLockOutSwipe(dx = 10f, dy = 120f, ratio = ratio, minLeadPx = minLeadPx))
+    }
+
+    @Test
+    fun horizontalDominantDragDoesNotLockOut() {
+        // A deliberate sideways swipe must NOT be locked out as a scroll.
+        assertFalse(ArchiveSwipe.shouldLockOutSwipe(dx = 120f, dy = 10f, ratio = ratio, minLeadPx = minLeadPx))
+        // Equal travel on both axes is ambiguous — do not lock out.
+        assertFalse(ArchiveSwipe.shouldLockOutSwipe(dx = 80f, dy = 80f, ratio = ratio, minLeadPx = minLeadPx))
+    }
+
+    @Test
+    fun lockOutRequiresBothRatioAndLead() {
+        // dy=72, dx=140: vertical lead = -68 (horizontal actually leads),
+        // neither lock-out condition holds.
+        assertFalse(ArchiveSwipe.shouldLockOutSwipe(dx = 140f, dy = 72f, ratio = ratio, minLeadPx = minLeadPx))
+        // dy=72, dx=8: ratio 72 >= 8*2=16 ✓, lead 64 >= 63 ✓ → lock out.
+        assertTrue(ArchiveSwipe.shouldLockOutSwipe(dx = 8f, dy = 72f, ratio = ratio, minLeadPx = minLeadPx))
+        // dy=70, dx=40: ratio 70 < 40*2=80 fails → do NOT lock out.
+        assertFalse(ArchiveSwipe.shouldLockOutSwipe(dx = 40f, dy = 70f, ratio = ratio, minLeadPx = minLeadPx))
+    }
+
+    @Test
+    fun lockOutIsDirectionAgnostic() {
+        // Upward scroll (negative dy) locks out identically — only
+        // magnitude matters.
+        assertTrue(ArchiveSwipe.shouldLockOutSwipe(dx = 10f, dy = -120f, ratio = ratio, minLeadPx = minLeadPx))
+        // Leftward (RTL) horizontal swipe is not a scroll.
+        assertFalse(ArchiveSwipe.shouldLockOutSwipe(dx = -120f, dy = 10f, ratio = ratio, minLeadPx = minLeadPx))
+    }
+
+    @Test
+    fun incrementalHorizontalDragIsNotLockedOutBeforeReachingLead() {
+        // Regression for #296 review: a normal horizontal swipe builds up
+        // incrementally and crosses the small axis slop (21px) long before
+        // it accumulates the 24dp (~63px) horizontal lead. At each of these
+        // intermediate, slop-cleared frames the swipe must STAY enabled —
+        // i.e. it must NOT be locked out — otherwise the deliberate swipe is
+        // killed for the rest of the gesture and archive becomes unreachable.
+        val incrementalHorizontalFrames =
+            listOf(
+                25f to 0f, // just past slop, no vertical component
+                30f to 1f,
+                40f to 2f,
+                55f to 3f, // still below the 63px lead
+                70f to 4f, // now past the lead — clearly a swipe
+            )
+        for ((dx, dy) in incrementalHorizontalFrames) {
+            assertTrue(
+                "incremental horizontal frame ($dx, $dy) must not lock out the swipe",
+                !ArchiveSwipe.shouldLockOutSwipe(dx = dx, dy = dy, ratio = ratio, minLeadPx = minLeadPx),
+            )
+        }
+    }
 }

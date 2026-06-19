@@ -46,4 +46,33 @@ object ArchiveSwipe {
         val vertical = abs(dy)
         return horizontal >= vertical * ratio && (horizontal - vertical) >= minLeadPx
     }
+
+    /**
+     * Whether a drag of cumulative travel `(dx, dy)` is a clear vertical
+     * scroll that should permanently lock the swipe gesture out for the
+     * rest of this pointer interaction (the LazyColumn scroll wins).
+     *
+     * This is the mirror of [shouldEngageSwipe] with the axes swapped:
+     * vertical travel must dominate horizontal by BOTH the [ratio] and
+     * an absolute [minLeadPx] lead. It is the only *terminal* lock-out
+     * condition — until it is met the gesture stays ambiguous and the
+     * swipe box remains enabled, so an ordinary incremental horizontal
+     * drag (which crosses the small axis slop long before it builds a
+     * 24dp horizontal lead) is never killed prematurely. The deliberate
+     * half-row positional threshold on the swipe box is what gates an
+     * actual archive commit.
+     *
+     * Direction sign is irrelevant — only axis magnitudes matter — so
+     * this behaves identically in LTR and RTL.
+     */
+    fun shouldLockOutSwipe(
+        dx: Float,
+        dy: Float,
+        ratio: Float,
+        minLeadPx: Float,
+    ): Boolean {
+        val horizontal = abs(dx)
+        val vertical = abs(dy)
+        return vertical >= horizontal * ratio && (vertical - horizontal) >= minLeadPx
+    }
 }
