@@ -1114,6 +1114,12 @@ private fun MainShell(
             sectionName = MainSection.Chats.name
             settingsDetailName = null
             selectedChat = null
+            // Notification routing never opens a just-created conversation, so
+            // clear any leftover open-time state from a prior New Chat / Create
+            // Group flow; otherwise a stale justCreated flag would auto-raise
+            // the IME on the next opened conversation (issue #321 guard).
+            selectedChatFocusMessageId = null
+            selectedChatJustCreated = false
         }
         when (step) {
             is NotificationNavStep.SwitchAccount -> {
@@ -1124,6 +1130,8 @@ private fun MainShell(
                 // here makes tapping from inside a chat take the same clean path
                 // as tapping after returning to the chat list.
                 selectedChat = null
+                selectedChatFocusMessageId = null
+                selectedChatJustCreated = false
                 appState.setActiveAccount(step.accountRef)
             }
             NotificationNavStep.AwaitChatList -> Unit // re-fires when list state settles
@@ -1136,6 +1144,11 @@ private fun MainShell(
                     .firstOrNull { it.group.groupIdHex == step.groupIdHex }
                     ?.let {
                         selectedChatFocusMessageId = null
+                        // Notification routing is never a just-created open, so
+                        // clear any stale justCreated flag carried over from a
+                        // prior New Chat / Create Group flow before showing the
+                        // target conversation (issue #321 guard).
+                        selectedChatJustCreated = false
                         selectedChat = it
                     }
                 onNotificationTargetHandled(target)
