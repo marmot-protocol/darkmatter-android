@@ -355,6 +355,7 @@ import dev.ipf.darkmatter.state.ConversationControllerCopy
 import dev.ipf.darkmatter.state.DarkMatterAppState
 import dev.ipf.darkmatter.state.MediaAutoDownloadNetwork
 import dev.ipf.darkmatter.state.MediaAutoDownloadType
+import dev.ipf.darkmatter.state.MediaQuality
 import dev.ipf.darkmatter.state.MessageStatus
 import dev.ipf.darkmatter.state.MessageStatusLabels
 import dev.ipf.darkmatter.state.OutgoingMessageIndicator
@@ -422,6 +423,7 @@ private enum class SettingsDetail {
     KeyPackages,
     Notifications,
     SecurityPrivacy,
+    DataStorage,
 }
 
 private data class DiagnosticLogEntry(
@@ -573,6 +575,26 @@ private val AppThemeMode.labelRes: Int
             AppThemeMode.Light -> R.string.theme_light
             AppThemeMode.Dark -> R.string.theme_dark
             AppThemeMode.Amoled -> R.string.theme_amoled
+        }
+
+private val MediaQuality.labelRes: Int
+    @StringRes
+    get() =
+        when (this) {
+            MediaQuality.Low -> R.string.media_quality_low
+            MediaQuality.Standard -> R.string.media_quality_standard
+            MediaQuality.High -> R.string.media_quality_high
+            MediaQuality.Original -> R.string.media_quality_original
+        }
+
+private val MediaQuality.subtitleRes: Int
+    @StringRes
+    get() =
+        when (this) {
+            MediaQuality.Low -> R.string.media_quality_low_subtitle
+            MediaQuality.Standard -> R.string.media_quality_standard_subtitle
+            MediaQuality.High -> R.string.media_quality_high_subtitle
+            MediaQuality.Original -> R.string.media_quality_original_subtitle
         }
 
 @Composable
@@ -6677,6 +6699,10 @@ private fun ConversationScreen(
                         appState.present(voiceTooShortMsg)
                     }
                 },
+                // Honor the user's media-quality ceiling for voice notes.
+                // Read at record-start (the controller is not re-keyed on the
+                // quality state) so a setting change applies to the next clip.
+                bitrateProvider = { appState.mediaQuality.audioBitrateBps },
             )
         }
     DisposableEffect(voiceRecordingController) {
@@ -6778,8 +6804,14 @@ private fun ConversationScreen(
                                     MediaPipeline.VideoReadResult.Failed -> continue
                                 }
                             } else {
+                                val quality = appState.mediaQuality
                                 val jpeg =
-                                    MediaPipeline.readDownscaledJpeg(context.contentResolver, uri) ?: continue
+                                    MediaPipeline.readDownscaledJpeg(
+                                        context.contentResolver,
+                                        uri,
+                                        maxEdgePx = quality.imageMaxEdgePx,
+                                        quality = quality.imageJpegQuality,
+                                    ) ?: continue
                                 val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
                                 val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
                                 PendingAttachment(
@@ -6945,7 +6977,14 @@ private fun ConversationScreen(
                             MediaPipeline.VideoReadResult.Failed -> continue
                         }
                     } else {
-                        val jpeg = MediaPipeline.readDownscaledJpeg(context.contentResolver, uri) ?: continue
+                        val quality = appState.mediaQuality
+                        val jpeg =
+                            MediaPipeline.readDownscaledJpeg(
+                                context.contentResolver,
+                                uri,
+                                maxEdgePx = quality.imageMaxEdgePx,
+                                quality = quality.imageJpegQuality,
+                            ) ?: continue
                         val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
                         val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
                         PendingAttachment(
@@ -12996,6 +13035,7 @@ private fun SettingsScreen(
                 onBack = { onDetailChange(null) },
                 onOpenDiagnostics = onOpenDiagnostics,
             )
+        SettingsDetail.DataStorage -> DataStorageScreen(appState, onBack = { onDetailChange(null) })
         null ->
             SettingsHomeScreen(
                 appState = appState,
@@ -13080,6 +13120,14 @@ private fun SettingsHomeScreen(
                     SettingsRow(stringResource(R.string.security_and_privacy), stringResource(R.string.security_privacy_settings_subtitle)) {
                         onOpenDetail(SettingsDetail.SecurityPrivacy)
                     }
+                }
+            }
+            item {
+                SectionCard(title = stringResource(R.string.data_and_storage)) {
+                    SettingsRow(
+                        stringResource(R.string.media_quality_title),
+                        stringResource(R.string.media_quality_settings_subtitle),
+                    ) { onOpenDetail(SettingsDetail.DataStorage) }
                 }
             }
             item {
@@ -13265,6 +13313,81 @@ private fun SelectableSettingsRow(
             }
         },
     )
+}
+
+// A selectable row that also shows a supporting line (e.g. the approximate
+// per-photo size delta) under the title. Mirrors [SelectableSettingsRow] but
+// with a subtitle slot.
+@Composable
+private fun SelectableSettingsRowWithSubtitle(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        headlineContent = { Text(title) },
+        supportingContent = {
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        trailingContent = {
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = stringResource(R.string.selected),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DataStorageScreen(
+    appState: DarkMatterAppState,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.data_and_storage)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item {
+                SectionCard(title = stringResource(R.string.media_quality_title)) {
+                    MediaQuality.entries.forEach { quality ->
+                        SelectableSettingsRowWithSubtitle(
+                            title = stringResource(quality.labelRes),
+                            subtitle = stringResource(quality.subtitleRes),
+                            selected = appState.mediaQuality == quality,
+                            onClick = { appState.updateMediaQuality(quality) },
+                        )
+                    }
+                    // Privacy floor + video carve-out. The size knob and the
+                    // metadata strip are orthogonal: images are always
+                    // re-encoded (which drops EXIF GPS / device make+model) at
+                    // every level, including Original. Video has no re-encode
+                    // path in this client, so it always sends as-is.
+                    Text(
+                        text = stringResource(R.string.media_quality_footer),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
