@@ -24,18 +24,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install pinned Android SDK packages
         run: |
@@ -46,7 +47,7 @@ jobs:
             "build-tools;${ANDROID_BUILD_TOOLS}"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
       - name: Restore stable debug signing key
         env:
@@ -84,9 +85,10 @@ jobs:
         run: |
           version_code="$(git rev-list --count HEAD)"
           short_sha="$(git rev-parse --short=7 HEAD)"
+          branch_slug="$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')"
           {
             echo "DARKMATTER_VERSION_CODE=$version_code"
-            echo "DARKMATTER_VERSION_NAME=master-$short_sha"
+            echo "DARKMATTER_VERSION_NAME=${branch_slug}-${short_sha}"
           } >>"$GITHUB_ENV"
 
       - name: Build debug APK
@@ -103,7 +105,7 @@ jobs:
           )
 
       - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: darkmatter-debug-apk-${{ github.run_number }}
           path: |
@@ -128,10 +130,15 @@ jobs:
           This is for internal QA only. It is not a release-signing path.
           EOF
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f latest-main "$GITHUB_SHA"
-          git push --force origin refs/tags/latest-main
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/latest-main" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest-main" \
+              -f sha="$GITHUB_SHA" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/latest-main" \
+              -f sha="$GITHUB_SHA" >/dev/null
+          fi
 
           if gh release view latest-main >/dev/null 2>&1; then
             gh release edit latest-main \
