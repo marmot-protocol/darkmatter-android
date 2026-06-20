@@ -1,0 +1,44 @@
+name: Debug APK
+
+# Builds the debug variant on every push to the default branch and publishes
+# the universal APK as a workflow artifact so internal testers can grab the
+# latest build without a local Android toolchain. Debug-only: the artifact is
+# signed with the public debug keystore and uses the `.debug` applicationId
+# suffix, so it installs side-by-side with the store build. Not a release flow.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debug-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble debug
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkmatter-debug-apk
+          path: app/build/outputs/apk/debug/*universal*.apk
+          if-no-files-found: error

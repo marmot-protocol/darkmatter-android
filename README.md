@@ -1,6 +1,12 @@
 # Dark Matter Android
 
+[![Debug APK](https://github.com/marmot-protocol/darkmatter-android/actions/workflows/debug-apk.yml/badge.svg)](https://github.com/marmot-protocol/darkmatter-android/actions/workflows/debug-apk.yml)
+
 Android client for Dark Matter.
+
+## Latest Debug Build
+
+Each push to the default branch builds a debug APK and uploads it as a workflow artifact. Grab the latest one from the most recent successful [Debug APK run](https://github.com/marmot-protocol/darkmatter-android/actions/workflows/debug-apk.yml?query=is%3Asuccess) — open the run and download `darkmatter-debug-apk` under Artifacts. It is the universal debug variant (`.debug` applicationId suffix), so it installs alongside the store build for side-by-side testing.
 
 ## Project Shape
 
