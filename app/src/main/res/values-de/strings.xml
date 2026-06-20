@@ -401,7 +401,9 @@
     <string name="confirm_transfer_admin_title">Admin übertragen?</string>
     <string name="confirm_transfer_admin_message">%1$s wird Admin und du trittst zurück. Du kannst später wieder Admin werden.</string>
     <string name="sole_admin_transfer_hint">Du bist der einzige Admin. Übertrage den Admin, um zu gehen oder zurückzutreten.</string>
-    <string name="transfer_admin_picker_subtitle">Wähle ein Mitglied als Admin. Du trittst zurück, sobald es übernimmt.</string>
+    <string name="sole_admin_leave_blocked_title">Erst Admin übertragen</string>
+    <string name="sole_admin_leave_blocked_message">Du bist der einzige Admin dieser Gruppe. Übertrage den Admin an ein anderes Mitglied, bevor du gehst.</string>
+    <string name="transfer_admin_picker_subtitle">Wähle ein Mitglied als Admin. Du trittst sofort zurück.</string>
     <string name="transfer_admin_no_candidates">Keine anderen Mitglieder, an die der Admin übertragen werden kann.</string>
     <string name="toast_couldnt_load_mls_state">MLS-Status konnte nicht geladen werden</string>
     <string name="toast_security_privacy_updated">Sicherheits- und Datenschutzeinstellungen aktualisiert</string>

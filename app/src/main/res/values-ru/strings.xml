@@ -403,7 +403,9 @@
     <string name="confirm_transfer_admin_title">Передать админа?</string>
     <string name="confirm_transfer_admin_message">%1$s станет админом, а вы сложите полномочия. Позже вас снова могут назначить админом.</string>
     <string name="sole_admin_transfer_hint">Вы единственный админ. Передайте админа, чтобы выйти или сложить полномочия.</string>
-    <string name="transfer_admin_picker_subtitle">Выберите участника, которого сделать админом. Вы сложите полномочия, когда он примет.</string>
+    <string name="sole_admin_leave_blocked_title">Сначала передайте админа</string>
+    <string name="sole_admin_leave_blocked_message">Вы единственный админ этой группы. Передайте админа другому участнику, прежде чем выйти.</string>
+    <string name="transfer_admin_picker_subtitle">Выберите участника, которого сделать админом. Вы сразу сложите полномочия.</string>
     <string name="transfer_admin_no_candidates">Нет других участников для передачи админа.</string>
     <string name="toast_couldnt_load_mls_state">Не удалось загрузить состояние MLS</string>
     <string name="toast_security_privacy_updated">Настройки безопасности и конфиденциальности обновлены</string>

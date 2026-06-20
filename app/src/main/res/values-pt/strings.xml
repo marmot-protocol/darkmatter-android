@@ -401,7 +401,9 @@
     <string name="confirm_transfer_admin_title">Transferir admin?</string>
     <string name="confirm_transfer_admin_message">%1$s torna-se admin e você renuncia. Você pode voltar a ser admin depois.</string>
     <string name="sole_admin_transfer_hint">Você é o único admin. Transfira o admin para sair ou renunciar.</string>
-    <string name="transfer_admin_picker_subtitle">Escolha um membro para tornar admin. Você renuncia quando ele aceitar.</string>
+    <string name="sole_admin_leave_blocked_title">Transfira o admin primeiro</string>
+    <string name="sole_admin_leave_blocked_message">Você é o único admin deste grupo. Transfira o admin para outro membro antes de sair.</string>
+    <string name="transfer_admin_picker_subtitle">Escolha um membro para tornar admin. Você renuncia imediatamente.</string>
     <string name="transfer_admin_no_candidates">Nenhum outro membro para transferir o admin.</string>
     <string name="toast_couldnt_load_mls_state">Não foi possível carregar o estado MLS</string>
     <string name="toast_security_privacy_updated">Segurança e privacidade atualizadas</string>

@@ -400,7 +400,9 @@
     <string name="confirm_transfer_admin_title">轉讓管理員？</string>
     <string name="confirm_transfer_admin_message">%1$s 將成為管理員，而你將卸任。你以後可以再次被設為管理員。</string>
     <string name="sole_admin_transfer_hint">你是唯一的管理員。請先轉讓管理員才能離開或卸任。</string>
-    <string name="transfer_admin_picker_subtitle">選擇一名成員設為管理員。對方接受後你將卸任。</string>
+    <string name="sole_admin_leave_blocked_title">請先轉讓管理員</string>
+    <string name="sole_admin_leave_blocked_message">你是該群組的唯一管理員。離開前請先把管理員轉讓給其他成員。</string>
+    <string name="transfer_admin_picker_subtitle">選擇一名成員設為管理員。你將立即卸任。</string>
     <string name="transfer_admin_no_candidates">沒有其他成員可以轉讓管理員。</string>
     <string name="toast_couldnt_load_mls_state">無法載入 MLS 狀態</string>
     <string name="toast_security_privacy_updated">安全與隱私已更新</string>

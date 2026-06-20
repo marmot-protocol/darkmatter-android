@@ -6389,6 +6389,15 @@ private fun ConversationScreen(
     // lands on the conversation, not the new chat's details page.
     var showDetails by remember(chat.id) { mutableStateOf(false) }
     var confirmLeaveFromTopBar by remember { mutableStateOf(false) }
+    // Sole-admin Leave gate: a sole admin with other members can't leave until
+    // they hand admin to someone else. Instead of the old toast-only dead end,
+    // the Leave action surfaces a "Transfer admin first" dialog that routes
+    // into the group details transfer picker (#417, adversarial review).
+    var showTransferAdminFirst by remember { mutableStateOf(false) }
+    // Set when the user opts to transfer from that dialog: opens details with
+    // the transfer picker auto-expanded. Keyed on chat.id so it doesn't leak
+    // across a conversation switch.
+    var openTransferOnDetails by remember(chat.id) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // Single conversation-level owner of which message's action menu is open, so
     // only one popover can be open at a time. With the keyboard up the menu is
@@ -7490,8 +7499,12 @@ private fun ConversationScreen(
         GroupDetailsScreen(
             appState = appState,
             controller = controller,
-            onBack = { showDetails = false },
+            onBack = {
+                showDetails = false
+                openTransferOnDetails = false
+            },
             onLeft = onBack,
+            autoOpenTransferAdmin = openTransferOnDetails,
         )
         return
     }
@@ -7627,7 +7640,15 @@ private fun ConversationScreen(
                                     enabled = !controller.mutationInFlight,
                                     onClick = {
                                         menuOpen = false
-                                        confirmLeaveFromTopBar = true
+                                        // A sole admin with other members can't
+                                        // leave until they transfer admin; route
+                                        // them to the transfer flow instead of
+                                        // the old leaveGroup() toast dead end.
+                                        if (controller.isSoleAdminWithOtherMembers) {
+                                            showTransferAdminFirst = true
+                                        } else {
+                                            confirmLeaveFromTopBar = true
+                                        }
                                     },
                                 )
                             }
@@ -7919,6 +7940,20 @@ private fun ConversationScreen(
         )
     }
 
+    if (showTransferAdminFirst) {
+        ConfirmDialog(
+            title = stringResource(R.string.sole_admin_leave_blocked_title),
+            message = stringResource(R.string.sole_admin_leave_blocked_message),
+            confirmLabel = stringResource(R.string.transfer_admin),
+            onConfirm = {
+                showTransferAdminFirst = false
+                openTransferOnDetails = true
+                showDetails = true
+            },
+            onDismiss = { showTransferAdminFirst = false },
+        )
+    }
+
     if (pendingMediaUris.isNotEmpty() || pendingDocumentUris.isNotEmpty()) {
         val imageUris = pendingMediaUris
         val documentUris = pendingDocumentUris
@@ -8045,6 +8080,10 @@ private fun GroupDetailsScreen(
     controller: ConversationController,
     onBack: () -> Unit,
     onLeft: () -> Unit,
+    // When true (sole admin routed in from the blocked top-level Leave gate),
+    // open the transfer-admin picker immediately so the trapped admin lands on
+    // the action instead of having to hunt for it in the Admins section (#417).
+    autoOpenTransferAdmin: Boolean = false,
 ) {
     var name by remember(controller.group.groupIdHex, controller.group.name) { mutableStateOf(controller.group.name) }
     var description by remember(controller.group.groupIdHex, controller.group.description) { mutableStateOf(controller.group.description) }
@@ -8060,6 +8099,15 @@ private fun GroupDetailsScreen(
     // leave path and the Admins prompt so a trapped sole admin can hand the
     // role to another member (issue #417).
     var showTransferAdmin by remember(controller.group.groupIdHex) { mutableStateOf(false) }
+    // Honor the caller's request to jump straight into the transfer picker
+    // (sole admin routed here from the blocked top-level Leave gate). Gated on
+    // the sole-admin predicate so a stale flag can't pop the sheet once the
+    // user is no longer trapped (e.g. transfer already completed).
+    LaunchedEffect(autoOpenTransferAdmin, controller.isSoleAdminWithOtherMembers) {
+        if (autoOpenTransferAdmin && controller.isSoleAdminWithOtherMembers) {
+            showTransferAdmin = true
+        }
+    }
     var mlsState by remember(controller.group.groupIdHex) { mutableStateOf<AppGroupMlsStateFfi?>(null) }
     var mlsLoading by remember(controller.group.groupIdHex) { mutableStateOf(false) }
     // Scoped to the visible group; the controller mutation continues on appState
