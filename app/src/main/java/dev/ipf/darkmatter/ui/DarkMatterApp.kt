@@ -12558,8 +12558,16 @@ private fun ProfilePictureDialog(
     pictureUrl: String,
     onDismiss: () -> Unit,
 ) {
-    val image by produceState(AvatarImageLoader.peek(pictureUrl), pictureUrl) {
-        if (value == null) value = AvatarImageLoader.load(pictureUrl)
+    val imageState by produceState<ProfilePictureImageState>(
+        initialValue =
+            AvatarImageLoader.peek(pictureUrl)?.let(ProfilePictureImageState::Ready)
+                ?: ProfilePictureImageState.Loading,
+        key1 = pictureUrl,
+    ) {
+        if (value is ProfilePictureImageState.Ready) return@produceState
+        value =
+            AvatarImageLoader.load(pictureUrl)?.let(ProfilePictureImageState::Ready)
+                ?: ProfilePictureImageState.Failed
     }
     Dialog(
         onDismissRequest = onDismiss,
@@ -12573,11 +12581,13 @@ private fun ProfilePictureDialog(
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            when (image) {
-                null -> Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color.White, modifier = Modifier.size(64.dp))
-                else ->
+            when (val state = imageState) {
+                ProfilePictureImageState.Loading -> CircularProgressIndicator(color = Color.White)
+                ProfilePictureImageState.Failed ->
+                    Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color.White, modifier = Modifier.size(64.dp))
+                is ProfilePictureImageState.Ready ->
                     Image(
-                        bitmap = image!!,
+                        bitmap = state.image,
                         contentDescription = title,
                         modifier = Modifier.fillMaxWidth().fillMaxHeight(0.82f),
                         contentScale = ContentScale.Fit,
@@ -12591,6 +12601,16 @@ private fun ProfilePictureDialog(
             }
         }
     }
+}
+
+private sealed interface ProfilePictureImageState {
+    data object Loading : ProfilePictureImageState
+
+    data object Failed : ProfilePictureImageState
+
+    data class Ready(
+        val image: ImageBitmap,
+    ) : ProfilePictureImageState
 }
 
 @Composable

@@ -710,6 +710,12 @@ class ChatsController(
     // `bind()` clears the set alongside the cache to reset both at once.
     private val inFlightMemberFetches = mutableSetOf<String>()
 
+    // Widening member snapshots to every group makes the chat-list projection
+    // much more useful, but the app should not start one roster FFI call per
+    // group on large accounts. Keep the one-shot per-group invariant above,
+    // while bounding simultaneous FFI/IO work.
+    private val memberFetchGate = Semaphore(MEMBER_FETCH_FANOUT)
+
     // Parsed markdown for each row's last-message preview, keyed by the exact
     // plaintext (tokens must always describe the text beside them — keying by
     // group or message id would go stale on edits). This is derived UI state
@@ -1237,14 +1243,18 @@ class ChatsController(
         pending.forEach { groupIdHex ->
             appState.launchMutation {
                 try {
-                    val members = appState.marmotIo { groupMembers(account, groupIdHex) }
-                    if (bindEpoch != epoch) return@launchMutation
-                    members
-                        .map { it.memberIdHex }
-                        .filter { it.isNotBlank() }
-                        .forEach(appState::requestProfile)
-                    memberCacheByGroup = memberCacheByGroup + (groupIdHex to members)
-                    recompute()
+                    memberFetchGate.withPermit {
+                        if (bindEpoch != epoch) return@withPermit
+                        val members = appState.marmotIo { groupMembers(account, groupIdHex) }
+                        if (bindEpoch == epoch) {
+                            members
+                                .map { it.memberIdHex }
+                                .filter { it.isNotBlank() }
+                                .forEach(appState::requestProfile)
+                            memberCacheByGroup = memberCacheByGroup + (groupIdHex to members)
+                            recompute()
+                        }
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Throwable) {
@@ -1378,6 +1388,11 @@ private val ConversationTimelinePageLimit = 50u
 private const val SEARCH_FANOUT = 6
 private val SEARCH_PER_CHAT_LIMIT = 5u
 private const val SEARCH_MAX_PAGES = 20
+
+// Maximum number of `groupMembers` FFI roster reads running at once from the
+// chat-list projection. Keeps large accounts from flooding IO at startup while
+// still letting shared-group snapshots materialize in the background.
+private const val MEMBER_FETCH_FANOUT = 4
 
 // Cap on how many subscription updates one coalesced batch can absorb. A
 // runaway producer shouldn't be able to wedge the UI behind an unbounded
