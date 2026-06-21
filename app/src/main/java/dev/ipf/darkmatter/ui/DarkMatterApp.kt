@@ -2911,6 +2911,11 @@ private const val MEDIA_ATTACHMENT_MAX_BYTES = ConversationController.MEDIA_RETA
 // controller can ever hold.
 private const val MEDIA_ALBUM_MAX_TOTAL_BYTES = ConversationController.MEDIA_RETAINED_MAX_BYTES
 
+private data class ImageAttachmentReadOutcome(
+    val attachment: PendingAttachment?,
+    val overflowed: Boolean = false,
+)
+
 /** Fixed height of an in-timeline image bubble — constant across load states
  *  so async decode never reflows the list (would break the open-time anchor). */
 private val MediaBubbleHeight = 240.dp
@@ -6672,6 +6677,49 @@ private fun ConversationScreen(
         }
     }
 
+    fun readImageAttachment(
+        uri: android.net.Uri,
+        remainingBytes: Long,
+    ): ImageAttachmentReadOutcome {
+        val quality = appState.mediaQuality
+        if (quality.preservesOriginalImageBytes) {
+            val cap = remainingBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            when (val original = MediaPipeline.readOriginalImageForUpload(context.contentResolver, uri, cap)) {
+                is MediaPipeline.OriginalImageReadResult.Success ->
+                    return ImageAttachmentReadOutcome(
+                        PendingAttachment(
+                            plaintextBytes = original.image.bytes,
+                            mediaType = original.image.mediaType,
+                            fileName = original.image.fileName,
+                            dim = original.image.dim,
+                            thumbhash = original.image.thumbhash,
+                        ),
+                    )
+                MediaPipeline.OriginalImageReadResult.TooLarge -> return ImageAttachmentReadOutcome(null, overflowed = true)
+                MediaPipeline.OriginalImageReadResult.Failed,
+                MediaPipeline.OriginalImageReadResult.Unsupported -> Unit // Fall back to JPEG re-encode so unsupported containers still strip metadata.
+            }
+        }
+        val jpeg =
+            MediaPipeline.readDownscaledJpeg(
+                context.contentResolver,
+                uri,
+                maxEdgePx = quality.imageMaxEdgePx,
+                quality = quality.imageJpegQuality,
+            ) ?: return ImageAttachmentReadOutcome(null)
+        val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
+        val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
+        return ImageAttachmentReadOutcome(
+            PendingAttachment(
+                plaintextBytes = jpeg.bytes,
+                mediaType = MediaPipeline.RECOMPRESSED_MIME,
+                fileName = fileName,
+                dim = "${jpeg.width}x${jpeg.height}",
+                thumbhash = jpeg.thumbhash,
+            ),
+        )
+    }
+
     val voiceRecordingController =
         // Re-key on every captured dependency: chat.id (basic), controller
         // (avoids dispatching through a stale ConversationController when
@@ -6804,23 +6852,12 @@ private fun ConversationScreen(
                                     MediaPipeline.VideoReadResult.Failed -> continue
                                 }
                             } else {
-                                val quality = appState.mediaQuality
-                                val jpeg =
-                                    MediaPipeline.readDownscaledJpeg(
-                                        context.contentResolver,
-                                        uri,
-                                        maxEdgePx = quality.imageMaxEdgePx,
-                                        quality = quality.imageJpegQuality,
-                                    ) ?: continue
-                                val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
-                                val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
-                                PendingAttachment(
-                                    plaintextBytes = jpeg.bytes,
-                                    mediaType = MediaPipeline.RECOMPRESSED_MIME,
-                                    fileName = fileName,
-                                    dim = "${jpeg.width}x${jpeg.height}",
-                                    thumbhash = jpeg.thumbhash,
-                                )
+                                val image = readImageAttachment(uri, remaining)
+                                if (image.overflowed) {
+                                    overflowed = true
+                                    continue
+                                }
+                                image.attachment ?: continue
                             }
                         consumed += attachment.plaintextBytes.size.toLong()
                         out += attachment
@@ -6977,23 +7014,12 @@ private fun ConversationScreen(
                             MediaPipeline.VideoReadResult.Failed -> continue
                         }
                     } else {
-                        val quality = appState.mediaQuality
-                        val jpeg =
-                            MediaPipeline.readDownscaledJpeg(
-                                context.contentResolver,
-                                uri,
-                                maxEdgePx = quality.imageMaxEdgePx,
-                                quality = quality.imageJpegQuality,
-                            ) ?: continue
-                        val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
-                        val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
-                        PendingAttachment(
-                            plaintextBytes = jpeg.bytes,
-                            mediaType = MediaPipeline.RECOMPRESSED_MIME,
-                            fileName = fileName,
-                            dim = "${jpeg.width}x${jpeg.height}",
-                            thumbhash = jpeg.thumbhash,
-                        )
+                        val image = readImageAttachment(uri, remaining)
+                        if (image.overflowed) {
+                            overflowed = true
+                            continue
+                        }
+                        image.attachment ?: continue
                     }
                 consumed += attachment.plaintextBytes.size.toLong()
                 out += attachment
@@ -7148,8 +7174,9 @@ private fun ConversationScreen(
     // Picked URIs accumulate in `pendingDocumentUris` so they can ride the
     // same staging shelf as image picks; one Send dispatches both sides
     // through one kind:9 album. Bytes pass through without recompression —
-    // the bytes ride the same `sendAttachments(list, caption)` path since
-    // the FFI is MIME-agnostic.
+    // including picked/forwarded audio files. The send-quality audio bitrate
+    // is intentionally scoped to recorded voice notes until this client grows
+    // a general audio transcode path.
     val documentPickerLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.OpenMultipleDocuments(),

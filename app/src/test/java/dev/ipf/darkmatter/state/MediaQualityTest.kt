@@ -56,9 +56,9 @@ class MediaQualityTest {
 
     @Test
     fun originalLevel_neverDownscales_evenForHugeSources() {
-        // Original's edge ceiling is so large that targetDimensions returns the
-        // source dimensions unchanged for any realistic image — the re-encode
-        // happens (stripping EXIF) but at full resolution.
+        // Original's primary path preserves metadata-stripped source bytes. The
+        // fallback JPEG path still carries an effectively unbounded edge ceiling
+        // so targetDimensions returns the source dimensions unchanged.
         val edge = MediaQuality.Original.imageMaxEdgePx
         assertEquals(8000 to 6000, MediaPipeline.targetDimensions(8000, 6000, edge))
         assertEquals(12_000 to 9000, MediaPipeline.targetDimensions(12_000, 9000, edge))
@@ -78,6 +78,8 @@ class MediaQualityTest {
 
     @Test
     fun originalLevel_usesHighestJpegQualityAndAudioBitrate() {
+        assertTrue(MediaQuality.Original.preservesOriginalImageBytes)
+        assertTrue(!MediaQuality.Low.preservesOriginalImageBytes)
         assertEquals(100, MediaQuality.Original.imageJpegQuality)
         assertEquals(96_000, MediaQuality.Original.audioBitrateBps)
     }

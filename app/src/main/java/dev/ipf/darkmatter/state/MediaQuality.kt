@@ -9,16 +9,16 @@ package dev.ipf.darkmatter.state
  *
  * Each level carries the concrete knobs the existing media pipeline already
  * supports:
- *  - [imageMaxEdgePx] / [imageJpegQuality] feed `MediaPipeline.readDownscaledJpeg`.
+ *  - [imageMaxEdgePx] / [imageJpegQuality] feed `MediaPipeline.readDownscaledJpeg`
+ *    for the compressed levels.
  *  - [audioBitrateBps] feeds `VoiceRecorder` (mono AAC-LC; the engine has no
  *    Opus re-encode path yet, so the bitrate knob applies to the AAC encoder).
  *
  * Privacy floor (orthogonal to this knob): every level — *including* [Original]
- * — still re-encodes images through `Bitmap.compress`, which strips EXIF
- * (GPS coordinates, device make/model). "Original" means "don't downscale,
- * keep maximum fidelity", not "ship the source bytes with their metadata".
- * The user never has to choose between sending a photo as-is and leaking
- * their location.
+ * — strips identifying photo metadata (EXIF GPS, device make/model, XMP/IPTC
+ * sidecars where the container exposes them). "Original" keeps the encoded
+ * image bytes when this client can strip metadata losslessly; unsupported image
+ * containers fall back to the JPEG path rather than leaking metadata.
  *
  * Video has no re-encode path in this client (matching darkmatter-ios /
  * darkmatter-desktop), so video is always sent as-is regardless of this
@@ -50,11 +50,10 @@ enum class MediaQuality(
     ),
 
     /**
-     * No downscale and maximum-fidelity re-encode. [imageMaxEdgePx] is
-     * [Int.MAX_VALUE] so `MediaPipeline.targetDimensions` returns the source
-     * dimensions unchanged (the ceiling never bites); the high JPEG quality
-     * keeps the re-encode visually lossless while still stripping EXIF.
-     * Audio uses the highest supported bitrate.
+     * No downscale/re-encode for supported image containers: use source bytes
+     * after metadata stripping. [imageMaxEdgePx] / [imageJpegQuality] are kept
+     * as a privacy-preserving fallback for formats whose metadata cannot be
+     * stripped losslessly here. Audio uses the highest supported bitrate.
      */
     Original(
         preferenceValue = "original",
@@ -63,6 +62,9 @@ enum class MediaQuality(
         audioBitrateBps = 96_000,
     ),
     ;
+
+    val preservesOriginalImageBytes: Boolean
+        get() = this == Original
 
     companion object {
         val DEFAULT: MediaQuality = Standard
