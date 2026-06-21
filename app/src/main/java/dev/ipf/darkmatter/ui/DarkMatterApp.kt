@@ -89,6 +89,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -423,7 +425,6 @@ private enum class SettingsDetail {
     KeyPackages,
     Notifications,
     SecurityPrivacy,
-    DataStorage,
 }
 
 private data class DiagnosticLogEntry(
@@ -6707,6 +6708,9 @@ private fun ConversationScreen(
                 maxEdgePx = quality.imageMaxEdgePx,
                 quality = quality.imageJpegQuality,
             ) ?: return ImageAttachmentReadOutcome(null)
+        if (jpeg.bytes.size.toLong() > remainingBytes) {
+            return ImageAttachmentReadOutcome(null, overflowed = true)
+        }
         val sourceName = queryDisplayName(context.contentResolver, uri) ?: "image.jpg"
         val fileName = MediaPipeline.swapExtensionToJpg(sourceName)
         return ImageAttachmentReadOutcome(
@@ -13062,7 +13066,6 @@ private fun SettingsScreen(
                 onBack = { onDetailChange(null) },
                 onOpenDiagnostics = onOpenDiagnostics,
             )
-        SettingsDetail.DataStorage -> DataStorageScreen(appState, onBack = { onDetailChange(null) })
         null ->
             SettingsHomeScreen(
                 appState = appState,
@@ -13147,14 +13150,6 @@ private fun SettingsHomeScreen(
                     SettingsRow(stringResource(R.string.security_and_privacy), stringResource(R.string.security_privacy_settings_subtitle)) {
                         onOpenDetail(SettingsDetail.SecurityPrivacy)
                     }
-                }
-            }
-            item {
-                SectionCard(title = stringResource(R.string.data_and_storage)) {
-                    SettingsRow(
-                        stringResource(R.string.media_quality_title),
-                        stringResource(R.string.media_quality_settings_subtitle),
-                    ) { onOpenDetail(SettingsDetail.DataStorage) }
                 }
             }
             item {
@@ -13282,6 +13277,9 @@ private fun AutoDownloadDataScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            item {
+                MediaQualitySettingsCard(appState)
+            }
             MediaAutoDownloadNetwork.entries.forEach { network ->
                 item {
                     SectionCard(title = stringResource(network.labelRes)) {
@@ -13353,7 +13351,7 @@ private fun SelectableSettingsRowWithSubtitle(
     onClick: () -> Unit,
 ) {
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.selectable(selected = selected, onClick = onClick, role = Role.RadioButton),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { Text(title) },
         supportingContent = {
@@ -13371,49 +13369,29 @@ private fun SelectableSettingsRowWithSubtitle(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DataStorageScreen(
-    appState: DarkMatterAppState,
-    onBack: () -> Unit,
-) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.data_and_storage)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            item {
-                SectionCard(title = stringResource(R.string.media_quality_title)) {
-                    MediaQuality.entries.forEach { quality ->
-                        SelectableSettingsRowWithSubtitle(
-                            title = stringResource(quality.labelRes),
-                            subtitle = stringResource(quality.subtitleRes),
-                            selected = appState.mediaQuality == quality,
-                            onClick = { appState.updateMediaQuality(quality) },
-                        )
-                    }
-                    // Privacy floor + video carve-out. The size knob and the
-                    // metadata strip are orthogonal: images are always
-                    // re-encoded (which drops EXIF GPS / device make+model) at
-                    // every level, including Original. Video has no re-encode
-                    // path in this client, so it always sends as-is.
-                    Text(
-                        text = stringResource(R.string.media_quality_footer),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
+private fun MediaQualitySettingsCard(appState: DarkMatterAppState) {
+    SectionCard(title = stringResource(R.string.media_quality_title)) {
+        Column(Modifier.selectableGroup()) {
+            MediaQuality.entries.forEach { quality ->
+                SelectableSettingsRowWithSubtitle(
+                    title = stringResource(quality.labelRes),
+                    subtitle = stringResource(quality.subtitleRes),
+                    selected = appState.mediaQuality == quality,
+                    onClick = { appState.updateMediaQuality(quality) },
+                )
             }
         }
+        // Privacy floor + video/audio carve-out. The size knob and metadata
+        // strip are orthogonal: photos never send location/device metadata,
+        // including Original's source-byte path. Video and picked audio
+        // currently send as-is.
+        Text(
+            text = stringResource(R.string.media_quality_footer),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }
 

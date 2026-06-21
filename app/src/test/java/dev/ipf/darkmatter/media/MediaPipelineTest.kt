@@ -160,6 +160,28 @@ class MediaPipelineTest {
     }
 
     @Test
+    fun originalJpegStrip_continuesFilteringAfterScanAndDropsTrailingBytes() {
+        val scan1 = byteArrayOf(0x11, 0xff.toByte(), 0x00, 0x22)
+        val scan2 = byteArrayOf(0x33, 0xff.toByte(), 0xd9.toByte())
+        val trailingMetadata = jpegSegment(0xe1, "trailing gps".encodeToByteArray())
+        val jpeg =
+            byteArrayOf(0xff.toByte(), 0xd8.toByte()) +
+                jpegSegment(0xda, byteArrayOf(0, 1, 2, 3)) +
+                scan1 +
+                jpegSegment(0xe1, "progressive gps".encodeToByteArray()) +
+                jpegSegment(0xda, byteArrayOf(4, 5, 6, 7)) +
+                scan2 +
+                trailingMetadata
+
+        val stripped = MediaPipeline.stripOriginalImageMetadata(jpeg)!!
+
+        assertFalse(stripped.containsAscii("progressive gps"))
+        assertFalse(stripped.containsAscii("trailing gps"))
+        assertTrue(stripped.containsSubsequence(scan1))
+        assertTrue(stripped.endsWithSubsequence(scan2))
+    }
+
+    @Test
     fun originalPngStrip_dropsTextAndExifChunksButKeepsImageData() {
         val idatPayload = byteArrayOf(9, 8, 7, 6)
         val png =
@@ -198,6 +220,7 @@ class MediaPipelineTest {
         assertTrue(stripped.containsAscii("VP8 "))
         assertTrue(stripped.containsSubsequence(vp8Payload))
         val vp8xOffset = stripped.indexOfAscii("VP8X")
+        assertTrue(vp8xOffset >= 0)
         assertEquals(0, stripped[vp8xOffset + 8].toInt() and 0x0c)
     }
 

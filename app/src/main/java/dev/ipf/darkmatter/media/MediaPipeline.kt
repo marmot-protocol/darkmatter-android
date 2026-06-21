@@ -557,8 +557,31 @@ object MediaPipeline {
             if (length < 2 || pos + length > bytes.size) return null
             val segmentEnd = pos + length
             if (marker == 0xda) {
-                out.write(bytes, markerStart, bytes.size - markerStart)
-                return out.toByteArray()
+                out.write(bytes, markerStart, segmentEnd - markerStart)
+                var scanPos = segmentEnd
+                var nextMarkerStart = -1
+                while (scanPos < bytes.size) {
+                    if (u8(bytes, scanPos) != 0xff) {
+                        scanPos++
+                        continue
+                    }
+                    val candidateStart = scanPos
+                    while (scanPos < bytes.size && u8(bytes, scanPos) == 0xff) scanPos++
+                    if (scanPos >= bytes.size) return null
+                    val candidate = u8(bytes, scanPos)
+                    if (candidate == 0x00) {
+                        scanPos++ // Stuffed 0xff byte inside entropy-coded data.
+                    } else if (candidate in 0xd0..0xd7) {
+                        scanPos++ // Restart markers are part of the scan stream.
+                    } else {
+                        nextMarkerStart = candidateStart
+                        break
+                    }
+                }
+                if (nextMarkerStart < 0) return null
+                out.write(bytes, segmentEnd, nextMarkerStart - segmentEnd)
+                pos = nextMarkerStart
+                continue
             }
             if (!isJpegMetadataMarker(marker)) {
                 out.write(bytes, markerStart, segmentEnd - markerStart)
@@ -580,10 +603,10 @@ object MediaPipeline {
         var pos = PNG_SIGNATURE.size
         while (pos + PNG_CHUNK_OVERHEAD <= bytes.size) {
             val length = u32be(bytes, pos)
-            if (length > Int.MAX_VALUE) return null
             val dataStart = pos + 8
-            val chunkEnd = dataStart + length.toInt() + 4
-            if (chunkEnd > bytes.size) return null
+            val chunkEndLong = dataStart.toLong() + length + 4L
+            if (chunkEndLong > bytes.size.toLong()) return null
+            val chunkEnd = chunkEndLong.toInt()
             val type = ascii(bytes, pos + 4, 4)
             if (!PNG_METADATA_CHUNKS.contains(type)) {
                 out.write(bytes, pos, chunkEnd - pos)
@@ -604,11 +627,11 @@ object MediaPipeline {
         while (pos + 8 <= bytes.size) {
             val chunkType = ascii(bytes, pos, 4)
             val chunkSize = u32le(bytes, pos + 4)
-            if (chunkSize > Int.MAX_VALUE) return null
             val dataStart = pos + 8
-            val dataEnd = dataStart + chunkSize.toInt()
-            val paddedEnd = dataEnd + (chunkSize.toInt() and 1)
-            if (paddedEnd > bytes.size) return null
+            val dataEndLong = dataStart.toLong() + chunkSize
+            val paddedEndLong = dataEndLong + (chunkSize and 1L)
+            if (paddedEndLong > bytes.size.toLong()) return null
+            val paddedEnd = paddedEndLong.toInt()
             when (chunkType) {
                 "EXIF", "XMP " -> Unit
                 "VP8X" -> {
