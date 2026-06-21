@@ -5134,8 +5134,11 @@ private fun MediaPendingPlaceholder(
                 // confirmed transition is a visual no-op even on the
                 // 3-image case. Each tile decodes from local bytes (no
                 // network), and a single status overlay sits across the
-                // whole bubble.
-                val visible = pendingAttachments.take(6)
+                // whole bubble. Cap at four tiles so the surplus collapses
+                // into the "+N" chip on the fourth tile, matching the
+                // confirmed grid bubbles (MasonryImageLayout renders four
+                // tiles max) (#527).
+                val visible = pendingAttachments.take(4)
                 val overflow = (pendingAttachments.size - visible.size).coerceAtLeast(0)
                 Box(Modifier.fillMaxWidth()) {
                     MasonryImageLayout(visibleCount = visible.size) { index, tileModifier ->
