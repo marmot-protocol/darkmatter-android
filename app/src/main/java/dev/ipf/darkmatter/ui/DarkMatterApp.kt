@@ -1226,8 +1226,11 @@ private fun MainShell(
                     settingsDetailName = null
                 },
                 onOpenDiagnostics = {
+                    // Preserve `settingsDetailName` so backing out of
+                    // Diagnostics returns to Security & Privacy (its only
+                    // entry point) rather than the Settings home, restoring
+                    // the breadcrumb the user walked in on (#412).
                     sectionName = MainSection.Diagnostics.name
-                    settingsDetailName = null
                 },
                 detail = settingsDetail,
                 onDetailChange = { settingsDetailName = it?.name },
@@ -1236,8 +1239,10 @@ private fun MainShell(
             DiagnosticsScreen(
                 appState = appState,
                 onBack = {
+                    // Leave `settingsDetailName` alone — it still holds the
+                    // detail (Security & Privacy) the user opened Diagnostics
+                    // from, so Settings re-enters that screen directly (#412).
                     sectionName = MainSection.Settings.name
-                    settingsDetailName = null
                 },
             )
     }
