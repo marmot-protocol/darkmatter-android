@@ -3068,7 +3068,7 @@ private fun imageBubbleSizing(ratio: Float?): Modifier =
  * blurred preview before the real bytes arrive.
  */
 @Composable
-private fun rememberThumbhashImage(thumbhash: String?): ImageBitmap? {
+internal fun rememberThumbhashImage(thumbhash: String?): ImageBitmap? {
     if (thumbhash.isNullOrBlank()) return null
     // The decode is a few hundred μs to a couple ms (cosine-basis sum
     // across a 32×32 grid). Doing it inside `remember { ... }` runs it on
@@ -3692,7 +3692,7 @@ private fun MediaVisualGridBubble(
  * the bubble can open the fullscreen player.
  */
 @Composable
-private fun MediaVideoGridTile(
+internal fun MediaVideoGridTile(
     messageIdHex: String,
     attachmentIndex: Int,
     reference: MediaAttachmentReferenceFfi,
@@ -3863,7 +3863,7 @@ private fun MediaVideoGridTile(
  * full-screen viewer at this attachment's index).
  */
 @Composable
-private fun MediaImageGridTile(
+internal fun MediaImageGridTile(
     messageIdHex: String,
     attachmentIndex: Int,
     reference: MediaAttachmentReferenceFfi,
@@ -4841,7 +4841,7 @@ private fun VoiceSpeedPill(currentSpeed: Float) {
  * the still-retained source bytes from the pending-attachments list while
  * the Blossom upload is in flight.
  */
-private suspend fun materializeVoiceAttachment(
+internal suspend fun materializeVoiceAttachment(
     context: android.content.Context,
     controller: ConversationController,
     messageIdHex: String,
@@ -4956,7 +4956,7 @@ private fun VoiceWaveform(
  * becomes "PDF", `image/jpeg` becomes "JPG", `application/vnd.…` falls back
  * to the lowercase MIME so the bubble never goes blank.
  */
-private fun shortMediaTypeLabel(mediaType: String): String {
+internal fun shortMediaTypeLabel(mediaType: String): String {
     val trimmed = mediaType.trim()
     if (trimmed.isEmpty()) return ""
     val tail = trimmed.substringAfterLast('/', missingDelimiterValue = trimmed)
@@ -4973,7 +4973,7 @@ private fun shortMediaTypeLabel(mediaType: String): String {
     }
 }
 
-private fun fileIconFor(mediaType: String): androidx.compose.ui.graphics.vector.ImageVector =
+internal fun fileIconFor(mediaType: String): androidx.compose.ui.graphics.vector.ImageVector =
     when {
         mediaType.startsWith("audio/", ignoreCase = true) -> Icons.Default.Audiotrack
         mediaType.startsWith("video/", ignoreCase = true) -> Icons.Default.Movie
@@ -4992,7 +4992,7 @@ private fun formatFileSize(bytes: Long): String {
     return String.format(java.util.Locale.US, "%.1f GB", gb)
 }
 
-private enum class OpenAttachmentResult { Opened, NoHandler, Error }
+internal enum class OpenAttachmentResult { Opened, NoHandler, Error }
 
 /** Which `ImageSearchSheet` button is currently driving an in-flight
  *  mutation, so the sheet can place the spinner on it. */
@@ -5024,7 +5024,7 @@ private enum class GroupImageAction { Apply, Remove }
  * exit; we don't track it per-call because the handing-off intent may
  * need it alive for an unbounded duration after this function returns.
  */
-private suspend fun openAttachmentExternally(
+internal suspend fun openAttachmentExternally(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
@@ -5827,7 +5827,7 @@ private fun ViewerPage(
  * Uses the IS_PENDING dance so other apps never see a half-written entry, and
  * sanitizes the remote-supplied [fileName] to a basename.
  */
-private fun saveImageToGallery(
+internal fun saveImageToGallery(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
@@ -5864,7 +5864,7 @@ private fun saveImageToGallery(
 /** Persist a decrypted video to the public Movies/DarkMatter folder via the
  *  Video MediaStore so it shows up in the system gallery. Mirrors the image
  *  save flow's IS_PENDING dance. */
-private fun saveVideoToGallery(
+internal fun saveVideoToGallery(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
@@ -5904,7 +5904,7 @@ private fun saveVideoToGallery(
  * write. The `startActivity` call has to run on Main, so the I/O is hopped
  * to `Dispatchers.IO` and the chooser is fired back on Main.
  */
-private suspend fun shareImage(
+internal suspend fun shareImage(
     context: android.content.Context,
     bytes: ByteArray,
     fileName: String,
@@ -7803,6 +7803,11 @@ private fun ConversationScreen(
                 openAddMemberOnDetails = false
             },
             onLeft = onBack,
+            onJumpToMessage = { messageId ->
+                showDetails = false
+                openTransferOnDetails = false
+                scrollToSearchMatch(messageId)
+            },
             autoOpenTransferAdmin = openTransferOnDetails,
             autoOpenAddMember = openAddMemberOnDetails,
             onAutoOpenAddMemberConsumed = { openAddMemberOnDetails = false },
@@ -8624,6 +8629,9 @@ private fun GroupDetailsScreen(
     controller: ConversationController,
     onBack: () -> Unit,
     onLeft: () -> Unit,
+    // Jump back to a message in the conversation (Shared Media tile tap). The
+    // caller closes details and reuses the existing focus-scroll mechanism.
+    onJumpToMessage: (String) -> Unit = {},
     // When true (sole admin routed in from the blocked top-level Leave gate),
     // open the transfer-admin picker immediately so the trapped admin lands on
     // the action instead of having to hunt for it in the Admins section (#417).
@@ -8740,6 +8748,21 @@ private fun GroupDetailsScreen(
                 accountIdHex == null || accountIdHex !in memberIds
             }
         if (filtered != pendingInvites) pendingInvites = filtered
+    }
+
+    val sharedMediaTiles = rememberSharedMediaTiles(controller, appState)
+    var showMediaLibrary by remember(controller.group.groupIdHex) { mutableStateOf(false) }
+
+    if (showMediaLibrary) {
+        BackHandler { showMediaLibrary = false }
+        MediaLibraryRoute(
+            tiles = sharedMediaTiles,
+            controller = controller,
+            appState = appState,
+            onBack = { showMediaLibrary = false },
+            onJumpToMessage = onJumpToMessage,
+        )
+        return
     }
 
     BackHandler { onBack() }
@@ -8969,6 +8992,14 @@ private fun GroupDetailsScreen(
                     }
                 }
             }
+
+            SharedMediaSection(
+                tiles = sharedMediaTiles,
+                controller = controller,
+                appState = appState,
+                onSeeAll = { showMediaLibrary = true },
+                onJumpToMessage = onJumpToMessage,
+            )
 
             SectionCard(title = stringResource(R.string.info)) {
                 CopyableValueRow(
@@ -16685,7 +16716,7 @@ private fun DiagnosticRow(
 // one step above the page" relationship, resolved per theme by luminance since
 // "lighter == elevated" can't be expressed the same way in both.
 @Composable
-private fun sectionPanelColor(): Color =
+internal fun sectionPanelColor(): Color =
     if (MaterialTheme.colorScheme.background.luminance() > 0.5f) {
         MaterialTheme.colorScheme.surfaceContainerLowest
     } else {
@@ -16693,7 +16724,7 @@ private fun sectionPanelColor(): Color =
     }
 
 @Composable
-private fun SectionCard(
+internal fun SectionCard(
     title: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -16709,7 +16740,7 @@ private fun SectionCard(
 }
 
 @Composable
-private fun SectionCardWithAction(
+internal fun SectionCardWithAction(
     title: String,
     action: @Composable RowScope.() -> Unit,
     content: @Composable ColumnScope.() -> Unit,
@@ -16761,7 +16792,7 @@ private val AvatarPalette =
     )
 
 @Composable
-private fun Avatar(
+internal fun Avatar(
     title: String,
     seed: String,
     size: androidx.compose.ui.unit.Dp,
