@@ -49,6 +49,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -6320,7 +6321,7 @@ private fun isNearBottom(
 ): Boolean {
     if (!listState.canScrollForward) return true
     val olderHeaderCount = if (hasOlderHeader) 1 else 0
-    val bottomTimelineIndex = timelineSize + 1 + olderHeaderCount
+    val bottomTimelineIndex = timelineSize + olderHeaderCount
     // Check the LAST visible item, not the first — keeps "near bottom"
     // truthful when the viewport shrinks (e.g. keyboard open) and fewer
     // items fit, which pushes firstVisibleItemIndex earlier even though
@@ -6329,7 +6330,24 @@ private fun isNearBottom(
         listState.layoutInfo.visibleItemsInfo
             .lastOrNull()
             ?.index ?: return false
-    return lastVisible >= bottomTimelineIndex - 1
+    return lastVisible >= bottomTimelineIndex
+}
+
+internal data class BottomStickSnapshot(
+    val key: Any?,
+    val index: Int,
+    val size: Int,
+    val atBottom: Boolean,
+    val isLastTimelineItem: Boolean,
+)
+
+internal fun bottomStickScrollDelta(
+    previous: BottomStickSnapshot?,
+    current: BottomStickSnapshot,
+): Int? {
+    if (previous == null || !previous.atBottom || !current.isLastTimelineItem) return null
+    if (previous.key != current.key || previous.index != current.index) return null
+    return (current.size - previous.size).takeIf { it > 0 }
 }
 
 /** Read the user-visible filename a content Uri exposes via OpenableColumns,
@@ -6500,7 +6518,7 @@ private fun ConversationScreen(
             val visible = listState.layoutInfo.visibleItemsInfo
             if (visible.isEmpty()) return@derivedStateOf -1
             val olderHeader = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-            // LazyColumn layout: [Spacer][maybe older-loading][timeline items][Spacer]
+            // LazyColumn layout: [Spacer][maybe older-loading][timeline items]
             val firstTimelineListIndex = 1 + olderHeader
             // Visible rows index into the rendered (edit-filtered) list, so clamp
             // to its last index, not the longer unfiltered timeline's.
@@ -7229,7 +7247,7 @@ private fun ConversationScreen(
     val latestTimelineItemId = renderedTimeline.lastOrNull()?.id
     val transcriptLocale = LocalConfiguration.current.locales[0]
     val olderHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-    val bottomTimelineIndex = renderedTimeline.size + 1 + olderHeaderCount
+    val bottomTimelineIndex = renderedTimeline.size + olderHeaderCount
 
     // Day label for the topmost visible message, surfaced by the sticky ribbon
     // overlay while scrolling. Hoisted into derivedStateOf and held as a State
@@ -7423,6 +7441,26 @@ private fun ConversationScreen(
             withFrameNanos { }
             val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
             runCatching { listState.scrollToItem(last) }
+        }
+    }
+    LaunchedEffect(listState, chat.id, bottomTimelineIndex) {
+        var previous: BottomStickSnapshot? = null
+        snapshotFlow {
+            val bottomItem =
+                listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index == bottomTimelineIndex }
+            BottomStickSnapshot(
+                key = bottomItem?.key,
+                index = bottomItem?.index ?: -1,
+                size = bottomItem?.size ?: 0,
+                atBottom = initialTimelineAnchored && !listState.canScrollForward,
+                isLastTimelineItem = bottomItem != null && renderedTimeline.isNotEmpty(),
+            )
+        }.collect { current ->
+            bottomStickScrollDelta(previous, current)?.let { delta ->
+                listState.scrollBy(delta.toFloat())
+            }
+            previous = current
         }
     }
     LaunchedEffect(latestTimelineItemId) {
@@ -7829,7 +7867,7 @@ private fun ConversationScreen(
                                     .fillMaxSize()
                                     .padding(horizontal = 12.dp)
                                     .alpha(if (initialTimelineAnchored) 1f else 0f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
                             contentPadding = PaddingValues(bottom = 8.dp),
                         ) {
                             item(key = "top-spacer") { Spacer(Modifier.height(4.dp)) }
@@ -7899,7 +7937,6 @@ private fun ConversationScreen(
                                     onReplyPreviewClick = { navigateToReplyTarget(it) },
                                 )
                             }
-                            item(key = "bottom-spacer") { Spacer(Modifier.height(8.dp)) }
                         }
                         // Day of the topmost visible message, shown only while
                         // scrolling — the inline separators carry it at rest.
