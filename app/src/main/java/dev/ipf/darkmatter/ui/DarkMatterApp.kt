@@ -7637,7 +7637,10 @@ private fun ConversationScreen(
                                         )
                                     },
                                     contentPadding = conversationMenuItemPadding,
-                                    enabled = !controller.mutationInFlight,
+                                    // Gate on membersLoaded: the sole-admin routing
+                                    // below reads the roster, and an empty (unloaded)
+                                    // roster would misroute to a plain leave.
+                                    enabled = !controller.mutationInFlight && controller.membersLoaded,
                                     onClick = {
                                         menuOpen = false
                                         // A sole admin with other members can't
@@ -8276,11 +8279,14 @@ private fun GroupDetailsScreen(
                                     )
                                 },
                                 leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
-                                // Always tappable for members (only greyed while a
-                                // mutation is in flight). The sole-admin gate is now
-                                // surfaced as an explanatory dialog by requestLeave
-                                // rather than a silently-disabled item.
-                                enabled = activeMutation == null && !controller.mutationInFlight,
+                                // Tappable for members (greyed while a mutation is
+                                // in flight). The sole-admin gate is surfaced as an
+                                // explanatory dialog by requestLeave rather than a
+                                // silently-disabled item — but only once the roster
+                                // is loaded, since requestLeave classifies the leave
+                                // from member count and an empty roster reads as
+                                // "sole member" (delete group).
+                                enabled = activeMutation == null && !controller.mutationInFlight && controller.membersLoaded,
                                 onClick = {
                                     menuOpen = false
                                     requestLeave(controller.title(groupTitleCopy))
@@ -8479,7 +8485,7 @@ private fun GroupDetailsScreen(
                 }
                 TextButton(
                     onClick = { requestLeave(controller.title(groupTitleCopy)) },
-                    enabled = activeMutation == null && !controller.mutationInFlight,
+                    enabled = activeMutation == null && !controller.mutationInFlight && controller.membersLoaded,
                     modifier = Modifier.fillMaxWidth(),
                     colors =
                         ButtonDefaults.textButtonColors(
