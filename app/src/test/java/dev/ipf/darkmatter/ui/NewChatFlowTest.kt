@@ -12,7 +12,6 @@ class NewChatFlowTest {
             canSubmitNewChatSheet(
                 directMessage = false,
                 busy = false,
-                selectedMembers = emptyList(),
                 pendingRecipient = "",
                 groupName = "Friends",
             ),
@@ -21,7 +20,6 @@ class NewChatFlowTest {
             canSubmitNewChatSheet(
                 directMessage = false,
                 busy = false,
-                selectedMembers = emptyList(),
                 pendingRecipient = "npub1alice",
                 groupName = "",
             ),
@@ -34,8 +32,7 @@ class NewChatFlowTest {
             emptyList<String>(),
             newChatMemberRefs(
                 directMessage = false,
-                selectedMembers = listOf("npub1alice"),
-                normalizedPendingRecipients = listOf("npub1bob"),
+                normalizedPendingRecipients = listOf("npub1alice"),
             ),
         )
     }
@@ -46,7 +43,6 @@ class NewChatFlowTest {
             canSubmitNewChatSheet(
                 directMessage = true,
                 busy = false,
-                selectedMembers = emptyList(),
                 pendingRecipient = "",
                 groupName = "",
             ),
@@ -55,7 +51,6 @@ class NewChatFlowTest {
             canSubmitNewChatSheet(
                 directMessage = true,
                 busy = false,
-                selectedMembers = emptyList(),
                 pendingRecipient = "npub1alice",
                 groupName = "",
             ),
@@ -64,8 +59,59 @@ class NewChatFlowTest {
             listOf("npub1alice"),
             newChatMemberRefs(
                 directMessage = true,
-                selectedMembers = listOf("npub1alice"),
-                normalizedPendingRecipients = listOf("npub1bob"),
+                normalizedPendingRecipients = listOf("npub1alice", "npub1bob", "npub1alice"),
+            ),
+        )
+    }
+
+    @Test
+    fun emptyGroupInviteCtaRequiresLoadedAdminSelfOnlyGroup() {
+        assertTrue(
+            canInviteFromEmptyGroup(
+                isSelfMember = true,
+                isSelfAdmin = true,
+                membersLoaded = true,
+                memberCount = 1,
+            ),
+        )
+        assertFalse(
+            canInviteFromEmptyGroup(
+                isSelfMember = true,
+                isSelfAdmin = true,
+                membersLoaded = true,
+                memberCount = 0,
+            ),
+        )
+        assertFalse(
+            canInviteFromEmptyGroup(
+                isSelfMember = true,
+                isSelfAdmin = true,
+                membersLoaded = true,
+                memberCount = 2,
+            ),
+        )
+        assertFalse(
+            canInviteFromEmptyGroup(
+                isSelfMember = true,
+                isSelfAdmin = false,
+                membersLoaded = true,
+                memberCount = 1,
+            ),
+        )
+        assertFalse(
+            canInviteFromEmptyGroup(
+                isSelfMember = false,
+                isSelfAdmin = true,
+                membersLoaded = true,
+                memberCount = 1,
+            ),
+        )
+        assertFalse(
+            canInviteFromEmptyGroup(
+                isSelfMember = true,
+                isSelfAdmin = true,
+                membersLoaded = false,
+                memberCount = 1,
             ),
         )
     }

@@ -2726,27 +2726,36 @@ private fun EmptyChats(onCreate: () -> Unit) {
 internal fun canSubmitNewChatSheet(
     directMessage: Boolean,
     busy: Boolean,
-    selectedMembers: List<String>,
     pendingRecipient: String,
     groupName: String,
 ): Boolean =
     !busy &&
         if (directMessage) {
-            selectedMembers.isNotEmpty() || pendingRecipient.isNotBlank()
+            pendingRecipient.isNotBlank()
         } else {
             groupName.isNotBlank()
         }
 
 internal fun newChatMemberRefs(
     directMessage: Boolean,
-    selectedMembers: List<String>,
     normalizedPendingRecipients: List<String>,
 ): List<String> =
     if (directMessage) {
-        (selectedMembers + normalizedPendingRecipients).distinct().take(1)
+        normalizedPendingRecipients.distinct().take(1)
     } else {
         emptyList()
     }
+
+internal fun canInviteFromEmptyGroup(
+    isSelfMember: Boolean,
+    isSelfAdmin: Boolean,
+    membersLoaded: Boolean,
+    memberCount: Int,
+): Boolean =
+    isSelfMember &&
+        isSelfAdmin &&
+        membersLoaded &&
+        memberCount == 1
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2882,7 +2891,7 @@ private fun NewChatSheet(
                         } else {
                             emptyList()
                         }
-                    val recipients = newChatMemberRefs(directMessage, emptyList(), normalizedPending)
+                    val recipients = newChatMemberRefs(directMessage, normalizedPending)
                     pending = ""
                     val account = appState.activeAccountRef ?: return@Button
                     // Reuse an existing 1:1 instead of creating a duplicate.
@@ -2932,7 +2941,7 @@ private fun NewChatSheet(
                         busy = false
                     }
                 },
-                enabled = canSubmitNewChatSheet(directMessage, busy, emptyList(), pending, groupName),
+                enabled = canSubmitNewChatSheet(directMessage, busy, pending, groupName),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (busy) {
@@ -7718,6 +7727,7 @@ private fun ConversationScreen(
             onLeft = onBack,
             autoOpenTransferAdmin = openTransferOnDetails,
             autoOpenAddMember = openAddMemberOnDetails,
+            onAutoOpenAddMemberConsumed = { openAddMemberOnDetails = false },
         )
         return
     }
@@ -7997,12 +8007,14 @@ private fun ConversationScreen(
                         },
                     )
                 controller.timeline.isEmpty() && !controller.isLoading && initialTimelineLoadStarted -> {
-                    val canInviteFromEmptyGroup =
-                        controller.isSelfMember &&
-                            controller.isSelfAdmin &&
-                            controller.membersLoaded &&
-                            controller.members.size <= 1
-                    if (canInviteFromEmptyGroup) {
+                    if (
+                        canInviteFromEmptyGroup(
+                            isSelfMember = controller.isSelfMember,
+                            isSelfAdmin = controller.isSelfAdmin,
+                            membersLoaded = controller.membersLoaded,
+                            memberCount = controller.members.size,
+                        )
+                    ) {
                         EmptyGroupConversation(
                             onAddMembers = {
                                 openAddMemberOnDetails = true
@@ -8349,6 +8361,7 @@ private fun GroupDetailsScreen(
     // When true (empty-group CTA), open the shared add-member sheet after the
     // details screen is mounted so the initial invite path reuses later-add UI.
     autoOpenAddMember: Boolean = false,
+    onAutoOpenAddMemberConsumed: () -> Unit = {},
 ) {
     var name by remember(controller.group.groupIdHex, controller.group.name) { mutableStateOf(controller.group.name) }
     var description by remember(controller.group.groupIdHex, controller.group.description) { mutableStateOf(controller.group.description) }
@@ -8378,6 +8391,7 @@ private fun GroupDetailsScreen(
             pendingMemberError = null
             pendingMemberAsAdmin = false
             showAddMember = true
+            onAutoOpenAddMemberConsumed()
         }
     }
     var mlsState by remember(controller.group.groupIdHex) { mutableStateOf<AppGroupMlsStateFfi?>(null) }
