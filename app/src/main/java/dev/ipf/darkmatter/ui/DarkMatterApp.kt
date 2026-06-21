@@ -13335,6 +13335,17 @@ private fun AppearanceScreen(
                     }
                 }
             }
+            item {
+                SectionCard(title = stringResource(R.string.enter_key_behavior_title)) {
+                    EnterKeyBehavior.entries.forEach { behavior ->
+                        SelectableSettingsRow(
+                            title = stringResource(behavior.labelRes),
+                            selected = appState.enterKeyBehavior == behavior,
+                            onClick = { appState.updateEnterKeyBehavior(behavior) },
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -13386,17 +13397,6 @@ private fun AutoDownloadDataScreen(
                                 onCheckedChange = { appState.setMediaAutoDownload(type, network, it) },
                             )
                         }
-                    }
-                }
-            }
-            item {
-                SectionCard(title = stringResource(R.string.enter_key_behavior_title)) {
-                    EnterKeyBehavior.entries.forEach { behavior ->
-                        SelectableSettingsRow(
-                            title = stringResource(behavior.labelRes),
-                            selected = appState.enterKeyBehavior == behavior,
-                            onClick = { appState.updateEnterKeyBehavior(behavior) },
-                        )
                     }
                 }
             }
