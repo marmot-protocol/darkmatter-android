@@ -3350,7 +3350,13 @@ class ConversationController(
                 }
                 group = group.copy(admins = withTarget)
 
-                appState.marmotIo { selfDemoteAdmin(account, group.groupIdHex) }
+                // The grant has already landed on the MLS group. If the scope is
+                // cancelled now, skipping the demote would strand both accounts as
+                // admin without telling the caller (rethrowIfCancellation below
+                // jumps past the partial-state branch). Run it to completion.
+                withContext(NonCancellable) {
+                    appState.marmotIo { selfDemoteAdmin(account, group.groupIdHex) }
+                }
                 // Case-insensitive so admin-list hex casing drift from the
                 // active account id doesn't leave the UI showing us as admin
                 // after a successful self-demote.
