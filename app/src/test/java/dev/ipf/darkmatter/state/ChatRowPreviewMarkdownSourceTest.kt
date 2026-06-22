@@ -10,9 +10,12 @@ import org.junit.Test
 /**
  * Pure-predicate coverage for [chatRowPreviewMarkdownSource]: the markdown
  * parse gate must only surface source text when the chat-list preview line is
- * the message body itself. Edit (1009) and group-system (1210) rows render
- * derived copy via [ChatListItem.projectedPreviewText], so their payloads must
- * not be parsed into preview tokens and styled in place (issue #577).
+ * the message body itself. Body kinds whose preview is the verbatim plaintext
+ * — kind 1 (legacy note), kind 9 (chat), kind 1209 (agent-stream final) — get
+ * their body parsed; edit (1009), agent-stream-start (1200), and group-system
+ * (1210) rows render derived copy via [ChatListItem.projectedPreviewText], so
+ * their payloads must not be parsed into preview tokens and styled in place
+ * (issue #577).
  */
 class ChatRowPreviewMarkdownSourceTest {
     @Test
@@ -20,6 +23,27 @@ class ChatRowPreviewMarkdownSourceTest {
         assertEquals(
             "hello **world**",
             chatRowPreviewMarkdownSource(rowWith(kind = 9uL, plaintext = "hello **world**")),
+        )
+    }
+
+    @Test
+    fun legacyNoteRowReturnsNonBlankBody() {
+        // Kind-1 legacy notes fall through to projectedPreviewText's verbatim
+        // body arm, so their plaintext must still be parsed for markdown.
+        assertEquals(
+            "note *body*",
+            chatRowPreviewMarkdownSource(rowWith(kind = 1uL, plaintext = "note *body*")),
+        )
+    }
+
+    @Test
+    fun agentStreamFinalRowReturnsNonBlankBody() {
+        // Kind-1209 agent-stream finals are user-facing body text (and
+        // searchable per SearchableBodyKinds); their preview is the verbatim
+        // plaintext, so markdown/mention/code rendering must apply.
+        assertEquals(
+            "final `answer`",
+            chatRowPreviewMarkdownSource(rowWith(kind = 1209uL, plaintext = "final `answer`")),
         )
     }
 
