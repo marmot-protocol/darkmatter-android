@@ -37,6 +37,8 @@
     <string name="recipient_preview_resolving">Résolution en cours…</string>
     <string name="recipient_preview_no_profile">Aucun profil publié</string>
     <string name="recipient_preview_unresolved">Impossible de résoudre cet identifiant</string>
+    <string name="recipient_preview_nip05_verified">Adresse vérifiée</string>
+    <string name="recipient_preview_nip05_unverified">Adresse non vérifiée</string>
     <string name="chat_row_action_archive">Archiver</string>
     <string name="chat_row_action_unarchive">Désarchiver</string>
     <string name="chat_row_action_mark_read">Marquer comme lu</string>

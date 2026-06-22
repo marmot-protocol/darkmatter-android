@@ -37,6 +37,8 @@
     <string name="recipient_preview_resolving">Çözümleniyor…</string>
     <string name="recipient_preview_no_profile">Yayınlanmış profil yok</string>
     <string name="recipient_preview_unresolved">Bu tanımlayıcı çözümlenemedi</string>
+    <string name="recipient_preview_nip05_verified">Doğrulanmış adres</string>
+    <string name="recipient_preview_nip05_unverified">Doğrulanmamış adres</string>
     <string name="chat_row_action_archive">Arşivle</string>
     <string name="chat_row_action_unarchive">Arşivden çıkar</string>
     <string name="chat_row_action_mark_read">Okundu olarak işaretle</string>

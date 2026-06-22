@@ -38,6 +38,8 @@
     <string name="recipient_preview_resolving">Resolving…</string>
     <string name="recipient_preview_no_profile">No profile published</string>
     <string name="recipient_preview_unresolved">Couldn\'t resolve this identifier</string>
+    <string name="recipient_preview_nip05_verified">Verified address</string>
+    <string name="recipient_preview_nip05_unverified">Unverified address</string>
     <string name="chat_row_action_archive">Archive</string>
     <string name="chat_row_action_unarchive">Unarchive</string>
     <string name="chat_row_action_mark_read">Mark as read</string>

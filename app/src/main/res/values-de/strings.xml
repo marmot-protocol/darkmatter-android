@@ -37,6 +37,8 @@
     <string name="recipient_preview_resolving">Wird aufgelöst…</string>
     <string name="recipient_preview_no_profile">Kein Profil veröffentlicht</string>
     <string name="recipient_preview_unresolved">Diese Kennung konnte nicht aufgelöst werden</string>
+    <string name="recipient_preview_nip05_verified">Verifizierte Adresse</string>
+    <string name="recipient_preview_nip05_unverified">Nicht verifizierte Adresse</string>
     <string name="chat_row_action_archive">Archivieren</string>
     <string name="chat_row_action_unarchive">Aus dem Archiv</string>
     <string name="chat_row_action_mark_read">Als gelesen markieren</string>
