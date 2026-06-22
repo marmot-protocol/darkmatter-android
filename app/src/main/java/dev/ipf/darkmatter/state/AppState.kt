@@ -47,6 +47,7 @@ import dev.ipf.marmotkit.AuditLogUploadSourceFfi
 import dev.ipf.marmotkit.MarkdownDocumentFfi
 import dev.ipf.marmotkit.Marmot
 import dev.ipf.marmotkit.NotificationSettingsFfi
+import dev.ipf.marmotkit.NotificationTriggerFfi
 import dev.ipf.marmotkit.NotificationUpdateFfi
 import dev.ipf.marmotkit.PushPlatformFfi
 import dev.ipf.marmotkit.RelayTelemetryResourceFfi
@@ -524,6 +525,10 @@ class DarkMatterAppState(
     var backgroundConnectionEnabled by mutableStateOf(BackgroundConnectionPreferences.isEnabled(appContext))
         private set
 
+    private var autoAcceptedInviteRevision by mutableStateOf(0)
+
+    private val autoAcceptingInviteJobs = ConcurrentHashMap<String, Deferred<AppGroupRecordFfi?>>()
+
     private var defaultNotificationsEnableAttempted by mutableStateOf(
         preferences.getBoolean(DEFAULT_NOTIFICATIONS_ENABLE_ATTEMPTED_KEY, false),
     )
@@ -791,8 +796,9 @@ class DarkMatterAppState(
 
     // TODO(marmot): remove this UI-controller backchannel once Marmot emits a
     // ProjectionUpdated (or equivalent chat-list/group projection update) after
-    // set_group_archived. Until then, the ChatsController stream never sees the
-    // archived-flag change and we forward it locally.
+    // set_group_archived / accept_group_invite. Until then, the ChatsController
+    // stream can lag behind local mutations and we forward the accepted/archived
+    // group record so rows stop rendering stale pending/archived state.
     fun applyLocalGroupUpdate(record: AppGroupRecordFfi) {
         chatsController?.applyLocalGroupUpdate(record)
     }
@@ -876,6 +882,110 @@ class DarkMatterAppState(
         get() = chatsController?.items.orEmpty()
 
     fun existingDirectChat(reference: String): ChatListItem? = chatsController?.existingDirectChat(reference)
+
+    val autoAcceptedInviteRevisionForCompose: Int
+        get() = autoAcceptedInviteRevision
+
+    fun autoAcceptedInviteBadgeVisible(groupIdHex: String): Boolean =
+        AutoAcceptedInviteMarkers.badgeVisible(
+            marker = autoAcceptedInviteMarker(activeAccountRef, groupIdHex),
+            nowMs = System.currentTimeMillis(),
+        )
+
+    internal fun autoAcceptedInviteBanner(groupIdHex: String): AutoAcceptedInviteBannerState? =
+        AutoAcceptedInviteMarkers.bannerState(autoAcceptedInviteMarker(activeAccountRef, groupIdHex))
+
+    fun markAutoAcceptedInviteOpened(groupIdHex: String) {
+        updateAutoAcceptedInviteMarkers {
+            AutoAcceptedInviteMarkers.markOpened(it, activeAccountRef, groupIdHex)
+        }
+    }
+
+    fun dismissAutoAcceptedInviteBanner(groupIdHex: String) {
+        updateAutoAcceptedInviteMarkers {
+            AutoAcceptedInviteMarkers.dismissBanner(it, activeAccountRef, groupIdHex)
+        }
+    }
+
+    fun forgetAutoAcceptedInvite(groupIdHex: String) {
+        updateAutoAcceptedInviteMarkers {
+            AutoAcceptedInviteMarkers.remove(it, activeAccountRef, groupIdHex)
+        }
+    }
+
+    internal suspend fun autoAcceptGroupInvite(
+        accountRef: String,
+        groupIdHex: String,
+        inviterAccountIdHex: String? = null,
+    ): AppGroupRecordFfi? {
+        val account = accountRef.takeIf { it.isNotBlank() } ?: return null
+        val groupId = groupIdHex.takeIf { it.isNotBlank() } ?: return null
+        val key = "$account\u0000$groupId"
+        val job =
+            mutationsScope.async {
+                runCatching {
+                    val accepted = marmotIo { acceptGroupInvite(account, groupId) }
+                    val inviter = accepted.welcomerAccountIdHex?.takeIf { it.isNotBlank() } ?: inviterAccountIdHex?.takeIf { it.isNotBlank() }
+                    rememberAutoAcceptedInvite(
+                        accountRef = account,
+                        groupIdHex = accepted.groupIdHex.takeIf { it.isNotBlank() } ?: groupId,
+                        inviterAccountIdHex = inviter,
+                    )
+                    inviter?.let(::requestProfile)
+                    if (account == activeAccountRef) applyLocalGroupUpdate(accepted)
+                    accepted
+                }.onFailure {
+                    rethrowIfCancellation(it)
+                    appStateDebug(it) { "auto-accept invite failed group=${groupId.take(8)}: ${it.readableMessage()}" }
+                }.getOrNull()
+            }
+        val existing = autoAcceptingInviteJobs.putIfAbsent(key, job)
+        if (existing != null) {
+            job.cancel()
+            return existing.await()
+        }
+        return try {
+            job.await()
+        } finally {
+            autoAcceptingInviteJobs.remove(key, job)
+        }
+    }
+
+    private fun autoAcceptedInviteMarker(
+        accountRef: String?,
+        groupIdHex: String,
+    ): AutoAcceptedInviteMarker? =
+        AutoAcceptedInviteMarkers.markerFor(
+            encoded = autoAcceptedInviteEncoded(),
+            accountRef = accountRef,
+            groupIdHex = groupIdHex,
+        )
+
+    private fun rememberAutoAcceptedInvite(
+        accountRef: String,
+        groupIdHex: String,
+        inviterAccountIdHex: String?,
+    ) {
+        updateAutoAcceptedInviteMarkers {
+            AutoAcceptedInviteMarkers.upsert(
+                encoded = it,
+                accountRef = accountRef,
+                groupIdHex = groupIdHex,
+                invitedAtMs = System.currentTimeMillis(),
+                inviterAccountIdHex = inviterAccountIdHex,
+            )
+        }
+    }
+
+    private fun autoAcceptedInviteEncoded(): Set<String> = preferences.getStringSet(AUTO_ACCEPTED_INVITES_KEY, emptySet()).orEmpty().toSet()
+
+    private fun updateAutoAcceptedInviteMarkers(transform: (Set<String>) -> Set<String>) {
+        val before = autoAcceptedInviteEncoded()
+        val after = transform(before)
+        if (after == before) return
+        preferences.edit().putStringSet(AUTO_ACCEPTED_INVITES_KEY, after).apply()
+        autoAcceptedInviteRevision += 1
+    }
 
     suspend fun <T> marmotIo(block: suspend Marmot.() -> T): T =
         withContext(Dispatchers.IO) {
@@ -1748,6 +1858,7 @@ class DarkMatterAppState(
         // now; clear it when the conversation closes.
         activeConversationAccountRef = if (groupIdHex != null) activeAccountRef else null
         if (groupIdHex != null) {
+            markAutoAcceptedInviteOpened(groupIdHex)
             synchronized(conversationStateLock) {
                 promoteConversationState(activeConversationAccountRef, groupIdHex)
             }
@@ -2596,8 +2707,12 @@ class DarkMatterAppState(
     // Resolve the conversation title for a notification the same way the chat
     // list does, since the runtime payload's group name is empty for unnamed
     // groups. Returns null for DMs (MessagingStyle shows the sender instead).
-    private suspend fun notificationConversationTitle(update: NotificationUpdateFfi): String? {
+    private suspend fun notificationConversationTitle(
+        update: NotificationUpdateFfi,
+        acceptedGroup: AppGroupRecordFfi? = null,
+    ): String? {
         if (update.isDm) return null
+        acceptedGroup?.name?.let { ProfileSanitizer.displayName(it) }?.let { return it }
         // Sanitize the payload name like the display surfaces do (strip
         // bidi/control chars) before trusting it as a notification title.
         update.groupName?.let { ProfileSanitizer.displayName(it) }?.let { return it }
@@ -2643,6 +2758,16 @@ class DarkMatterAppState(
                             while (isActive) {
                                 val update = marmotIo { subscription.next() } ?: break
                                 backoffMillis = NOTIFICATION_RETRY_INITIAL_BACKOFF_MILLIS
+                                val autoAcceptedInvite =
+                                    if (update.trigger == NotificationTriggerFfi.GROUP_INVITE) {
+                                        autoAcceptGroupInvite(
+                                            accountRef = update.accountRef,
+                                            groupIdHex = update.groupIdHex,
+                                            inviterAccountIdHex = update.sender.accountIdHex,
+                                        )
+                                    } else {
+                                        null
+                                    }
                                 val activeConversation = activeConversationGroupIdHex
                                 val shouldPost =
                                     LocalNotificationPolicy.shouldPost(
@@ -2672,10 +2797,11 @@ class DarkMatterAppState(
                                         }
                                     localNotificationPresenter.show(
                                         update,
-                                        notificationConversationTitle(update),
+                                        notificationConversationTitle(update, autoAcceptedInvite),
                                         notificationSenderName(update),
                                         previewTextOverride,
                                         reactedToPreviewOverride,
+                                        groupInviteAutoAccepted = autoAcceptedInvite != null,
                                     )
                                 }
                                 refreshAccountUnreadCount(update.accountRef)
@@ -2823,6 +2949,7 @@ class DarkMatterAppState(
         private const val MEDIA_QUALITY_KEY = "media_quality"
         private const val ENTER_KEY_BEHAVIOR_KEY = "enter_key_behavior"
         private const val DEFAULT_NOTIFICATIONS_ENABLE_ATTEMPTED_KEY = "default_notifications_enable_attempted"
+        private const val AUTO_ACCEPTED_INVITES_KEY = "auto_accepted_invites"
 
         // 24 MiB cap on decrypted attachment bytes resident in memory —
         // roughly ten 1920px JPEGs. Persists across conversation re-entry.
