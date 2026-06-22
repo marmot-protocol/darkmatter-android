@@ -265,6 +265,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -3202,6 +3203,44 @@ private fun aspectRatioFromDim(dim: String?): Float? {
     return (w.toFloat() / h.toFloat()).coerceIn(0.4f, 2.5f)
 }
 
+/**
+ * Tap opens inline media; long-press belongs to the message action menu.
+ *
+ * A plain media `clickable` observes the final up event after the parent row's
+ * raw long-press detector opens the action menu, so a hold can dispatch both
+ * "open viewer" and "show actions". Keep both branches in one detector so a
+ * completed long-press never also becomes a tap, while still reporting the
+ * window-space y used by the message action popover.
+ */
+@Composable
+internal fun Modifier.mediaTapOrActionLongPress(
+    gestureKey: Any?,
+    onTap: () -> Unit,
+    onLongPressWindowY: (Float) -> Unit,
+): Modifier {
+    val latestOnTap by rememberUpdatedState(onTap)
+    val latestOnLongPressWindowY by rememberUpdatedState(onLongPressWindowY)
+    var boundsTopPx by remember(gestureKey) { mutableStateOf(0f) }
+    return this
+        .onGloballyPositioned { coordinates ->
+            boundsTopPx = coordinates.boundsInWindow().top
+        }.semantics {
+            onClick {
+                latestOnTap()
+                true
+            }
+            onLongClick {
+                latestOnLongPressWindowY(boundsTopPx)
+                true
+            }
+        }.pointerInput(gestureKey) {
+            detectTapGestures(
+                onTap = { latestOnTap() },
+                onLongPress = { offset -> latestOnLongPressWindowY(boundsTopPx + offset.y) },
+            )
+        }
+}
+
 /** Saves a nullable Uri across process death (camera capture round-trip). */
 private val NullableUriSaver: Saver<android.net.Uri?, String> =
     Saver(
@@ -3382,6 +3421,7 @@ private fun MediaImageBubble(
     appState: DarkMatterAppState,
     mine: Boolean,
     uploading: Boolean = false,
+    onLongPressWindowY: (Float) -> Unit,
 ) {
     val record = item.record
     val key = record.messageIdHex
@@ -3491,7 +3531,11 @@ private fun MediaImageBubble(
                         modifier =
                             Modifier
                                 .fillMaxSize()
-                                .clickable { viewerOpen = true },
+                                .mediaTapOrActionLongPress(
+                                    gestureKey = "$key#$attachmentIndex",
+                                    onTap = { viewerOpen = true },
+                                    onLongPressWindowY = onLongPressWindowY,
+                                ),
                     )
                 failed ->
                     MediaCircleAction(
@@ -3616,6 +3660,7 @@ private fun MediaImageGridBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPressWindowY: (Float) -> Unit,
 ) {
     val record = item.record
     // Show up to four tiles before collapsing the remainder into a "+N"
@@ -3636,6 +3681,7 @@ private fun MediaImageGridBubble(
             appState = appState,
             mine = mine,
             onTap = { viewerOpenAt = tileIndex },
+            onLongPressWindowY = onLongPressWindowY,
             overflowCount = if (showOverflow) overflow else 0,
             modifier = tileModifier,
         )
@@ -3675,6 +3721,7 @@ private fun MediaVisualGridBubble(
     appState: DarkMatterAppState,
     mine: Boolean,
     uploading: Boolean = false,
+    onLongPressWindowY: (Float) -> Unit,
 ) {
     val record = item.record
     // Show up to four tiles before collapsing the remainder into a "+N"
@@ -3708,6 +3755,7 @@ private fun MediaVisualGridBubble(
                 appState = appState,
                 mine = mine,
                 onTap = { viewerOpenAt = tileIndex },
+                onLongPressWindowY = onLongPressWindowY,
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
                 uploading = uploading,
@@ -3928,6 +3976,7 @@ private fun MediaImageGridTile(
     appState: DarkMatterAppState,
     mine: Boolean,
     onTap: () -> Unit,
+    onLongPressWindowY: (Float) -> Unit,
     overflowCount: Int,
     modifier: Modifier = Modifier,
     uploading: Boolean = false,
@@ -3993,19 +4042,21 @@ private fun MediaImageGridTile(
 
     Box(
         modifier =
-            modifier.clickable(
+            modifier.mediaTapOrActionLongPress(
+                gestureKey = decodeKey,
                 // Two modes:
                 //   - Bytes ready (`bitmap != null`): tap opens the viewer.
                 //   - Auto-download gated: tap flips startDownload, so the
                 //     first tap fetches and the next tap (once decoded)
                 //     opens the viewer. Same UX as the single-image bubble.
-                onClick = {
+                onTap = {
                     if (bitmap != null) {
                         onTap()
                     } else if (!startDownload) {
                         startDownload = true
                     }
                 },
+                onLongPressWindowY = onLongPressWindowY,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -10499,6 +10550,15 @@ private fun MessageBubble(
         forwardSheetOpen = true
     }
 
+    fun openActionMenuAt(windowY: Float?) {
+        if (deleted) return
+        longPressWindowY = windowY
+        haptics.performHapticFeedback(
+            androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
+        )
+        onActionMenuOpenChange(true)
+    }
+
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val messageGroupMaxWidth = maxWidth * 0.95f
         val senderAvatarWidth = if (showSenderAvatar) 40.dp else 0.dp
@@ -10572,11 +10632,7 @@ private fun MessageBubble(
                                         // Capture the press y in window space before
                                         // opening so the popover anchors at the
                                         // finger, not the bubble top (#326).
-                                        longPressWindowY = rowBoundsTopPx + longPress.position.y
-                                        haptics.performHapticFeedback(
-                                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
-                                        )
-                                        onActionMenuOpenChange(true)
+                                        openActionMenuAt(rowBoundsTopPx + longPress.position.y)
                                     }
                                 }
                             }
@@ -10599,8 +10655,7 @@ private fun MessageBubble(
                                 onLongClick(label = messageActionsLabel) {
                                     // Accessibility entry has no touch point;
                                     // anchor to the bubble top (#326).
-                                    longPressWindowY = null
-                                    onActionMenuOpenChange(true)
+                                    openActionMenuAt(null)
                                     true
                                 }
                             }
@@ -10868,6 +10923,7 @@ private fun MessageBubble(
                                         controller = controller,
                                         appState = appState,
                                         mine = mine,
+                                        onLongPressWindowY = { openActionMenuAt(it) },
                                     )
                                 }
                                 if (footerOnVisualMedia) {
@@ -10885,6 +10941,7 @@ private fun MessageBubble(
                                 controller = controller,
                                 appState = appState,
                                 mine = mine,
+                                onLongPressWindowY = { openActionMenuAt(it) },
                             )
                         }
                     }
@@ -10967,6 +11024,7 @@ private fun MessageBubble(
                                         appState = appState,
                                         mine = true,
                                         uploading = !uploadFailed,
+                                        onLongPressWindowY = { openActionMenuAt(it) },
                                     )
                                 }
                                 MediaFooterOverlay(
@@ -10983,6 +11041,7 @@ private fun MessageBubble(
                                 appState = appState,
                                 mine = true,
                                 uploading = !uploadFailed,
+                                onLongPressWindowY = { openActionMenuAt(it) },
                             )
                         }
                     }
@@ -11259,8 +11318,7 @@ private fun MessageBubble(
                                     onClick = { appState.presentProfile(appState.npub(record.sender)) },
                                     onLongClick = {
                                         if (!deleted) {
-                                            longPressWindowY = null
-                                            onActionMenuOpenChange(true)
+                                            openActionMenuAt(null)
                                         }
                                     },
                                 ),
