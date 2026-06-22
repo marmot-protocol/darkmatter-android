@@ -384,6 +384,7 @@ import dev.ipf.darkmatter.state.labelFor
 import dev.ipf.darkmatter.state.nextReadAnchor
 import dev.ipf.darkmatter.state.outgoingIndicator
 import dev.ipf.darkmatter.state.shortHex
+import dev.ipf.darkmatter.state.shouldResetNavOnAccountChange
 import dev.ipf.darkmatter.state.shouldShowOriginalTimestamp
 import dev.ipf.darkmatter.ui.theme.Dimens
 import dev.ipf.marmotkit.AccountKeyPackageFfi
@@ -1307,6 +1308,31 @@ private fun MainShell(
         onDispose {
             if (selectedChat != null) appState.setActiveConversation(null)
         }
+    }
+
+    // Pop in-shell navigation back to the chat-list root when the active
+    // account changes while the shell stays mounted (AppPhase.Ready preserved).
+    // Without this, Sign Out & Wipe of the active account while another remains
+    // leaves the shell painted on the now-deleted account's Identity & Keys
+    // screen (issue #547), since the deep Settings/conversation nav state lives
+    // in this shell's rememberSaveable and survives the account switch. The
+    // no-accounts case drops to AppPhase.Onboarding and tears the shell down at
+    // the top-level router, so it isn't handled here. Plain `remember` (not
+    // Saveable) for the previous-ref tracker: a fresh composition after process
+    // death must report `previous == null` so the saved screen/conversation is
+    // restored, not popped (issue #386 guard, encoded in
+    // shouldResetNavOnAccountChange).
+    var previousActiveAccountRef by remember { mutableStateOf(appState.activeAccountRef) }
+    LaunchedEffect(appState.activeAccountRef) {
+        val current = appState.activeAccountRef
+        if (shouldResetNavOnAccountChange(previousActiveAccountRef, current)) {
+            selectedChat = null
+            selectedChatFocusMessageId = null
+            selectedChatJustCreated = false
+            sectionName = MainSection.Chats.name
+            settingsDetailName = null
+        }
+        previousActiveAccountRef = current
     }
 
     appState.pendingProfileNpub?.let { npub ->
