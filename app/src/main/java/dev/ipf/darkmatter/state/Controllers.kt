@@ -810,7 +810,7 @@ class ChatsController(
     suspend fun closeLiveSubscriptionsForAccountTeardown(accountRef: String) {
         val teardown =
             synchronized(liveSubscriptionLock) {
-                if (boundAccountRef != accountRef && this.accountRef != accountRef) {
+                if (!shouldTeardownLiveSubscriptionsForAccount(accountRef, this.accountRef, boundAccountRef)) {
                     null
                 } else {
                     this.accountRef = null
@@ -826,8 +826,8 @@ class ChatsController(
             runCatching { chatListSubscription?.close() }
             runCatching { chatsSubscription?.close() }
         }
-        if (job != null && job !== coroutineContext[Job]) {
-            job.cancelAndJoin()
+        if (shouldCancelLiveSubscriptionJob(job, coroutineContext[Job])) {
+            job?.cancelAndJoin()
         }
     }
 
@@ -1760,6 +1760,10 @@ class ConversationController(
     // cursor.
     @Volatile
     private var timelineSubscription: TimelineMessagesSubscription? = null
+    private val liveSubscriptionLock = Any()
+    private var groupStateSubscription: GroupStateSubscription? = null
+    private var startJob: Job? = null
+    private var accountTeardownRequested = false
     private val activeStreamIds = mutableSetOf<String>()
 
     // Bounded LRU set: tombstones are capped so an agent-heavy conversation
@@ -1849,6 +1853,17 @@ class ConversationController(
 
     suspend fun start() {
         val account = conversationAccountRef ?: return
+        val currentStartJob = coroutineContext[Job]
+        val shouldStart =
+            synchronized(liveSubscriptionLock) {
+                if (accountTeardownRequested) {
+                    false
+                } else {
+                    startJob = currentStartJob
+                    true
+                }
+            }
+        if (!shouldStart) return
         isLoading = true
         error = null
         try {
@@ -1878,8 +1893,36 @@ class ConversationController(
             error = throwable.message ?: throwable.javaClass.simpleName
         } finally {
             cleanupConversationSubscriptions()
+            synchronized(liveSubscriptionLock) {
+                if (startJob === currentStartJob) {
+                    startJob = null
+                }
+            }
         }
     }
+
+    suspend fun closeLiveSubscriptionsForAccountTeardown(accountRef: String) {
+        if (!shouldTeardownLiveSubscriptionsForAccount(accountRef, conversationAccountRef, conversationAccountRef)) return
+        val teardown =
+            synchronized(liveSubscriptionLock) {
+                accountTeardownRequested = true
+                val current = Triple(groupStateSubscription, timelineSubscription, startJob)
+                groupStateSubscription = null
+                timelineSubscription = null
+                startJob = null
+                current
+            }
+        val (groupSubscription, timelineStream, job) = teardown
+        withContext(NonCancellable + Dispatchers.IO) {
+            runCatching { groupSubscription?.close() }
+            runCatching { timelineStream?.close() }
+        }
+        if (shouldCancelLiveSubscriptionJob(job, coroutineContext[Job])) {
+            job?.cancelAndJoin()
+        }
+    }
+
+    private fun isAccountTeardownRequested(): Boolean = synchronized(liveSubscriptionLock) { accountTeardownRequested }
 
     /**
      * Retry loop for the timeline + group-state live subscriptions. Extracted
@@ -1888,11 +1931,11 @@ class ConversationController(
      */
     private suspend fun runConversationSubscriptionLoop(account: String) {
         var retryDelayMs = LIVE_SUBSCRIPTION_INITIAL_RETRY_DELAY_MS
-        while (coroutineContext.isActive) {
+        while (coroutineContext.isActive && !isAccountTeardownRequested()) {
             val (shouldExit, connected) = runConversationSubscriptionIteration(account)
             if (shouldExit) return
             if (connected) retryDelayMs = LIVE_SUBSCRIPTION_INITIAL_RETRY_DELAY_MS
-            if (!coroutineContext.isActive) break
+            if (!coroutineContext.isActive || isAccountTeardownRequested()) break
             delay(retryDelayMs)
             retryDelayMs = nextLiveSubscriptionRetryDelayMillis(retryDelayMs)
         }
@@ -1911,7 +1954,16 @@ class ConversationController(
                 appState.marmotIo {
                     subscribeTimelineMessages(account, group.groupIdHex, ConversationTimelinePageLimit)
                 }
-            timelineSubscription = timelineStream
+            val stopAfterTimelineOpen =
+                synchronized(liveSubscriptionLock) {
+                    if (accountTeardownRequested) {
+                        true
+                    } else {
+                        timelineSubscription = timelineStream
+                        false
+                    }
+                }
+            if (stopAfterTimelineOpen) return true to false
             val timelineReconnect = timelineRecords.isNotEmpty()
             val snapshotStreamIds =
                 if (timelineReconnect) {
@@ -1938,6 +1990,16 @@ class ConversationController(
             val groupStream =
                 appState.marmotIo { subscribeGroupState(account, group.groupIdHex) }
             groupSubscription = groupStream
+            val stopAfterGroupOpen =
+                synchronized(liveSubscriptionLock) {
+                    if (accountTeardownRequested) {
+                        true
+                    } else {
+                        groupStateSubscription = groupStream
+                        false
+                    }
+                }
+            if (stopAfterGroupOpen) return true to false
             val groupSnapshot =
                 withContext(Dispatchers.IO) {
                     groupStream.snapshot()
@@ -1999,8 +2061,13 @@ class ConversationController(
         groupSubscription: GroupStateSubscription?,
         timelineStream: TimelineMessagesSubscription?,
     ) {
-        if (timelineSubscription === timelineStream) {
-            timelineSubscription = null
+        synchronized(liveSubscriptionLock) {
+            if (groupStateSubscription === groupSubscription) {
+                groupStateSubscription = null
+            }
+            if (timelineSubscription === timelineStream) {
+                timelineSubscription = null
+            }
         }
         withContext(NonCancellable + Dispatchers.IO) {
             runCatching { groupSubscription?.close() }
@@ -2014,8 +2081,12 @@ class ConversationController(
         // loops can end while the screen is still composed, and acceptInvite()
         // — which launches into inviteStreamScope from an independent mutation
         // scope — may fire afterward.
-        val closingSubscription = timelineSubscription
-        timelineSubscription = null
+        val closingSubscription =
+            synchronized(liveSubscriptionLock) {
+                val current = timelineSubscription
+                timelineSubscription = null
+                current
+            }
         withContext(NonCancellable + Dispatchers.IO) {
             runCatching { closingSubscription?.close() }
         }

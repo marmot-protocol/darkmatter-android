@@ -75,7 +75,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.yield
 import java.net.IDN
 import java.net.URI
 import java.util.Locale
@@ -619,6 +618,8 @@ class DarkMatterAppState(
     private var activeConversationAccountRef: String? = null
     private val profileRefreshGate = ProfileRefreshGate(PROFILE_REFRESH_RETRY_COOLDOWN_MILLIS)
     private var chatsController: ChatsController? = null
+    private val conversationControllerLock = Any()
+    private val conversationControllers = linkedSetOf<ConversationController>()
 
     init {
         applyLanguageTag(languageTag)
@@ -793,19 +794,44 @@ class DarkMatterAppState(
         chatsController = controller
     }
 
+    fun attachConversationController(controller: ConversationController) {
+        synchronized(conversationControllerLock) { conversationControllers.add(controller) }
+    }
+
+    fun detachConversationController(controller: ConversationController) {
+        synchronized(conversationControllerLock) { conversationControllers.remove(controller) }
+    }
+
+    private fun conversationControllersForAccountTeardown(): List<ConversationController> =
+        synchronized(conversationControllerLock) { conversationControllers.toList() }
+
+    private fun destructiveWipeRuntimeState(): DestructiveAccountWipeRuntimeState =
+        DestructiveAccountWipeRuntimeState(
+            activeAccountRef = activeAccountRef,
+            activeConversationAccountRef = activeConversationAccountRef,
+            activeConversationGroupIdHex = activeConversationGroupIdHex,
+            runtimeGeneration = runtimeGeneration,
+        )
+
+    private fun applyDestructiveWipeRuntimeState(state: DestructiveAccountWipeRuntimeState) {
+        activeAccountRef = state.activeAccountRef
+        activeConversationAccountRef = state.activeConversationAccountRef
+        activeConversationGroupIdHex = state.activeConversationGroupIdHex
+        runtimeGeneration = state.runtimeGeneration
+    }
+
     private suspend fun prepareForDestructiveAccountWipe(accountRef: String): Boolean {
         val restartNotifications = notificationJob?.isActive == true
-        activeAccountRef = null
-        activeConversationAccountRef = null
-        activeConversationGroupIdHex = null
-        runtimeGeneration += 1
+        val chatsControllerForTeardown = chatsController
+        val conversationControllersForTeardown = conversationControllersForAccountTeardown()
+        applyDestructiveWipeRuntimeState(prepareDestructiveAccountWipeRuntimeState(destructiveWipeRuntimeState()))
         reloadMediaAutoDownloadMatrix()
-        chatsController?.closeLiveSubscriptionsForAccountTeardown(accountRef)
+        // Capture controller references before the first suspending teardown.
+        // Recomposition is allowed to detach/replace them after activeAccountRef
+        // changes, but the destructive wipe still has to drain the old handles.
+        chatsControllerForTeardown?.closeLiveSubscriptionsForAccountTeardown(accountRef)
+        conversationControllersForTeardown.forEach { it.closeLiveSubscriptionsForAccountTeardown(accountRef) }
         stopNotificationListenerForAccountTeardown()
-        // Give Compose-owned conversation controllers a chance to observe the
-        // active-account/runtime-generation change and run their NonCancellable
-        // subscription cleanup before the engine account is deleted.
-        yield()
         return restartNotifications
     }
 
@@ -813,8 +839,9 @@ class DarkMatterAppState(
         accountRef: String,
         restartNotifications: Boolean,
     ) {
-        activeAccountRef = accountRef
-        runtimeGeneration += 1
+        applyDestructiveWipeRuntimeState(
+            restoreFailedDestructiveAccountWipeRuntimeState(destructiveWipeRuntimeState(), accountRef),
+        )
         reloadMediaAutoDownloadMatrix()
         configurePrivacyRuntime()
         refreshLocalNotificationSettings()
@@ -1416,8 +1443,12 @@ class DarkMatterAppState(
         clearCrossAccountCaches()
         val restartNotifications = prepareForDestructiveAccountWipe(wipedRef)
         val wipeResult =
-            nativePushSyncMutex.withLock {
+            nativePushSyncMutex.withSerializedNativePushWipe {
                 runCatching { marmotIo { signOutAndWipe(wipedRef) } }
+                    .onSuccess {
+                        pushTokenStore.clearPendingDisable(wipedRef)
+                        pushTokenStore.clear()
+                    }
             }
         val failure = wipeResult.exceptionOrNull()
         if (failure != null) {
@@ -1432,8 +1463,6 @@ class DarkMatterAppState(
                 return null
             }
         wipeDecryptedMediaFromDisk()
-        pushTokenStore.clearPendingDisable(wipedRef)
-        pushTokenStore.clear()
         val refreshedAccounts = runCatching { marmotIo { listAccounts() } }.getOrDefault(emptyList())
         accounts = refreshedAccounts
         refreshAccountUnreadCounts(refreshedAccounts)
