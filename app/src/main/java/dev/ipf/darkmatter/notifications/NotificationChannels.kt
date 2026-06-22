@@ -30,8 +30,8 @@ object NotificationChannels {
         val legacy = manager.getNotificationChannel(NotificationChannelSpec.LEGACY_MESSAGES_CHANNEL_ID)
         NotificationChannelSpec.entries.forEach { spec ->
             // For direct messages, inherit the legacy channel's user-chosen
-            // importance at construction time (importance is final once a
-            // channel is built, so it cannot be copied afterwards).
+            // importance at construction time so the split does not reset a
+            // legacy mute/custom importance during migration.
             val migrateLegacy = spec == NotificationChannelSpec.DIRECT_MESSAGES && legacy != null
             val importanceOverride = if (migrateLegacy) legacy!!.importance else null
             val channel = buildChannel(context, spec, importanceOverride)
@@ -44,11 +44,49 @@ object NotificationChannels {
         // missing channel is a no-op. Done last, after the replacements exist,
         // so a partial run never leaves the user without a channel. The reactions
         // and invites channels are re-keyed (not migrated) because their
-        // importance was raised and a live channel's importance can't change.
+        // default importance changed and the old rows should not linger.
         manager.deleteNotificationChannel(NotificationChannelSpec.LEGACY_MESSAGES_CHANNEL_ID)
         manager.deleteNotificationChannel(NotificationChannelSpec.LEGACY_REACTIONS_CHANNEL_ID)
         manager.deleteNotificationChannel(NotificationChannelSpec.LEGACY_INVITES_CHANNEL_ID)
     }
+
+    fun channelStates(context: Context): List<NotificationChannelState> {
+        ensureChannels(context)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        return NotificationChannelSpec.entries.map { spec ->
+            val channel = manager?.getNotificationChannel(spec.id)
+            NotificationChannelState(
+                spec = spec,
+                enabled = (channel?.importance ?: spec.importance.toAndroidImportance()) != NotificationManager.IMPORTANCE_NONE,
+            )
+        }
+    }
+
+    fun setChannelEnabled(
+        context: Context,
+        spec: NotificationChannelSpec,
+        enabled: Boolean,
+    ): Boolean {
+        ensureChannels(context)
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val channel = manager.getNotificationChannel(spec.id) ?: return false
+        val targetImportance =
+            if (enabled) {
+                spec.importance.toAndroidImportance()
+            } else {
+                NotificationManager.IMPORTANCE_NONE
+            }
+
+        if (channel.importance == targetImportance) return true
+
+        channel.setImportance(targetImportance)
+        manager.createNotificationChannel(channel)
+        return manager.getNotificationChannel(spec.id)?.importance == targetImportance
+    }
+
+    fun channelNameRes(spec: NotificationChannelSpec): Int = spec.nameRes()
+
+    fun channelDescriptionRes(spec: NotificationChannelSpec): Int = spec.descriptionRes()
 
     /**
      * Carry the user-mutable settings the user may have customised on the legacy
@@ -56,8 +94,8 @@ object NotificationChannels {
      * not silently reset a custom sound / vibration pattern / importance.
      *
      * Identity fields (id, name, description) stay as the new channel's; only
-     * fields the OS lets a user change are copied. Importance is handled at
-     * construction (it is final once the channel is built) — see [ensureChannels].
+     * fields the OS lets a user change are copied. Importance is handled by
+     * [ensureChannels] during migration and [setChannelEnabled] for in-app mute.
      */
     private fun copyUserSettings(
         from: NotificationChannel,
@@ -134,3 +172,8 @@ object NotificationChannels {
             ChannelImportance.LOW -> NotificationManager.IMPORTANCE_LOW
         }
 }
+
+data class NotificationChannelState(
+    val spec: NotificationChannelSpec,
+    val enabled: Boolean,
+)

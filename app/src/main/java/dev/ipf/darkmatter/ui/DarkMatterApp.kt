@@ -362,6 +362,9 @@ import dev.ipf.darkmatter.media.MediaPipeline
 import dev.ipf.darkmatter.media.MediaReferenceParser
 import dev.ipf.darkmatter.media.Thumbhash
 import dev.ipf.darkmatter.media.sanitizeHttpsAvatarUrl
+import dev.ipf.darkmatter.notifications.NotificationChannelSpec
+import dev.ipf.darkmatter.notifications.NotificationChannelState
+import dev.ipf.darkmatter.notifications.NotificationChannels
 import dev.ipf.darkmatter.notifications.NotificationNavStep
 import dev.ipf.darkmatter.notifications.NotificationTarget
 import dev.ipf.darkmatter.notifications.resolveNotificationNav
@@ -14434,6 +14437,7 @@ private fun NotificationsScreen(
     var pendingNativePushEnable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var notificationChannelStates by remember { mutableStateOf<List<NotificationChannelState>>(emptyList()) }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             appState.refreshLocalNotificationPermission()
@@ -14454,9 +14458,10 @@ private fun NotificationsScreen(
             pendingNativePushEnable = false
         }
 
-    LaunchedEffect(appState.activeAccountRef) {
+    LaunchedEffect(appState.activeAccountRef, context) {
         appState.refreshLocalNotificationPermission()
         appState.refreshLocalNotificationSettings()
+        notificationChannelStates = NotificationChannels.channelStates(context)
     }
 
     Scaffold(
@@ -14541,31 +14546,45 @@ private fun NotificationsScreen(
                         )
                     }
                     HorizontalDivider(Modifier.padding(vertical = 12.dp))
-                    // Per-type controls (sound, vibration, importance, lockscreen,
-                    // DND bypass) live in the OS notification details — Android's
-                    // native per-channel UI. We deep-link there instead of
-                    // duplicating those toggles in-app. See #288.
+                    // Per-type mute mirrors the live OS channel importance. The
+                    // channel remains the source of truth; no app-side copy is
+                    // persisted. Full sound/vibration/lockscreen controls still
+                    // live in Android's native per-channel UI. See #288/#308.
                     //
-                    // Use the same plain Row layout as the toggle rows above (not a
-                    // ListItem-based SettingsRow) so the leading edge lines up with
-                    // them; ListItem injects its own ~16.dp leading inset that left
-                    // the categories row indented further right than the settings
-                    // above it. See #499.
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { openAppNotificationSettings(context) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.notification_categories), style = MaterialTheme.typography.bodyLarge)
-                            Text(stringResource(R.string.notification_categories_subtitle), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Keep the same plain Row layout as the toggle rows above
+                    // (not ListItem) so the leading edge stays aligned. See #499.
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.notification_categories), style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                stringResource(R.string.notification_categories_subtitle),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        Icon(
-                            Icons.AutoMirrored.Filled.Forward,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        notificationChannelStates.forEachIndexed { index, state ->
+                            if (index > 0) HorizontalDivider()
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .clickable { openNotificationChannelSettings(context, state.spec) },
+                                ) {
+                                    Text(stringResource(NotificationChannels.channelNameRes(state.spec)), style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        stringResource(NotificationChannels.channelDescriptionRes(state.spec)),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Switch(
+                                    checked = state.enabled,
+                                    onCheckedChange = { enabled ->
+                                        val applied = NotificationChannels.setChannelEnabled(context, state.spec, enabled)
+                                        notificationChannelStates = NotificationChannels.channelStates(context)
+                                        if (!applied) openNotificationChannelSettings(context, state.spec)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -14591,6 +14610,20 @@ private fun openAppNotificationSettings(context: Context) {
     if (context.tryStartActivity(appDetailsIntent)) return
 
     Toast.makeText(context, R.string.toast_notification_settings_unavailable, Toast.LENGTH_SHORT).show()
+}
+
+private fun openNotificationChannelSettings(
+    context: Context,
+    spec: NotificationChannelSpec,
+) {
+    val channelIntent =
+        Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .putExtra(Settings.EXTRA_CHANNEL_ID, spec.id)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (context.tryStartActivity(channelIntent)) return
+
+    openAppNotificationSettings(context)
 }
 
 private fun Context.tryStartActivity(intent: Intent): Boolean = runCatching { startActivity(intent) }.isSuccess
