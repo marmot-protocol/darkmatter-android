@@ -64,10 +64,18 @@ object MediaInventory {
     }
 
     // A body URL whose path ends in a known image extension is treated as an
-    // image (and kept out of the URLs bucket). Query/fragment suffixes are
-    // tolerated so `…/cat.jpg?w=200` still classifies.
+    // image (and kept out of the URLs bucket). Matched against the URL path
+    // only, so `https://x.com/page?file=cat.jpg` is a link, not an image.
     private val IMAGE_URL_EXTENSION =
-        Regex("""\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)(?:[?#].*)?$""", RegexOption.IGNORE_CASE)
+        Regex("""\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$""", RegexOption.IGNORE_CASE)
+
+    // True when the URL's path component (not its query/fragment) ends in a
+    // known image extension. Unparseable or path-less URLs are not images.
+    private fun isImageUrl(url: String): Boolean {
+        val path = runCatching { java.net.URI(url).path }.getOrNull()
+        if (path.isNullOrEmpty()) return false
+        return IMAGE_URL_EXTENSION.containsMatchIn(path)
+    }
 
     fun build(records: List<AppMessageRecordFfi>): Inventory {
         val images = ArrayList<MediaEntry>()
@@ -82,7 +90,7 @@ object MediaInventory {
                 bucketFor(kind, images, videos, voice, files).add(entry)
             }
             for (url in collectHttpUrls(record.contentTokens)) {
-                if (IMAGE_URL_EXTENSION.containsMatchIn(url)) {
+                if (isImageUrl(url)) {
                     images.add(MediaEntry(record.messageIdHex, record.sender, record.recordedAt, Kind.IMAGE, Source.LinkedUrl(url)))
                 } else {
                     urls.add(UrlEntry(record.messageIdHex, record.sender, record.recordedAt, url))

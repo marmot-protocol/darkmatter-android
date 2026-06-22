@@ -52,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -74,7 +75,9 @@ import dev.ipf.darkmatter.media.MediaReferenceParser
 import dev.ipf.darkmatter.state.ConversationController
 import dev.ipf.darkmatter.state.DarkMatterAppState
 import dev.ipf.marmotkit.MediaAttachmentReferenceFfi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.URI
 import java.util.Calendar
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -141,60 +144,81 @@ internal fun rememberSharedMediaTiles(
     appState: DarkMatterAppState,
 ): SharedMediaTiles {
     val myAccountId = appState.activeAccount?.accountIdHex
-    return remember(controller.timeline, controller.mediaReferences, myAccountId) {
+    // The build sweep is O(N) over the timeline; run it off the composition
+    // thread and surface an empty result until it lands (consumers treat empty
+    // as "hide section / empty tabs", so the brief initial state is graceful).
+    val tiles by produceState(
+        initialValue = SharedMediaTiles(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), hasOther = false),
+        controller.timeline,
+        controller.mediaReferences,
+        myAccountId,
+    ) {
         val records = controller.timeline.map { it.record }
-        val inventory = MediaInventory.build(records)
-        val images = ArrayList<SharedMediaTile>()
-        val videos = ArrayList<SharedMediaTile>()
-        val voice = ArrayList<SharedMediaRow>()
-        val files = ArrayList<SharedMediaRow>()
-        for (record in records) {
-            val mine = MessageProjector.isMine(record, myAccountId)
-            val references =
-                controller.mediaReferences[record.messageIdHex]
-                    ?: MediaReferenceParser.parseAllImetaTags(record.tags)
-            references.forEachIndexed { index, reference ->
-                when {
-                    MediaReferenceParser.isImageMedia(reference) ->
-                        images.add(
-                            SharedMediaTile(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender, isVideo = false),
-                        )
-                    MediaReferenceParser.isVideoMedia(reference) ->
-                        videos.add(
-                            SharedMediaTile(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender, isVideo = true),
-                        )
-                    MediaReferenceParser.isAudioMedia(reference) ->
-                        voice.add(
-                            SharedMediaRow(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender),
-                        )
-                    else ->
-                        files.add(
-                            SharedMediaRow(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender),
-                        )
-                }
+        val references = records.associate { it.messageIdHex to controller.mediaReferences[it.messageIdHex] }
+        value = withContext(Dispatchers.Default) { buildTiles(records, references, myAccountId) }
+    }
+    return tiles
+}
+
+// Pure tile projection extracted from the composable so it can run on a
+// background dispatcher. References are looked up from the controller cache
+// (carrying the real `sourceEpoch`) with the imeta parser as the
+// optimistic-record fallback — mirroring the conversation bubble path.
+private fun buildTiles(
+    records: List<dev.ipf.marmotkit.AppMessageRecordFfi>,
+    cachedReferences: Map<String, List<MediaAttachmentReferenceFfi>?>,
+    myAccountId: String?,
+): SharedMediaTiles {
+    val inventory = MediaInventory.build(records)
+    val images = ArrayList<SharedMediaTile>()
+    val videos = ArrayList<SharedMediaTile>()
+    val voice = ArrayList<SharedMediaRow>()
+    val files = ArrayList<SharedMediaRow>()
+    for (record in records) {
+        val mine = MessageProjector.isMine(record, myAccountId)
+        val references =
+            cachedReferences[record.messageIdHex]
+                ?: MediaReferenceParser.parseAllImetaTags(record.tags)
+        references.forEachIndexed { index, reference ->
+            when {
+                MediaReferenceParser.isImageMedia(reference) ->
+                    images.add(
+                        SharedMediaTile(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender, isVideo = false),
+                    )
+                MediaReferenceParser.isVideoMedia(reference) ->
+                    videos.add(
+                        SharedMediaTile(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender, isVideo = true),
+                    )
+                MediaReferenceParser.isAudioMedia(reference) ->
+                    voice.add(
+                        SharedMediaRow(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender),
+                    )
+                else ->
+                    files.add(
+                        SharedMediaRow(record.messageIdHex, index, reference, mine, record.recordedAt, record.sender),
+                    )
             }
         }
-        // Newest first for the grids and the vertical lists.
-        images.reverse()
-        videos.reverse()
-        voice.reverse()
-        files.reverse()
-        // URLs are sorted newest-first to match the lists; the inventory keeps
-        // them in timeline order (oldest first).
-        val urls = inventory.urls.asReversed()
-        // Bare image-URL links carry no attachment index, so they aren't
-        // rendered in any grid/list; still count them so the section's
-        // "View shared media" entry point appears when they're the only media.
-        val linkedImageUrls = inventory.images.count { it.source is MediaInventory.Source.LinkedUrl }
-        SharedMediaTiles(
-            images = images,
-            videos = videos,
-            voice = voice,
-            files = files,
-            urls = urls,
-            hasOther = linkedImageUrls > 0,
-        )
     }
+    // Newest first for the grids and the vertical lists.
+    images.reverse()
+    videos.reverse()
+    voice.reverse()
+    files.reverse()
+    // URLs are sorted newest-first to match the lists; the inventory keeps
+    // them in timeline order (oldest first).
+    val urls = inventory.urls.asReversed()
+    // Bare image-URL links aren't rendered in any grid/list yet, so they don't
+    // count toward `hasOther` — otherwise a links-only conversation would show
+    // the "View shared media" entry into a library with every tab empty.
+    return SharedMediaTiles(
+        images = images,
+        videos = videos,
+        voice = voice,
+        files = files,
+        urls = urls,
+        hasOther = voice.isNotEmpty() || files.isNotEmpty() || urls.isNotEmpty(),
+    )
 }
 
 private val ThumbStripSize = 96.dp
@@ -327,7 +351,18 @@ internal fun MediaLibraryRoute(
     onBack: () -> Unit,
     onJumpToMessage: (String) -> Unit,
 ) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(MediaTab.Images.ordinal) }
+    // The entry point opens for video/voice/file/URL-only conversations too, so
+    // seed the selection to the first non-empty tab rather than always Images.
+    val initialTab =
+        when {
+            tiles.images.isNotEmpty() -> MediaTab.Images
+            tiles.videos.isNotEmpty() -> MediaTab.Videos
+            tiles.voice.isNotEmpty() -> MediaTab.Voice
+            tiles.files.isNotEmpty() -> MediaTab.Files
+            tiles.urls.isNotEmpty() -> MediaTab.Urls
+            else -> MediaTab.Images
+        }
+    var selectedTab by rememberSaveable { mutableIntStateOf(initialTab.ordinal) }
     // Cross-message viewer state. Pages span the whole tapped tab (images or
     // videos), so swiping crosses message boundaries; each page carries its own
     // message context. Keyed null when closed.
@@ -822,28 +857,30 @@ private fun FileLibraryRow(
                                 val saved =
                                     runCatching {
                                         val bytes = fetchBytes()
-                                        when {
-                                            row.reference.mediaType.startsWith("image/", ignoreCase = true) ->
-                                                saveImageToGallery(
-                                                    context,
-                                                    bytes,
-                                                    row.reference.fileName,
-                                                    row.reference.mediaType,
-                                                )
-                                            row.reference.mediaType.startsWith("video/", ignoreCase = true) ->
-                                                saveVideoToGallery(
-                                                    context,
-                                                    bytes,
-                                                    row.reference.fileName,
-                                                    row.reference.mediaType,
-                                                )
-                                            else ->
-                                                saveFileToDownloads(
-                                                    context,
-                                                    bytes,
-                                                    row.reference.fileName,
-                                                    row.reference.mediaType,
-                                                )
+                                        withContext(Dispatchers.IO) {
+                                            when {
+                                                row.reference.mediaType.startsWith("image/", ignoreCase = true) ->
+                                                    saveImageToGallery(
+                                                        context,
+                                                        bytes,
+                                                        row.reference.fileName,
+                                                        row.reference.mediaType,
+                                                    )
+                                                row.reference.mediaType.startsWith("video/", ignoreCase = true) ->
+                                                    saveVideoToGallery(
+                                                        context,
+                                                        bytes,
+                                                        row.reference.fileName,
+                                                        row.reference.mediaType,
+                                                    )
+                                                else ->
+                                                    saveFileToDownloads(
+                                                        context,
+                                                        bytes,
+                                                        row.reference.fileName,
+                                                        row.reference.mediaType,
+                                                    )
+                                            }
                                         }
                                     }.getOrDefault(false)
                                 appState.present(
@@ -888,12 +925,15 @@ private fun UrlLibraryTab(
     val clipboard = LocalClipboardManager.current
     val couldntOpenMessage = stringResource(R.string.media_couldnt_open)
     MonthSectionedColumn(
-        items = urls,
+        // The same URL can appear twice in one message, so include the
+        // occurrence position to keep list keys unique.
+        items = urls.withIndex().toList(),
         listState = listState,
         emptyLabel = stringResource(R.string.shared_media_empty_urls),
-        monthOf = { it.recordedAt },
-        keyOf = { "${it.messageIdHex}#${it.url}" },
-    ) { entry ->
+        monthOf = { it.value.recordedAt },
+        keyOf = { "${it.index}#${it.value.messageIdHex}#${it.value.url}" },
+    ) { indexed ->
+        val entry = indexed.value
         UrlLibraryRow(
             entry = entry,
             appState = appState,

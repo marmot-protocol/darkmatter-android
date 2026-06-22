@@ -58,6 +58,15 @@ class MediaInventoryTest {
     }
 
     @Test
+    fun imageExtensionInQueryOnlyIsAUrlNotAnImage() {
+        // The image extension is in the query, not the path — it's a normal link
+        // and must stay in the URLs bucket, not be misread as an image.
+        val inventory = MediaInventory.build(listOf(record(id = "m", body = link("https://example.com/article?file=cat.jpg"))))
+        assertTrue(inventory.images.isEmpty())
+        assertEquals(listOf("https://example.com/article?file=cat.jpg"), inventory.urls.map { it.url })
+    }
+
+    @Test
     fun nonHttpLinksAreIgnored() {
         val inventory = MediaInventory.build(listOf(record(id = "m", body = link("mailto:someone@example.com"))))
         assertTrue(inventory.isEmpty)
