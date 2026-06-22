@@ -14767,7 +14767,6 @@ private fun AccountSelectorSheet(
     onAddAccount: () -> Unit,
     onAccountSwitched: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         appState.refreshAccounts()
     }
@@ -14780,7 +14779,16 @@ private fun AccountSelectorSheet(
                     ListItem(
                         modifier =
                             Modifier.clickable {
-                                scope.launch {
+                                // Run on the process-lifetime mutation scope, not this
+                                // sheet's rememberCoroutineScope. setActiveAccount flips
+                                // activeAccountRef partway through and keeps suspending
+                                // (profile warm, notification refresh, push sync); the
+                                // account-change nav reset in MainShell then disposes this
+                                // sheet, which would cancel a sheet-scoped coroutine before
+                                // the switch cleanup finishes (#547). onDismiss /
+                                // onAccountSwitched only set parent composition state, so
+                                // they are safe to run from the mutation scope.
+                                appState.launchMutation {
                                     appState.setActiveAccount(account.label)
                                     onDismiss()
                                     // Land on the newly-active account's chat list
@@ -16181,7 +16189,14 @@ private fun IdentityScreen(
                     onClick = {
                         showWipeConfirm = false
                         wipeConfirmInput = ""
-                        scope.launch {
+                        // Run on the process-lifetime mutation scope, not this
+                        // screen's rememberCoroutineScope. signOutAndWipeActiveAccount
+                        // flips activeAccountRef partway through and keeps suspending
+                        // (push teardown, notification refresh); the account-change nav
+                        // reset in MainShell then pops IdentityScreen out of composition,
+                        // which would cancel a screen-scoped coroutine before the wipe
+                        // finishes and before the success toast is presented (#547).
+                        appState.launchMutation {
                             val outcome = appState.signOutAndWipeActiveAccount()
                             if (outcome != null) {
                                 appState.present(R.string.toast_signed_out_and_wiped)
