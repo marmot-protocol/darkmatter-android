@@ -2935,6 +2935,28 @@ internal fun shouldRestoreComposerFocusOnResume(
     hasActiveEditOrReplySession: Boolean = false,
 ): Boolean = wasComposerFocusedOnPause || hasActiveEditOrReplySession
 
+/**
+ * Whether the resume observer should actively clear focus and hide the keyboard
+ * (issue #589, Case B "keyboard was closed on leave").
+ *
+ * This is NOT the inverse of [shouldRestoreComposerFocusOnResume]. The clear/hide
+ * branch uses the screen-wide [androidx.compose.ui.focus.FocusManager], so it must
+ * not fire whenever *some other* text field legitimately owns focus and the
+ * keyboard. In-chat search (#292) is exactly that case: while the search bar is
+ * open the composer is not focused (so [shouldRestoreComposerFocusOnResume] is
+ * false), but the search field holds focus and the IME is up on purpose. Clearing
+ * focus here would drop the search field's focus and hide its keyboard, and
+ * `LaunchedEffect(searchOpen)` would not re-fire on resume to restore it —
+ * regressing the search UX after an app-switch.
+ *
+ * So: clear focus only when we are not restoring composer focus AND no other
+ * text field (currently just in-chat search) owns the focus/IME.
+ */
+internal fun shouldClearFocusOnResume(
+    restoringComposerFocus: Boolean,
+    searchOpen: Boolean,
+): Boolean = !restoringComposerFocus && !searchOpen
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NewChatSheet(
@@ -8002,10 +8024,23 @@ private fun ConversationScreen(
                                     // exactly as it was before the switch.
                                     runCatching { composerFocus.requestFocus() }
                                     keyboardController?.show()
-                                } else {
+                                } else if (shouldClearFocusOnResume(
+                                        restoringComposerFocus = restoreFocus,
+                                        searchOpen = searchOpen,
+                                    )
+                                ) {
                                     // Case B (was NOT focused): the system tried
                                     // to restore focus/IME — undo it so the
                                     // keyboard does not pop unrequested.
+                                    //
+                                    // Guarded on !searchOpen: in-chat search
+                                    // (#292) legitimately owns focus + IME while
+                                    // open, and clearFocus(force = true) is
+                                    // screen-wide. Clearing here would drop the
+                                    // search field's focus and hide its keyboard,
+                                    // and LaunchedEffect(searchOpen) does not
+                                    // re-fire on resume to restore it — so we
+                                    // leave focus untouched while search is open.
                                     focusManager.clearFocus(force = true)
                                     keyboardController?.hide()
                                 }

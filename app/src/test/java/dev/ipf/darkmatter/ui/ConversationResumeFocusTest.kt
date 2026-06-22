@@ -62,4 +62,53 @@ class ConversationResumeFocusTest {
             ),
         )
     }
+
+    @Test
+    fun clearsFocusWhenNotRestoringAndSearchClosed() {
+        // Case B (keyboard closed on leave, search not involved): the resume
+        // observer must actively clear focus + hide the keyboard so the system
+        // does not pop it open unrequested.
+        assertTrue(
+            shouldClearFocusOnResume(
+                restoringComposerFocus = false,
+                searchOpen = false,
+            ),
+        )
+    }
+
+    @Test
+    fun doesNotClearFocusWhileSearchOpen() {
+        // #589 regression / #292 guard: in-chat search legitimately owns focus
+        // and the keyboard while open. The screen-wide clearFocus(force = true)
+        // must NOT fire on resume in that state, or the search field loses focus
+        // and its keyboard hides with nothing to restore it.
+        assertFalse(
+            shouldClearFocusOnResume(
+                restoringComposerFocus = false,
+                searchOpen = true,
+            ),
+        )
+    }
+
+    @Test
+    fun doesNotClearFocusWhenRestoringComposerFocus() {
+        // When we are restoring composer focus, the destructive clear branch must
+        // not also fire — the two outcomes are mutually exclusive.
+        assertFalse(
+            shouldClearFocusOnResume(
+                restoringComposerFocus = true,
+                searchOpen = false,
+            ),
+        )
+    }
+
+    @Test
+    fun doesNotClearFocusWhenRestoringAndSearchOpen() {
+        assertFalse(
+            shouldClearFocusOnResume(
+                restoringComposerFocus = true,
+                searchOpen = true,
+            ),
+        )
+    }
 }
