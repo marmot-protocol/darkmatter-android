@@ -240,6 +240,28 @@ internal fun chatRowPreviewMarkdownSource(row: ChatListRowFfi): String? {
 }
 
 /**
+ * Distinct, non-blank account ids whose profile presentation a timeline page
+ * needs painted: every message author, every reply-preview author, and every
+ * reaction author. First-seen order is preserved so the warm pass below favors
+ * the rows nearest the top of the page. Used to pre-warm local profile
+ * presentations before the first composition so sender names + avatars don't
+ * pop in a few frames after the message bubble. See #609.
+ */
+internal fun timelineRecordProfileSenders(records: Iterable<TimelineMessageRecordFfi>): List<String> {
+    val senders = linkedSetOf<String>()
+
+    fun add(id: String) {
+        if (id.isNotBlank()) senders.add(id)
+    }
+    records.forEach { record ->
+        add(record.sender)
+        record.replyPreview?.let { add(it.sender) }
+        record.reactions.userReactions.forEach { add(it.sender) }
+    }
+    return senders.toList()
+}
+
+/**
  * Next optimistic timelineOrder: one past the max across both the published
  * timeline and the in-flight optimistic items. Including `pending` is what
  * stops back-to-back optimistic sends from colliding while a publish is still
@@ -3791,6 +3813,14 @@ class ConversationController(
                 }
             }
         }
+        // Pre-warm local profile presentations for everyone this page references
+        // (message authors, reply-preview authors, reaction authors) before the
+        // publish below kicks off the first composition. The requestProfile calls
+        // above are the gated *relay* refresh (network); this is the ungated
+        // *local* read each row would otherwise lazily fire on its own first
+        // paint — pulling it forward in one batch closes the per-row sender
+        // name/avatar hydration flicker for already-on-device history. See #609.
+        appState.warmProfilePresentations(timelineRecordProfileSenders(page.messages))
         if (updatePagination) {
             hasMoreBefore = page.hasMoreBefore
         }

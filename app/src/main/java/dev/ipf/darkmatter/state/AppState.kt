@@ -2345,6 +2345,32 @@ class DarkMatterAppState(
         accountIdHexes.forEach { requestProfile(it) }
     }
 
+    /**
+     * Eagerly materialize the *local* profile presentation (display name +
+     * avatar URL) for each id from on-device storage, ahead of any row asking
+     * for it. The lazy path ([profilePresentation] → [ensureProfileMaterialized])
+     * only fires when a composable first reads `displayName`/`avatarUrl` during
+     * its initial paint, so for a chat whose history is already on device the
+     * sender name + avatar slot render empty for a few frames and then pop in
+     * once the off-main local read lands and bumps [profileRevision] (#609).
+     *
+     * Calling this when a timeline page is applied — before the first
+     * composition publishes — warms `profilePresentations` from the same local,
+     * ungated, off-main read the row would otherwise trigger one frame later, so
+     * the name + avatar URL are present on (or within a frame of) the first
+     * paint instead of after a network round-trip. This is *not* a new
+     * Android-owned data cache: it reuses the existing in-memory presentation
+     * materialization, just scheduled proactively. The gated relay refresh for
+     * freshness stays the job of [requestProfile]/[requestProfiles].
+     */
+    fun warmProfilePresentations(accountIdHexes: Iterable<String>) {
+        accountIdHexes.forEach { id ->
+            val trimmed = id.trim()
+            if (trimmed.isEmpty()) return@forEach
+            ensureProfileMaterialized(trimmed)
+        }
+    }
+
     fun cachedGroupMemberSnapshot(
         accountRef: String?,
         groupIdHex: String,
