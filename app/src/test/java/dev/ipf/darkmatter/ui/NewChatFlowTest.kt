@@ -65,6 +65,48 @@ class NewChatFlowTest {
     }
 
     @Test
+    fun recipientPreviewMapsResolutionSignalsToState() {
+        // Empty input -> no card.
+        assertEquals(
+            RecipientPreviewState.Empty,
+            recipientPreviewState(hasInput = false, resolving = false, resolvedHex = null, hasProfile = false),
+        )
+        // Resolving wins over a not-yet-known key (NIP-05 lookup / kind:0 fetch).
+        assertEquals(
+            RecipientPreviewState.Resolving,
+            recipientPreviewState(hasInput = true, resolving = true, resolvedHex = null, hasProfile = false),
+        )
+        // Settled with no key -> invalid.
+        assertEquals(
+            RecipientPreviewState.Invalid,
+            recipientPreviewState(hasInput = true, resolving = false, resolvedHex = null, hasProfile = false),
+        )
+        // Resolved with metadata -> full card.
+        assertEquals(
+            RecipientPreviewState.Loaded,
+            recipientPreviewState(hasInput = true, resolving = false, resolvedHex = "deadbeef", hasProfile = true),
+        )
+        // Resolved but no metadata -> fallback card.
+        assertEquals(
+            RecipientPreviewState.NoProfile,
+            recipientPreviewState(hasInput = true, resolving = false, resolvedHex = "deadbeef", hasProfile = false),
+        )
+    }
+
+    @Test
+    fun recipientPreviewGatesSubmitOnlyForResolvingOrInvalid() {
+        // Loaded and no-profile both confirm a real key -> action allowed.
+        assertTrue(recipientPreviewAllowsSubmit(RecipientPreviewState.Loaded))
+        assertTrue(recipientPreviewAllowsSubmit(RecipientPreviewState.NoProfile))
+        // Empty defers to the surface's own validation (e.g. group create with
+        // no recipient field) -> not blocked here.
+        assertTrue(recipientPreviewAllowsSubmit(RecipientPreviewState.Empty))
+        // In-flight / unresolvable identifiers block the action.
+        assertFalse(recipientPreviewAllowsSubmit(RecipientPreviewState.Resolving))
+        assertFalse(recipientPreviewAllowsSubmit(RecipientPreviewState.Invalid))
+    }
+
+    @Test
     fun emptyGroupInviteCtaRequiresLoadedAdminSelfOnlyGroup() {
         assertTrue(
             canInviteFromEmptyGroup(
