@@ -71,6 +71,15 @@ class LocalNotificationPresenterDecisionTest {
     }
 
     @Test
+    fun groupInviteWithBlankGroupIdUsesPlainStyleAndNoActions() {
+        val decision = decision(update(trigger = NotificationTriggerFfi.GROUP_INVITE, groupIdHex = ""))
+
+        assertSame(NotificationStyleChoice.Plain, decision?.style)
+        assertEquals(emptyList<NotificationActionKind>(), decision?.actions)
+        assertEquals(0, decision?.historyCap)
+    }
+
+    @Test
     fun historyCapCarriesOnlyPreviousMessagesThatFitBesideTheNewOne() {
         val decision = decision(update(trigger = NotificationTriggerFfi.NEW_MESSAGE)) ?: error("missing decision")
         val oldHistory = (1..30).toList()
@@ -80,17 +89,21 @@ class LocalNotificationPresenterDecisionTest {
     }
 
     @Test
-    fun channelRoutingMatchesNotificationChannelSpecForEachPostKind() {
-        val updates =
+    fun channelRoutingReturnsConcreteChannelIdsForEachPostKind() {
+        val updatesWithExpectedChannels =
             listOf(
-                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = true),
-                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false),
-                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false, reactionEmoji = "❤️"),
-                update(trigger = NotificationTriggerFfi.GROUP_INVITE),
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = true) to
+                    NotificationChannelSpec.DIRECT_MESSAGES.id,
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false) to
+                    NotificationChannelSpec.GROUP_MESSAGES.id,
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false, reactionEmoji = "❤️") to
+                    NotificationChannelSpec.REACTIONS.id,
+                update(trigger = NotificationTriggerFfi.GROUP_INVITE) to
+                    NotificationChannelSpec.INVITES.id,
             )
 
-        updates.forEach { update ->
-            assertEquals(NotificationChannelSpec.forUpdate(update).id, decision(update)?.channelId)
+        updatesWithExpectedChannels.forEach { (update, expectedChannelId) ->
+            assertEquals(expectedChannelId, decision(update)?.channelId)
         }
     }
 
