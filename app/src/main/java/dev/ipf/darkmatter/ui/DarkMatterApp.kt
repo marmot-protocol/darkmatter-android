@@ -3346,6 +3346,7 @@ private fun MediaImageBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPress: () -> Unit = {},
     uploading: Boolean = false,
 ) {
     val record = item.record
@@ -3456,7 +3457,10 @@ private fun MediaImageBubble(
                         modifier =
                             Modifier
                                 .fillMaxSize()
-                                .clickable { viewerOpen = true },
+                                .combinedClickable(
+                                    onLongClick = onLongPress,
+                                    onClick = { viewerOpen = true },
+                                ),
                     )
                 failed ->
                     MediaCircleAction(
@@ -3523,6 +3527,7 @@ private fun MediaImageBubble(
 @Composable
 private fun MasonryImageLayout(
     visibleCount: Int,
+    onLongPress: () -> Unit = {},
     tile: @Composable (index: Int, tileModifier: Modifier) -> Unit,
 ) {
     when (visibleCount) {
@@ -3581,6 +3586,7 @@ private fun MediaImageGridBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPress: () -> Unit = {},
 ) {
     val record = item.record
     // Show up to four tiles before collapsing the remainder into a "+N"
@@ -3603,6 +3609,7 @@ private fun MediaImageGridBubble(
             onTap = { viewerOpenAt = tileIndex },
             overflowCount = if (showOverflow) overflow else 0,
             modifier = tileModifier,
+            onLongPress = onLongPress,
         )
     }
 
@@ -3611,7 +3618,7 @@ private fun MediaImageGridBubble(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        MasonryImageLayout(visibleCount = visible.size, tile = tileAt)
+        MasonryImageLayout(visibleCount = visible.size, onLongPress = onLongPress, tile = tileAt)
     }
 
     viewerOpenAt?.let { index ->
@@ -3639,6 +3646,7 @@ private fun MediaVisualGridBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPress: () -> Unit = {},
     uploading: Boolean = false,
 ) {
     val record = item.record
@@ -3662,6 +3670,7 @@ private fun MediaVisualGridBubble(
                 onTap = { _ -> viewerOpenAt = tileIndex },
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
+                onLongPress = onLongPress,
                 uploading = uploading,
             )
         } else {
@@ -3675,6 +3684,7 @@ private fun MediaVisualGridBubble(
                 onTap = { viewerOpenAt = tileIndex },
                 overflowCount = if (showOverflow) overflow else 0,
                 modifier = tileModifier,
+                onLongPress = onLongPress,
                 uploading = uploading,
             )
         }
@@ -3685,7 +3695,7 @@ private fun MediaVisualGridBubble(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        MasonryImageLayout(visibleCount = visible.size, tile = tileAt)
+        MasonryImageLayout(visibleCount = visible.size, onLongPress = onLongPress, tile = tileAt)
     }
 
     viewerOpenAt?.let { tileIndex ->
@@ -3724,6 +3734,7 @@ private fun MediaVideoGridTile(
     onTap: (java.io.File) -> Unit,
     overflowCount: Int,
     modifier: Modifier = Modifier,
+    onLongPress: () -> Unit = {},
     uploading: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -3784,10 +3795,13 @@ private fun MediaVideoGridTile(
 
     Box(
         modifier =
-            modifier.clickable {
-                val f = localFile
-                if (f != null) onTap(f) else startDownload = true
-            },
+            modifier.combinedClickable(
+                onLongClick = onLongPress,
+                onClick = {
+                    val f = localFile
+                    if (f != null) onTap(f) else startDownload = true
+                },
+            ),
     ) {
         val poster = posterBitmap
         when {
@@ -3895,6 +3909,7 @@ private fun MediaImageGridTile(
     onTap: () -> Unit,
     overflowCount: Int,
     modifier: Modifier = Modifier,
+    onLongPress: () -> Unit = {},
     uploading: Boolean = false,
 ) {
     // Two-bucket key model (mirrors `MediaImageBubble`):
@@ -3958,7 +3973,8 @@ private fun MediaImageGridTile(
 
     Box(
         modifier =
-            modifier.clickable(
+            modifier.combinedClickable(
+                onLongClick = onLongPress,
                 // Two modes:
                 //   - Bytes ready (`bitmap != null`): tap opens the viewer.
                 //   - Auto-download gated: tap flips startDownload, so the
@@ -4059,6 +4075,7 @@ private fun MediaFileBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPress: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -4115,59 +4132,63 @@ private fun MediaFileBubble(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !inFlight) {
-                    failed = false
-                    // Tap is an explicit opt-in: ensure the gate is open so a
-                    // policy-gated file still fetches on demand.
-                    startDownload = true
-                    inFlight = true
-                    scope.launch {
-                        val outcome =
-                            runCatching {
-                                // For own sends, the retained-uploads LRU still
-                                // holds the source plaintext during the upload
-                                // window. Prefer those bytes — the FFI download
-                                // path is mid-flight (the blob may not have
-                                // fully propagated through the Blossom server
-                                // yet) and would otherwise return invalid bytes
-                                // that the system reader rejects.
-                                val retained =
-                                    if (mine) {
-                                        controller
-                                            .pendingAttachmentsList(messageIdHex)
-                                            .getOrNull(attachmentIndex)
-                                            ?.plaintextBytes
-                                    } else {
-                                        null
-                                    }
-                                val data =
-                                    retained
-                                        ?: controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
-                                cached = true
-                                openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
-                            }.onFailure {
-                                // Swipe-up / screen-dispose cancels this
-                                // coroutine. The download itself continues on
-                                // `mutationsScope` and lands in the cache —
-                                // rethrow so the launch dies quietly instead
-                                // of misreporting cancellation as a generic
-                                // "couldn't open file" toast.
-                                if (it is kotlinx.coroutines.CancellationException) throw it
-                            }.getOrDefault(OpenAttachmentResult.Error)
-                        when (outcome) {
-                            OpenAttachmentResult.Opened -> Unit
-                            OpenAttachmentResult.NoHandler -> {
-                                failed = true
-                                appState.present(noOpenAppMessage)
+                .combinedClickable(
+                    enabled = !inFlight,
+                    onLongClick = onLongPress,
+                    onClick = {
+                        failed = false
+                        // Tap is an explicit opt-in: ensure the gate is open so a
+                        // policy-gated file still fetches on demand.
+                        startDownload = true
+                        inFlight = true
+                        scope.launch {
+                            val outcome =
+                                runCatching {
+                                    // For own sends, the retained-uploads LRU still
+                                    // holds the source plaintext during the upload
+                                    // window. Prefer those bytes — the FFI download
+                                    // path is mid-flight (the blob may not have
+                                    // fully propagated through the Blossom server
+                                    // yet) and would otherwise return invalid bytes
+                                    // that the system reader rejects.
+                                    val retained =
+                                        if (mine) {
+                                            controller
+                                                .pendingAttachmentsList(messageIdHex)
+                                                .getOrNull(attachmentIndex)
+                                                ?.plaintextBytes
+                                        } else {
+                                            null
+                                        }
+                                    val data =
+                                        retained
+                                            ?: controller.downloadAttachment(messageIdHex, attachmentIndex, reference)
+                                    cached = true
+                                    openAttachmentExternally(context, data, reference.fileName, reference.mediaType)
+                                }.onFailure {
+                                    // Swipe-up / screen-dispose cancels this
+                                    // coroutine. The download itself continues on
+                                    // `mutationsScope` and lands in the cache —
+                                    // rethrow so the launch dies quietly instead
+                                    // of misreporting cancellation as a generic
+                                    // "couldn't open file" toast.
+                                    if (it is kotlinx.coroutines.CancellationException) throw it
+                                }.getOrDefault(OpenAttachmentResult.Error)
+                            when (outcome) {
+                                OpenAttachmentResult.Opened -> Unit
+                                OpenAttachmentResult.NoHandler -> {
+                                    failed = true
+                                    appState.present(noOpenAppMessage)
+                                }
+                                OpenAttachmentResult.Error -> {
+                                    failed = true
+                                    appState.present(couldntOpenMessage)
+                                }
                             }
-                            OpenAttachmentResult.Error -> {
-                                failed = true
-                                appState.present(couldntOpenMessage)
-                            }
+                            inFlight = false
                         }
-                        inFlight = false
-                    }
-                },
+                    },
+                ),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -4233,6 +4254,7 @@ private fun MediaVideoBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPress: () -> Unit = {},
     uploading: Boolean = false,
     uploadFailed: Boolean = false,
     onRetryUpload: (() -> Unit)? = null,
@@ -4352,19 +4374,22 @@ private fun MediaVideoBubble(
                 modifier =
                     Modifier
                         .size(56.dp)
-                        .clickable {
-                            when {
-                                uploadFailed -> onRetryUpload?.invoke()
-                                else -> {
-                                    val f = localFile
-                                    if (f != null) {
-                                        playerOpen = true
-                                    } else {
-                                        startDownload = true
+                        .combinedClickable(
+                            onLongClick = onLongPress,
+                            onClick = {
+                                when {
+                                    uploadFailed -> onRetryUpload?.invoke()
+                                    else -> {
+                                        val f = localFile
+                                        if (f != null) {
+                                            playerOpen = true
+                                        } else {
+                                            startDownload = true
+                                        }
                                     }
                                 }
-                            }
-                        },
+                            },
+                        ),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     when {
@@ -4574,6 +4599,7 @@ private fun MediaVoiceBubble(
     controller: ConversationController,
     appState: DarkMatterAppState,
     mine: Boolean,
+    onLongPress: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -4698,46 +4724,50 @@ private fun MediaVoiceBubble(
                 modifier =
                     Modifier
                         .size(48.dp)
-                        .clickable(enabled = !loading) {
-                            failed = false
-                            // First tap on an un-fetched, auto-download-off clip
-                            // is a Download affordance: opt in and let the
-                            // gated effect fetch it, rather than fetch+play in
-                            // one tap. Mirrors the video bubble's tap-to-fetch.
-                            if (!startDownload && localFile == null) {
-                                startDownload = true
-                                return@clickable
-                            }
-                            if (isPlayingThis) {
-                                dev.ipf.darkmatter.audio.VoicePlaybackController
-                                    .pause()
-                                return@clickable
-                            }
-                            scope.launch {
-                                val file =
-                                    localFile ?: runCatching {
-                                        loading = true
-                                        materializeVoiceAttachment(
-                                            context = context,
-                                            controller = controller,
-                                            messageIdHex = messageIdHex,
-                                            attachmentIndex = attachmentIndex,
-                                            reference = reference,
-                                            mine = mine,
-                                        )
-                                    }.onFailure {
-                                        if (it is kotlinx.coroutines.CancellationException) throw it
-                                        Log.w("MediaVoiceBubble", "materialize failed for msg=${messageIdHex.take(8)}#$attachmentIndex", it)
-                                        failed = true
-                                    }.also { loading = false }
-                                        .getOrNull()
+                        .combinedClickable(
+                            enabled = !loading,
+                            onLongClick = onLongPress,
+                            onClick = {
+                                failed = false
+                                // First tap on an un-fetched, auto-download-off clip
+                                // is a Download affordance: opt in and let the
+                                // gated effect fetch it, rather than fetch+play in
+                                // one tap. Mirrors the video bubble's tap-to-fetch.
+                                if (!startDownload && localFile == null) {
+                                    startDownload = true
+                                    return@combinedClickable
+                                }
+                                if (isPlayingThis) {
+                                    dev.ipf.darkmatter.audio.VoicePlaybackController
+                                        .pause()
+                                    return@combinedClickable
+                                }
+                                scope.launch {
+                                    val file =
+                                        localFile ?: runCatching {
+                                            loading = true
+                                            materializeVoiceAttachment(
+                                                context = context,
+                                                controller = controller,
+                                                messageIdHex = messageIdHex,
+                                                attachmentIndex = attachmentIndex,
+                                                reference = reference,
+                                                mine = mine,
+                                            )
+                                        }.onFailure {
+                                            if (it is kotlinx.coroutines.CancellationException) throw it
+                                            Log.w("MediaVoiceBubble", "materialize failed for msg=${messageIdHex.take(8)}#$attachmentIndex", it)
+                                            failed = true
+                                        }.also { loading = false }
+                                            .getOrNull()
 
-                                if (file == null) return@launch
-                                localFile = file
-                                dev.ipf.darkmatter.audio.VoicePlaybackController
-                                    .play(pillKey, file)
-                            }
-                        },
+                                    if (file == null) return@launch
+                                    localFile = file
+                                    dev.ipf.darkmatter.audio.VoicePlaybackController
+                                        .play(pillKey, file)
+                                }
+                            },
+                        ),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     when {
@@ -10824,6 +10854,10 @@ private fun MessageBubble(
                                         mine = mine,
                                         controller = controller,
                                         appState = appState,
+                                        onLongPress = {
+                                            longPressWindowY = null
+                                            onActionMenuOpenChange(true)
+                                        },
                                     )
                                 } else {
                                     MediaImageBubble(
@@ -10833,6 +10867,10 @@ private fun MessageBubble(
                                         controller = controller,
                                         appState = appState,
                                         mine = mine,
+                                        onLongPress = {
+                                            longPressWindowY = null
+                                            onActionMenuOpenChange(true)
+                                        },
                                     )
                                 }
                                 if (footerOnVisualMedia) {
@@ -10850,6 +10888,10 @@ private fun MessageBubble(
                                 controller = controller,
                                 appState = appState,
                                 mine = mine,
+                                onLongPress = {
+                                    longPressWindowY = null
+                                    onActionMenuOpenChange(true)
+                                },
                             )
                         }
                     }
@@ -10862,6 +10904,10 @@ private fun MessageBubble(
                                 mine = mine,
                                 controller = controller,
                                 appState = appState,
+                                onLongPress = {
+                                    longPressWindowY = null
+                                    onActionMenuOpenChange(true)
+                                },
                             )
                         }
                     }
@@ -10874,6 +10920,10 @@ private fun MessageBubble(
                                 mine = mine,
                                 controller = controller,
                                 appState = appState,
+                                onLongPress = {
+                                    longPressWindowY = null
+                                    onActionMenuOpenChange(true)
+                                },
                             )
                         }
                     }
@@ -10900,6 +10950,10 @@ private fun MessageBubble(
                                 mine = true,
                                 controller = controller,
                                 appState = appState,
+                                onLongPress = {
+                                    longPressWindowY = null
+                                    onActionMenuOpenChange(true)
+                                },
                             )
                         }
                     }
@@ -10919,6 +10973,10 @@ private fun MessageBubble(
                                         mine = true,
                                         controller = controller,
                                         appState = appState,
+                                        onLongPress = {
+                                            longPressWindowY = null
+                                            onActionMenuOpenChange(true)
+                                        },
                                         uploading = !uploadFailed,
                                         uploadFailed = uploadFailed,
                                         onRetryUpload = if (uploadFailed) retryUpload else null,
@@ -10931,6 +10989,10 @@ private fun MessageBubble(
                                         controller = controller,
                                         appState = appState,
                                         mine = true,
+                                        onLongPress = {
+                                            longPressWindowY = null
+                                            onActionMenuOpenChange(true)
+                                        },
                                         uploading = !uploadFailed,
                                     )
                                 }
@@ -10947,6 +11009,10 @@ private fun MessageBubble(
                                 controller = controller,
                                 appState = appState,
                                 mine = true,
+                                onLongPress = {
+                                    longPressWindowY = null
+                                    onActionMenuOpenChange(true)
+                                },
                                 uploading = !uploadFailed,
                             )
                         }
