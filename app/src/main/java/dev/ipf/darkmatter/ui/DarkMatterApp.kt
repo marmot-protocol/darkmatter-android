@@ -10841,6 +10841,14 @@ private fun MessageBubble(
                 // own object (#527). Behavior — download gating, single-visual
                 // footer overlay, tap-to-open viewers, upload/failed/retry — is
                 // unchanged from the in-bubble version.
+                // Long-press on any media tile opens the action menu (not the
+                // viewer); anchored to the bubble top like the accessibility
+                // long-click path. Hoisted so every media call site shares one
+                // definition.
+                val onMediaLongPress: () -> Unit = {
+                    longPressWindowY = null
+                    onActionMenuOpenChange(true)
+                }
                 val mediaBlocks: @Composable ColumnScope.() -> Unit = {
                     if (!deleted && !invalidated && visualAttachments.isNotEmpty()) {
                         if (visualAttachments.size == 1) {
@@ -10854,10 +10862,7 @@ private fun MessageBubble(
                                         mine = mine,
                                         controller = controller,
                                         appState = appState,
-                                        onLongPress = {
-                                            longPressWindowY = null
-                                            onActionMenuOpenChange(true)
-                                        },
+                                        onLongPress = onMediaLongPress,
                                     )
                                 } else {
                                     MediaImageBubble(
@@ -10867,10 +10872,7 @@ private fun MessageBubble(
                                         controller = controller,
                                         appState = appState,
                                         mine = mine,
-                                        onLongPress = {
-                                            longPressWindowY = null
-                                            onActionMenuOpenChange(true)
-                                        },
+                                        onLongPress = onMediaLongPress,
                                     )
                                 }
                                 if (footerOnVisualMedia) {
@@ -10888,10 +10890,7 @@ private fun MessageBubble(
                                 controller = controller,
                                 appState = appState,
                                 mine = mine,
-                                onLongPress = {
-                                    longPressWindowY = null
-                                    onActionMenuOpenChange(true)
-                                },
+                                onLongPress = onMediaLongPress,
                             )
                         }
                     }
@@ -10904,10 +10903,7 @@ private fun MessageBubble(
                                 mine = mine,
                                 controller = controller,
                                 appState = appState,
-                                onLongPress = {
-                                    longPressWindowY = null
-                                    onActionMenuOpenChange(true)
-                                },
+                                onLongPress = onMediaLongPress,
                             )
                         }
                     }
@@ -10920,10 +10916,7 @@ private fun MessageBubble(
                                 mine = mine,
                                 controller = controller,
                                 appState = appState,
-                                onLongPress = {
-                                    longPressWindowY = null
-                                    onActionMenuOpenChange(true)
-                                },
+                                onLongPress = onMediaLongPress,
                             )
                         }
                     }
@@ -10950,10 +10943,7 @@ private fun MessageBubble(
                                 mine = true,
                                 controller = controller,
                                 appState = appState,
-                                onLongPress = {
-                                    longPressWindowY = null
-                                    onActionMenuOpenChange(true)
-                                },
+                                onLongPress = onMediaLongPress,
                             )
                         }
                     }
@@ -10973,10 +10963,7 @@ private fun MessageBubble(
                                         mine = true,
                                         controller = controller,
                                         appState = appState,
-                                        onLongPress = {
-                                            longPressWindowY = null
-                                            onActionMenuOpenChange(true)
-                                        },
+                                        onLongPress = onMediaLongPress,
                                         uploading = !uploadFailed,
                                         uploadFailed = uploadFailed,
                                         onRetryUpload = if (uploadFailed) retryUpload else null,
@@ -10989,10 +10976,7 @@ private fun MessageBubble(
                                         controller = controller,
                                         appState = appState,
                                         mine = true,
-                                        onLongPress = {
-                                            longPressWindowY = null
-                                            onActionMenuOpenChange(true)
-                                        },
+                                        onLongPress = onMediaLongPress,
                                         uploading = !uploadFailed,
                                     )
                                 }
@@ -11009,10 +10993,7 @@ private fun MessageBubble(
                                 controller = controller,
                                 appState = appState,
                                 mine = true,
-                                onLongPress = {
-                                    longPressWindowY = null
-                                    onActionMenuOpenChange(true)
-                                },
+                                onLongPress = onMediaLongPress,
                                 uploading = !uploadFailed,
                             )
                         }
