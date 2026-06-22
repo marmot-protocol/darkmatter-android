@@ -16,17 +16,23 @@ internal data class AutoAcceptedInviteBannerState(
 internal object AutoAcceptedInviteMarkers {
     const val BADGE_TTL_MILLIS: Long = 24L * 60L * 60L * 1_000L
 
+    // Unit Separator is outside the hex identifiers/timestamps/booleans stored
+    // here. Keep malformed future fields from corrupting the whole StringSet.
     private const val SEP = "\u001F"
 
-    fun encode(marker: AutoAcceptedInviteMarker): String =
-        listOf(
-            marker.accountRef,
-            marker.groupIdHex,
-            marker.invitedAtMs.toString(),
-            marker.inviterAccountIdHex.orEmpty(),
-            marker.opened.toString(),
-            marker.bannerDismissed.toString(),
-        ).joinToString(SEP)
+    private fun encode(marker: AutoAcceptedInviteMarker): String? {
+        val fields =
+            listOf(
+                marker.accountRef,
+                marker.groupIdHex,
+                marker.invitedAtMs.toString(),
+                marker.inviterAccountIdHex.orEmpty(),
+                marker.opened.toString(),
+                marker.bannerDismissed.toString(),
+            )
+        if (fields.any { SEP in it }) return null
+        return fields.joinToString(SEP)
+    }
 
     fun decode(raw: String): AutoAcceptedInviteMarker? {
         val parts = raw.split(SEP, limit = 6)
@@ -64,22 +70,25 @@ internal object AutoAcceptedInviteMarkers {
         groupIdHex: String,
         invitedAtMs: Long,
         inviterAccountIdHex: String?,
+        opened: Boolean = false,
     ): Set<String> {
+        val existing = markerFor(encoded, accountRef, groupIdHex)
         val replacement =
             AutoAcceptedInviteMarker(
                 accountRef = accountRef,
                 groupIdHex = groupIdHex,
                 invitedAtMs = invitedAtMs,
                 inviterAccountIdHex = inviterAccountIdHex?.takeIf { it.isNotBlank() },
-                opened = markerFor(encoded, accountRef, groupIdHex)?.opened ?: false,
-                bannerDismissed = markerFor(encoded, accountRef, groupIdHex)?.bannerDismissed ?: false,
+                opened = existing?.opened == true || opened,
+                bannerDismissed = existing?.bannerDismissed ?: false,
             )
+        val encodedReplacement = encode(replacement) ?: return encoded
         return encoded
             .asSequence()
             .mapNotNull(::decode)
             .filterNot { it.accountRef == accountRef && it.groupIdHex.equals(groupIdHex, ignoreCase = true) }
-            .map(::encode)
-            .toSet() + encode(replacement)
+            .mapNotNull(::encode)
+            .toSet() + encodedReplacement
     }
 
     fun markOpened(
@@ -104,7 +113,7 @@ internal object AutoAcceptedInviteMarkers {
             .asSequence()
             .mapNotNull(::decode)
             .filterNot { it.accountRef == account && it.groupIdHex.equals(groupIdHex, ignoreCase = true) }
-            .map(::encode)
+            .mapNotNull(::encode)
             .toSet()
     }
 
@@ -137,7 +146,7 @@ internal object AutoAcceptedInviteMarkers {
                     } else {
                         marker
                     }
-                }.map(::encode)
+                }.mapNotNull(::encode)
                 .toSet()
         return if (changed) updated else encoded
     }

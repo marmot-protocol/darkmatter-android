@@ -54,6 +54,37 @@ class AutoAcceptedInviteMarkersTest {
     }
 
     @Test
+    fun upsertCanSeedOpenedForAlreadyActiveConversation() {
+        val encoded =
+            AutoAcceptedInviteMarkers.upsert(
+                encoded = emptySet(),
+                accountRef = "account-a",
+                groupIdHex = "group-a",
+                invitedAtMs = 1_000L,
+                inviterAccountIdHex = "alice",
+                opened = true,
+            )
+        val marker = AutoAcceptedInviteMarkers.markerFor(encoded, "account-a", "group-a")
+
+        assertFalse(AutoAcceptedInviteMarkers.badgeVisible(marker, nowMs = 1_000L))
+        assertEquals("alice", AutoAcceptedInviteMarkers.bannerState(marker)?.inviterAccountIdHex)
+    }
+
+    @Test
+    fun upsertIgnoresMalformedFieldsContainingSeparator() {
+        val encoded =
+            AutoAcceptedInviteMarkers.upsert(
+                encoded = emptySet(),
+                accountRef = "account\u001Fbad",
+                groupIdHex = "group-a",
+                invitedAtMs = 1_000L,
+                inviterAccountIdHex = "alice",
+            )
+
+        assertTrue(encoded.isEmpty())
+    }
+
+    @Test
     fun removeClearsMarkerForOneAccountAndGroup() {
         val accountA =
             AutoAcceptedInviteMarkers.upsert(

@@ -925,10 +925,11 @@ class DarkMatterAppState(
             mutationsScope.async {
                 runCatching {
                     val accepted = marmotIo { acceptGroupInvite(account, groupId) }
+                    val acceptedGroupId = accepted.groupIdHex.takeIf { it.isNotBlank() } ?: groupId
                     val inviter = accepted.welcomerAccountIdHex?.takeIf { it.isNotBlank() } ?: inviterAccountIdHex?.takeIf { it.isNotBlank() }
                     rememberAutoAcceptedInvite(
                         accountRef = account,
-                        groupIdHex = accepted.groupIdHex.takeIf { it.isNotBlank() } ?: groupId,
+                        groupIdHex = acceptedGroupId,
                         inviterAccountIdHex = inviter,
                     )
                     inviter?.let(::requestProfile)
@@ -966,6 +967,7 @@ class DarkMatterAppState(
         groupIdHex: String,
         inviterAccountIdHex: String?,
     ) {
+        val opened = isActiveConversation(accountRef, groupIdHex)
         updateAutoAcceptedInviteMarkers {
             AutoAcceptedInviteMarkers.upsert(
                 encoded = it,
@@ -973,9 +975,17 @@ class DarkMatterAppState(
                 groupIdHex = groupIdHex,
                 invitedAtMs = System.currentTimeMillis(),
                 inviterAccountIdHex = inviterAccountIdHex,
+                opened = opened,
             )
         }
     }
+
+    private fun isActiveConversation(
+        accountRef: String,
+        groupIdHex: String,
+    ): Boolean =
+        activeConversationAccountRef == accountRef &&
+            activeConversationGroupIdHex?.equals(groupIdHex, ignoreCase = true) == true
 
     private fun autoAcceptedInviteEncoded(): Set<String> = preferences.getStringSet(AUTO_ACCEPTED_INVITES_KEY, emptySet()).orEmpty().toSet()
 
@@ -2741,6 +2751,68 @@ class DarkMatterAppState(
             groupOfPeopleFormat = appContext.getString(R.string.group_title_people_count),
         )
 
+    private suspend fun postNotificationUpdate(
+        update: NotificationUpdateFfi,
+        autoAcceptedInvite: AppGroupRecordFfi? = null,
+    ) {
+        val activeConversation = activeConversationGroupIdHex
+        val shouldPost =
+            LocalNotificationPolicy.shouldPost(
+                update = update,
+                appInForeground = appInForeground,
+                activeConversationGroupIdHex = activeConversation,
+                activeConversationAccountRef = activeConversationAccountRef,
+            )
+        appStateDebug {
+            "notification update key=${update.notificationKey.take(16)} trigger=${update.trigger} " +
+                "foreground=$appInForeground active=${activeConversation?.take(8) ?: "<none>"} " +
+                "activeAccount=${activeConversationAccountRef?.take(8) ?: "<none>"} " +
+                "updateAccount=${update.accountRef.take(8)} post=$shouldPost"
+        }
+        if (shouldPost) {
+            val previewTextOverride =
+                if (LocalNotificationFormatter.needsPreviewTextResolution(update)) {
+                    notificationPreviewText(update.previewText)
+                } else {
+                    null
+                }
+            val reactedToPreviewOverride =
+                if (LocalNotificationFormatter.needsReactedToPreviewResolution(update)) {
+                    notificationPreviewText(update.reactedToPreview)
+                } else {
+                    null
+                }
+            localNotificationPresenter.show(
+                update,
+                notificationConversationTitle(update, autoAcceptedInvite),
+                notificationSenderName(update),
+                previewTextOverride,
+                reactedToPreviewOverride,
+                groupInviteAutoAccepted = autoAcceptedInvite != null,
+            )
+        }
+        refreshAccountUnreadCount(update.accountRef)
+    }
+
+    private fun launchGroupInviteNotificationHandler(update: NotificationUpdateFfi) {
+        notificationScope.launch {
+            runCatching {
+                val autoAcceptedInvite =
+                    autoAcceptGroupInvite(
+                        accountRef = update.accountRef,
+                        groupIdHex = update.groupIdHex,
+                        inviterAccountIdHex = update.sender.accountIdHex,
+                    )
+                postNotificationUpdate(update, autoAcceptedInvite)
+            }.onFailure {
+                rethrowIfCancellation(it)
+                appStateDebug(it) {
+                    "notification update failed key=${update.notificationKey.take(16)} trigger=${update.trigger}: ${it.readableMessage()}"
+                }
+            }
+        }
+    }
+
     private fun startNotificationListener() {
         if (notificationJob?.isActive == true) return
         notificationJob =
@@ -2758,53 +2830,14 @@ class DarkMatterAppState(
                             while (isActive) {
                                 val update = marmotIo { subscription.next() } ?: break
                                 backoffMillis = NOTIFICATION_RETRY_INITIAL_BACKOFF_MILLIS
-                                val autoAcceptedInvite =
-                                    if (update.trigger == NotificationTriggerFfi.GROUP_INVITE) {
-                                        autoAcceptGroupInvite(
-                                            accountRef = update.accountRef,
-                                            groupIdHex = update.groupIdHex,
-                                            inviterAccountIdHex = update.sender.accountIdHex,
-                                        )
-                                    } else {
-                                        null
-                                    }
-                                val activeConversation = activeConversationGroupIdHex
-                                val shouldPost =
-                                    LocalNotificationPolicy.shouldPost(
-                                        update = update,
-                                        appInForeground = appInForeground,
-                                        activeConversationGroupIdHex = activeConversation,
-                                        activeConversationAccountRef = activeConversationAccountRef,
-                                    )
-                                appStateDebug {
-                                    "notification update key=${update.notificationKey.take(16)} trigger=${update.trigger} " +
-                                        "foreground=$appInForeground active=${activeConversation?.take(8) ?: "<none>"} " +
-                                        "activeAccount=${activeConversationAccountRef?.take(8) ?: "<none>"} " +
-                                        "updateAccount=${update.accountRef.take(8)} post=$shouldPost"
+                                if (update.trigger == NotificationTriggerFfi.GROUP_INVITE) {
+                                    // Accept + title resolution can perform MLS/network work. Run it
+                                    // off the subscription loop so one slow invite does not hold back
+                                    // subsequent notification updates.
+                                    launchGroupInviteNotificationHandler(update)
+                                } else {
+                                    postNotificationUpdate(update)
                                 }
-                                if (shouldPost) {
-                                    val previewTextOverride =
-                                        if (LocalNotificationFormatter.needsPreviewTextResolution(update)) {
-                                            notificationPreviewText(update.previewText)
-                                        } else {
-                                            null
-                                        }
-                                    val reactedToPreviewOverride =
-                                        if (LocalNotificationFormatter.needsReactedToPreviewResolution(update)) {
-                                            notificationPreviewText(update.reactedToPreview)
-                                        } else {
-                                            null
-                                        }
-                                    localNotificationPresenter.show(
-                                        update,
-                                        notificationConversationTitle(update, autoAcceptedInvite),
-                                        notificationSenderName(update),
-                                        previewTextOverride,
-                                        reactedToPreviewOverride,
-                                        groupInviteAutoAccepted = autoAcceptedInvite != null,
-                                    )
-                                }
-                                refreshAccountUnreadCount(update.accountRef)
                             }
                         } finally {
                             runCatching {

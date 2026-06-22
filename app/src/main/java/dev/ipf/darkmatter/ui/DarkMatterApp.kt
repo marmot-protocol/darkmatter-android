@@ -6964,6 +6964,8 @@ private fun ConversationScreen(
     val context = LocalContext.current
     val groupTitleCopy = rememberGroupTitleCopy()
     val messageTextCopy = rememberMessageTextCopy()
+    // Keep the banner hidden immediately after the user dismisses it. The
+    // persisted marker update is asynchronous with Compose's next revision.
     var inviteBannerDismissedThisSession by remember(chat.id) { mutableStateOf(false) }
     val autoInviteBanner =
         remember(
