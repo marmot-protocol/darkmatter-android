@@ -22,9 +22,13 @@ object MediaInventory {
 
     /** Where a media entry came from: an encrypted attachment, or a bare link in the body. */
     sealed interface Source {
-        data class Attachment(val reference: MediaAttachmentReferenceFfi) : Source
+        data class Attachment(
+            val reference: MediaAttachmentReferenceFfi,
+        ) : Source
 
-        data class LinkedUrl(val url: String) : Source
+        data class LinkedUrl(
+            val url: String,
+        ) : Source
     }
 
     data class MediaEntry(

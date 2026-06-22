@@ -2,6 +2,7 @@ package dev.ipf.darkmatter.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -20,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
@@ -38,7 +37,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -79,6 +77,7 @@ import dev.ipf.marmotkit.MediaAttachmentReferenceFfi
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.util.Calendar
+import androidx.compose.foundation.lazy.grid.items as gridItems
 
 // A renderable image/video tile resolved from the conversation timeline. Unlike
 // MediaInventory's MediaEntry (which is transport-free and carries only the
@@ -121,8 +120,12 @@ internal data class SharedMediaTiles(
 ) {
     val isEmpty: Boolean
         get() =
-            images.isEmpty() && videos.isEmpty() && voice.isEmpty() &&
-                files.isEmpty() && urls.isEmpty() && !hasOther
+            images.isEmpty() &&
+                videos.isEmpty() &&
+                voice.isEmpty() &&
+                files.isEmpty() &&
+                urls.isEmpty() &&
+                !hasOther
 }
 
 // Walk the loaded timeline once and project image/video tiles, newest first.
@@ -297,7 +300,9 @@ internal fun SharedMediaSection(
 private fun List<SharedMediaTile>.toViewerPages(): List<MediaViewerPage> =
     map { MediaViewerPage(it.messageIdHex, it.attachmentIndex, it.reference, it.mine, it.sender, it.recordedAt) }
 
-private enum class MediaTab(val labelRes: Int) {
+private enum class MediaTab(
+    val labelRes: Int,
+) {
     Images(R.string.shared_media_tab_images),
     Videos(R.string.shared_media_tab_videos),
     Voice(R.string.shared_media_tab_voice),
@@ -757,8 +762,7 @@ private fun FileLibraryRow(
                         }
                         inFlight = false
                     }
-                }
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                }.padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -990,8 +994,7 @@ private fun SenderAvatar(
 
 // Host of an absolute URL for the URL-row title, falling back to the raw URL
 // when it can't be parsed (the inventory already guarantees an http(s) prefix).
-private fun hostOf(url: String): String =
-    runCatching { URI(url).host }.getOrNull()?.removePrefix("www.")?.takeIf { it.isNotBlank() } ?: url
+private fun hostOf(url: String): String = runCatching { URI(url).host }.getOrNull()?.removePrefix("www.")?.takeIf { it.isNotBlank() } ?: url
 
 // Compact relative-ish timestamp for the media rows: today shows the clock,
 // older entries show the calendar date. `recordedAt` is epoch SECONDS.
@@ -1011,7 +1014,8 @@ private fun relativeTimestamp(
         } else {
             android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_ABBREV_ALL
         }
-    return android.text.format.DateUtils.formatDateTime(context, millis, flags)
+    return android.text.format.DateUtils
+        .formatDateTime(context, millis, flags)
 }
 
 // Month bucketing keyed off the local-time calendar so the separators match
@@ -1048,7 +1052,11 @@ private fun saveFileToDownloads(
     val resolver = context.contentResolver
     val values =
         android.content.ContentValues().apply {
-            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, dev.ipf.darkmatter.media.MediaPipeline.safeDisplayName(fileName))
+            put(
+                android.provider.MediaStore.Downloads.DISPLAY_NAME,
+                dev.ipf.darkmatter.media.MediaPipeline
+                    .safeDisplayName(fileName),
+            )
             put(android.provider.MediaStore.Downloads.MIME_TYPE, mediaType.ifBlank { "application/octet-stream" })
             put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/DarkMatter")
             put(android.provider.MediaStore.Downloads.IS_PENDING, 1)

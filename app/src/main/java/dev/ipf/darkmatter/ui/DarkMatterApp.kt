@@ -5628,8 +5628,7 @@ internal fun FullScreenMediaViewer(
                             Brush.verticalGradient(
                                 listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f)),
                             ),
-                        )
-                        .navigationBarsPadding()
+                        ).navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 Text(
