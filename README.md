@@ -47,8 +47,8 @@ no signing secrets or `google-services.json`.
 Pushes to `master` also run `.github/workflows/android-instrumented.yml`, a
 separate emulator workflow for `:app:connectedDebugAndroidTest`. It is
 master-only, not a pull-request gate, because emulator boot is slower and more
-flake-prone than the fast JVM checks. On failure it uploads Android test reports
-for seven days.
+flake-prone than the fast JVM checks. It uploads Android test reports when
+available and retains them for seven days.
 
 Run the same fast checks locally before pushing:
 
