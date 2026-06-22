@@ -4,14 +4,13 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * Generates profile pseudonyms in the same two-word style Marmot assigns to new
- * identities at signup.
+ * Generates random profile pseudonyms in the same two-word style Marmot assigns
+ * to new identities at signup.
  *
- * Keep the word lists and seed-to-index derivation in sync with
+ * Keep the word lists and SHA-256 seed-to-index derivation in sync with
  * `marmot-app::default_profile_pseudonym` in the Marmot core repository. The
- * edit-profile roll action feeds fresh local entropy through the same selector
- * so users can roll a new random-style display name without creating a new
- * identity.
+ * edit-profile roll action uses fresh local entropy, so rolls are distribution
+ * compatible with signup pseudonyms but not reproducible from an account id.
  */
 object ProfilePseudonymGenerator {
     private val adjectives =
@@ -88,17 +87,44 @@ object ProfilePseudonymGenerator {
 
     private val secureRandom = SecureRandom()
 
+    private const val ENTROPY_BYTE_COUNT = 32
     private const val RANDOM_ROLL_RETRY_COUNT = 8
 
-    fun random(excluding: String? = null): String {
+    internal val adjectiveCount: Int
+        get() = adjectives.size
+
+    internal val nounCount: Int
+        get() = nouns.size
+
+    fun random(excluding: String? = null): String =
+        random(excluding = excluding) {
+            ByteArray(ENTROPY_BYTE_COUNT).also(secureRandom::nextBytes)
+        }
+
+    internal fun random(
+        excluding: String? = null,
+        entropyProvider: () -> ByteArray,
+    ): String {
         val excluded = excluding?.trim()?.takeIf { it.isNotEmpty() }
         repeat(RANDOM_ROLL_RETRY_COUNT) {
-            val entropy = ByteArray(32)
-            secureRandom.nextBytes(entropy)
-            val candidate = fromEntropy(entropy)
+            val candidate = fromEntropy(entropyProvider())
             if (candidate != excluded) return candidate
         }
         return nextAfter(excluded)
+    }
+
+    internal fun wordListFingerprint(): String {
+        val payload =
+            buildString {
+                appendLine("adjectives")
+                adjectives.forEach { appendLine(it) }
+                appendLine("nouns")
+                nouns.forEach { appendLine(it) }
+            }
+        return MessageDigest
+            .getInstance("SHA-256")
+            .digest(payload.toByteArray(Charsets.UTF_8))
+            .toHexString()
     }
 
     internal fun fromEntropy(entropy: ByteArray): String = fromSeed(entropy.toHexString())
