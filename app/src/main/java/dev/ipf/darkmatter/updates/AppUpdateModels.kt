@@ -1,5 +1,7 @@
 package dev.ipf.darkmatter.updates
 
+import java.math.BigInteger
+
 /** Constants for Dark Matter's Zapstore listing and release metadata. */
 object AppUpdateConstants {
     const val DARKMATTER_ZAPSTORE_APP_ID = "org.parres.darkmatter"
@@ -44,7 +46,7 @@ object CalVer {
         val r = segments(right)
         val width = maxOf(l.size, r.size)
         for (index in 0 until width) {
-            val cmp = l.getOrElse(index) { 0 }.compareTo(r.getOrElse(index) { 0 })
+            val cmp = l.getOrElse(index) { BigInteger.ZERO }.compareTo(r.getOrElse(index) { BigInteger.ZERO })
             if (cmp != 0) return cmp
         }
         return 0
@@ -59,10 +61,10 @@ object CalVer {
             .distinct()
             .count { compare(it, installedVersion) > 0 }
 
-    private fun segments(version: String): List<Int> =
+    private fun segments(version: String): List<BigInteger> =
         version
             .trim()
             .split('.')
             .filter { it.isNotEmpty() }
-            .map { segment -> leadingNumber.find(segment)?.value?.toIntOrNull() ?: 0 }
+            .map { segment -> leadingNumber.find(segment)?.value?.let(::BigInteger) ?: BigInteger.ZERO }
 }

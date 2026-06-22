@@ -64,6 +64,8 @@ class AppUpdateNotifier(
 
     companion object {
         private const val NOTIFICATION_TAG = "app_update"
+
+        // Stable id for the single app-update notification; not tied to release versions.
         private const val NOTIFICATION_ID = 410
     }
 }

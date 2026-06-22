@@ -28,7 +28,7 @@ internal data class NostrEvent(
             append('[')
             append('0')
             append(',')
-            append(JSONObject.quote(pubkey))
+            appendNostrJsonString(pubkey)
             append(',')
             append(createdAt)
             append(',')
@@ -40,13 +40,13 @@ internal data class NostrEvent(
                 append('[')
                 tag.forEachIndexed { tagIndex, value ->
                     if (tagIndex > 0) append(',')
-                    append(JSONObject.quote(value))
+                    appendNostrJsonString(value)
                 }
                 append(']')
             }
             append(']')
             append(',')
-            append(JSONObject.quote(content))
+            appendNostrJsonString(content)
             append(']')
         }
 
@@ -90,6 +90,30 @@ internal fun String.hexToBytes(): ByteArray? {
 }
 
 internal fun ByteArray.toHex(): String = joinToString(separator = "") { "%02x".format(it.toInt() and 0xff) }
+
+private fun StringBuilder.appendNostrJsonString(value: String) {
+    append('"')
+    value.forEach { char ->
+        when (char) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\b' -> append("\\b")
+            '\u000C' -> append("\\f")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> {
+                if (char < ' ') {
+                    append("\\u")
+                    append(char.code.toString(16).padStart(4, '0'))
+                } else {
+                    append(char)
+                }
+            }
+        }
+    }
+    append('"')
+}
 
 private fun String.isHex(expectedLength: Int): Boolean = length == expectedLength && all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
 

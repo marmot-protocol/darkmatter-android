@@ -40,6 +40,7 @@ import dev.ipf.darkmatter.notifications.PushTokenStore
 import dev.ipf.darkmatter.ui.markdownDocumentMentionBech32s
 import dev.ipf.darkmatter.ui.markdownDocumentToPreviewAnnotatedString
 import dev.ipf.darkmatter.updates.AppUpdateConstants
+import dev.ipf.darkmatter.updates.AppUpdateForegroundState
 import dev.ipf.darkmatter.updates.AppUpdateInfo
 import dev.ipf.darkmatter.updates.AppUpdateNotifier
 import dev.ipf.darkmatter.updates.AppUpdateRepository
@@ -1965,9 +1966,12 @@ class DarkMatterAppState(
 
     fun setAppInForeground(foreground: Boolean) {
         appInForeground = foreground
+        AppUpdateForegroundState.isForeground = foreground
         if (foreground) {
             refreshLocalNotificationPermission()
             notificationScope.launch { catchUpAfterForegroundActivation() }
+        } else {
+            notificationScope.launch { refreshAppUpdateIfStale(notifyIfNewer = true) }
         }
         if (foreground && backgroundConnectionEnabled) startBackgroundConnectionService()
         if (foreground) notificationScope.launch { syncNativePushRegistrationIfEnabled() }

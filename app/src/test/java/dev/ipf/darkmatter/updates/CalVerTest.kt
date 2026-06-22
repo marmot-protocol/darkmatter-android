@@ -29,4 +29,10 @@ class CalVerTest {
             ),
         )
     }
+
+    @Test
+    fun comparesHugeSegmentsWithoutOverflowingToZero() {
+        assertTrue(CalVer.compare("2026.999999999999999999999.1", "2026.6.1") > 0)
+        assertEquals(0, CalVer.compare("2026.999999999999999999999.1", "2026.999999999999999999999.1"))
+    }
 }

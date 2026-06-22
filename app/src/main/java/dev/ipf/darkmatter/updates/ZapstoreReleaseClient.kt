@@ -39,13 +39,12 @@ class ZapstoreReleaseClient(
 
         val address = appEvent.tagValues("a").firstNotNullOfOrNull { ZapstoreAddress.parse(it, publisherPubkey, appId) } ?: return null
         val releaseEvent =
-            fetchEvents(releaseEventFilter(address.dTag), FETCH_TIMEOUT_MS)
-                .firstOrNull { event ->
-                    event.kind == KIND_ZAPSTORE_RELEASE &&
-                        event.pubkey == publisherPubkey &&
-                        event.hasTag("d", address.dTag) &&
-                        NostrEventVerifier.verifies(event)
-                } ?: return null
+            latestVerifiedReleaseEvent(
+                events = fetchEvents(releaseEventFilter(address.dTag), FETCH_TIMEOUT_MS),
+                publisherPubkey = publisherPubkey,
+                dTag = address.dTag,
+                verifies = NostrEventVerifier::verifies,
+            ) ?: return null
 
         val version = releaseEvent.firstTagValue("d")?.let { ZapstoreAddress.versionFromReleaseDTag(it, appId) } ?: address.version
         val releasesBehind =
@@ -72,14 +71,14 @@ class ZapstoreReleaseClient(
             .put("kinds", JSONArray().put(KIND_ZAPSTORE_APP))
             .put("authors", JSONArray().put(publisherPubkey))
             .put("#d", JSONArray().put(appId))
-            .put("limit", 1)
+            .put("limit", REPLACEABLE_EVENT_LIMIT)
 
     private fun releaseEventFilter(dTag: String): JSONObject =
         JSONObject()
             .put("kinds", JSONArray().put(KIND_ZAPSTORE_RELEASE))
             .put("authors", JSONArray().put(publisherPubkey))
             .put("#d", JSONArray().put(dTag))
-            .put("limit", 1)
+            .put("limit", REPLACEABLE_EVENT_LIMIT)
 
     private fun releaseHistoryFilter(): JSONObject =
         JSONObject()
@@ -177,7 +176,22 @@ class ZapstoreReleaseClient(
         private const val KIND_ZAPSTORE_APP = 32267
         private const val KIND_ZAPSTORE_RELEASE = 30063
         private const val FETCH_TIMEOUT_MS = 10_000L
+        private const val REPLACEABLE_EVENT_LIMIT = 10
         private const val RELEASE_HISTORY_LIMIT = 100
+
+        internal fun latestVerifiedReleaseEvent(
+            events: Iterable<NostrEvent>,
+            publisherPubkey: String,
+            dTag: String,
+            verifies: (NostrEvent) -> Boolean,
+        ): NostrEvent? =
+            events
+                .filter { event ->
+                    event.kind == KIND_ZAPSTORE_RELEASE &&
+                        event.pubkey == publisherPubkey &&
+                        event.hasTag("d", dTag) &&
+                        verifies(event)
+                }.maxByOrNull { it.createdAt }
 
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient

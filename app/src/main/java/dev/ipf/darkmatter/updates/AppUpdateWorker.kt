@@ -21,7 +21,7 @@ class AppUpdateWorker(
         return try {
             val repository = AppUpdateRepository(applicationContext)
             val info = repository.refresh()
-            if (info.shouldShowBanner) {
+            if (info.shouldShowBanner && AppUpdateForegroundState.shouldPostBackgroundNotification()) {
                 AppUpdateNotifier(applicationContext).show(info)
             }
             Result.success()
