@@ -973,6 +973,14 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1086,6 +1094,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_edit_message(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`targetMessageId`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,
     ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_export_encrypted_secret_key(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_marmot_uniffi_fn_method_marmot_group_details(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_group_management_state(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
@@ -1166,6 +1176,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_retry_hydrate_quarantined_group(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_reveal_nsec(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_marmot_uniffi_fn_method_marmot_self_demote_admin(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_self_demote_admin_detailed(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
@@ -1195,6 +1207,10 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_fn_method_marmot_set_relay_telemetry_settings(`ptr`: Pointer,`settings`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_shutdown(`ptr`: Pointer,
+    ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_sign_in_account(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,
+    ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_sign_out(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`deleteKeyPackages`: Byte,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_sign_out_and_wipe(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,
     ): Long
@@ -1442,6 +1458,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_edit_message(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_export_encrypted_secret_key(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_group_details(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_group_management_state(
@@ -1522,6 +1540,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_retry_hydrate_quarantined_group(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_reveal_nsec(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin_detailed(
@@ -1551,6 +1571,10 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_checksum_method_marmot_set_relay_telemetry_settings(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_shutdown(
+    ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_sign_in_account(
+    ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_sign_out(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_sign_out_and_wipe(
     ): Short
@@ -1727,6 +1751,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_edit_message() != 43927.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_export_encrypted_secret_key() != 9505.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_group_details() != 55062.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1847,6 +1874,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_retry_hydrate_quarantined_group() != 51443.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_reveal_nsec() != 4639.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin() != 8845.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1890,6 +1920,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_shutdown() != 57342.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_sign_in_account() != 63258.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_sign_out() != 40136.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_sign_out_and_wipe() != 64245.toShort()) {
@@ -3894,6 +3930,18 @@ public interface MarmotInterface {
     suspend fun `editMessage`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `targetMessageId`: kotlin.String, `content`: kotlin.String): SendSummaryFfi
     
     /**
+     * Export the active account's private key as a password-encrypted NIP-49
+     * `ncryptsec1...` bech32 backup string (darkmatter#544).
+     *
+     * SENSITIVE: the passphrase is accepted as an owned FFI string and zeroed
+     * on return by the Rust boundary. The encrypted export is logged to the
+     * per-account audit log, but unlike `reveal_nsec` it does not downgrade the
+     * account's NIP-49 KEY_SECURITY_BYTE because raw plaintext key material is
+     * not returned to the host app.
+     */
+    fun `exportEncryptedSecretKey`(`accountRef`: kotlin.String, `passphrase`: kotlin.String): kotlin.String
+    
+    /**
      * Group plus enriched member rows for detail screens.
      */
     suspend fun `groupDetails`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): GroupDetailsFfi
@@ -4122,6 +4170,19 @@ public interface MarmotInterface {
     suspend fun `retryHydrateQuarantinedGroup`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): kotlin.Boolean
     
     /**
+     * Export the active account's raw private key in canonical `nsec1...`
+     * bech32 form for an in-app key-backup display (darkmatter#543).
+     *
+     * SENSITIVE: revealing the raw key is logged to the per-account audit log
+     * and permanently marks the account's NIP-49 KEY_SECURITY_BYTE as 0x00
+     * ("handled insecurely"). The returned string is computed on demand and is
+     * never cached by the engine; the caller should display it transiently and
+     * drop it. Refuses unknown / public-only / cross-account refs via the
+     * existing keystore validation.
+     */
+    fun `revealNsec`(`accountRef`: kotlin.String): kotlin.String
+    
+    /**
      * Step down as an admin of `group_id_hex` (demote the active account).
      */
     suspend fun `selfDemoteAdmin`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): SendSummaryFfi
@@ -4198,6 +4259,33 @@ public interface MarmotInterface {
      * host side will see their `next()` return `None` shortly after.
      */
     suspend fun `shutdown`()
+    
+    /**
+     * Re-activate a non-destructively signed-out local account. This clears
+     * the durable signed-out marker and starts the account worker again; relay
+     * list/key-package repair can still be driven by the existing publish
+     * commands after sign-in.
+     */
+    suspend fun `signInAccount`(`accountRef`: kotlin.String): AccountSummaryFfi
+    
+    /**
+     * Non-destructive sign-out: deactivate the account on this device and,
+     * when `delete_key_packages` is `true` (the default behavior in the UI),
+     * publish kind:5 deletions for its relay-published KeyPackages so
+     * strangers cannot gift-wrap a Welcome into a new group while it is signed
+     * out.
+     *
+     * Unlike [`sign_out_and_wipe`](Self::sign_out_and_wipe) /
+     * [`remove_account`](Self::remove_account), this keeps ALL local state on
+     * device — the SQLCipher session database (MLS state + projections), cached
+     * media/secrets, the SQL account record, and the secret-store nsec — so the
+     * same identity can be signed back in from the account picker with its
+     * groups, message history, and drafts intact. The account ref stays valid
+     * after this returns. The returned `SignOutOutcomeFfi` surfaces per-relay
+     * KeyPackage cleanup failures so the app can show a "will retry on next
+     * sign-in" hint (darkmatter#477).
+     */
+    suspend fun `signOut`(`accountRef`: kotlin.String, `deleteKeyPackages`: kotlin.Boolean): SignOutOutcomeFfi
     
     /**
      * Destructive sign-out: leave every active MLS group (best-effort), delete
@@ -4955,6 +5043,29 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
         MarmotKitException.ErrorHandler,
     )
     }
+
+    
+    /**
+     * Export the active account's private key as a password-encrypted NIP-49
+     * `ncryptsec1...` bech32 backup string (darkmatter#544).
+     *
+     * SENSITIVE: the passphrase is accepted as an owned FFI string and zeroed
+     * on return by the Rust boundary. The encrypted export is logged to the
+     * per-account audit log, but unlike `reveal_nsec` it does not downgrade the
+     * account's NIP-49 KEY_SECURITY_BYTE because raw plaintext key material is
+     * not returned to the host app.
+     */
+    @Throws(MarmotKitException::class)override fun `exportEncryptedSecretKey`(`accountRef`: kotlin.String, `passphrase`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(MarmotKitException) { _status ->
+    UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_export_encrypted_secret_key(
+        it, FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
 
     
     /**
@@ -5849,6 +5960,30 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
 
     
     /**
+     * Export the active account's raw private key in canonical `nsec1...`
+     * bech32 form for an in-app key-backup display (darkmatter#543).
+     *
+     * SENSITIVE: revealing the raw key is logged to the per-account audit log
+     * and permanently marks the account's NIP-49 KEY_SECURITY_BYTE as 0x00
+     * ("handled insecurely"). The returned string is computed on demand and is
+     * never cached by the engine; the caller should display it transiently and
+     * drop it. Refuses unknown / public-only / cross-account refs via the
+     * existing keystore validation.
+     */
+    @Throws(MarmotKitException::class)override fun `revealNsec`(`accountRef`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(MarmotKitException) { _status ->
+    UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_reveal_nsec(
+        it, FfiConverterString.lower(`accountRef`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Step down as an admin of `group_id_hex` (demote the active account).
      */
     @Throws(MarmotKitException::class)
@@ -6192,6 +6327,71 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
         
         // Error FFI converter
         UniffiNullRustCallStatusErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Re-activate a non-destructively signed-out local account. This clears
+     * the durable signed-out marker and starts the account worker again; relay
+     * list/key-package repair can still be driven by the existing publish
+     * commands after sign-in.
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `signInAccount`(`accountRef`: kotlin.String) : AccountSummaryFfi {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_sign_in_account(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeAccountSummaryFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Non-destructive sign-out: deactivate the account on this device and,
+     * when `delete_key_packages` is `true` (the default behavior in the UI),
+     * publish kind:5 deletions for its relay-published KeyPackages so
+     * strangers cannot gift-wrap a Welcome into a new group while it is signed
+     * out.
+     *
+     * Unlike [`sign_out_and_wipe`](Self::sign_out_and_wipe) /
+     * [`remove_account`](Self::remove_account), this keeps ALL local state on
+     * device — the SQLCipher session database (MLS state + projections), cached
+     * media/secrets, the SQL account record, and the secret-store nsec — so the
+     * same identity can be signed back in from the account picker with its
+     * groups, message history, and drafts intact. The account ref stays valid
+     * after this returns. The returned `SignOutOutcomeFfi` surfaces per-relay
+     * KeyPackage cleanup failures so the app can show a "will retry on next
+     * sign-in" hint (darkmatter#477).
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `signOut`(`accountRef`: kotlin.String, `deleteKeyPackages`: kotlin.Boolean) : SignOutOutcomeFfi {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_sign_out(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterBoolean.lower(`deleteKeyPackages`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeSignOutOutcomeFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
     )
     }
 
@@ -7711,6 +7911,7 @@ data class AccountSummaryFfi (
     var `label`: kotlin.String, 
     var `accountIdHex`: kotlin.String, 
     var `localSigning`: kotlin.Boolean, 
+    var `signedOut`: kotlin.Boolean, 
     var `running`: kotlin.Boolean
 ) {
     
@@ -7727,6 +7928,7 @@ public object FfiConverterTypeAccountSummaryFfi: FfiConverterRustBuffer<AccountS
             FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -7734,6 +7936,7 @@ public object FfiConverterTypeAccountSummaryFfi: FfiConverterRustBuffer<AccountS
             FfiConverterString.allocationSize(value.`label`) +
             FfiConverterString.allocationSize(value.`accountIdHex`) +
             FfiConverterBoolean.allocationSize(value.`localSigning`) +
+            FfiConverterBoolean.allocationSize(value.`signedOut`) +
             FfiConverterBoolean.allocationSize(value.`running`)
     )
 
@@ -7741,6 +7944,7 @@ public object FfiConverterTypeAccountSummaryFfi: FfiConverterRustBuffer<AccountS
             FfiConverterString.write(value.`label`, buf)
             FfiConverterString.write(value.`accountIdHex`, buf)
             FfiConverterBoolean.write(value.`localSigning`, buf)
+            FfiConverterBoolean.write(value.`signedOut`, buf)
             FfiConverterBoolean.write(value.`running`, buf)
     }
 }
@@ -10388,6 +10592,59 @@ public object FfiConverterTypeSendSummaryFfi: FfiConverterRustBuffer<SendSummary
 
 
 
+/**
+ * Structured result of the non-destructive `signOut`. The account's local
+ * state is kept on device; only the relay-published KeyPackages are cleaned
+ * up (when requested), so the app can render the same per-relay
+ * partial-failure sheet as a wipe and show a "will retry on next sign-in" hint.
+ */
+data class SignOutOutcomeFfi (
+    /**
+     * Relay-published KeyPackage events successfully deleted. `0` when
+     * `deleteKeyPackages` was `false`.
+     */
+    var `keyPackagesDeleted`: kotlin.UInt, 
+    /**
+     * Per-relay KeyPackage deletion (or discovery) failures. Best-effort.
+     */
+    var `keyPackageFailures`: List<RelayFailureFfi>, 
+    /**
+     * Local teardown (worker shutdown, subscription deactivation, in-memory
+     * cache eviction) result. Never removes on-disk state.
+     */
+    var `localCleanup`: LocalCleanupReportFfi
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignOutOutcomeFfi: FfiConverterRustBuffer<SignOutOutcomeFfi> {
+    override fun read(buf: ByteBuffer): SignOutOutcomeFfi {
+        return SignOutOutcomeFfi(
+            FfiConverterUInt.read(buf),
+            FfiConverterSequenceTypeRelayFailureFfi.read(buf),
+            FfiConverterTypeLocalCleanupReportFfi.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SignOutOutcomeFfi) = (
+            FfiConverterUInt.allocationSize(value.`keyPackagesDeleted`) +
+            FfiConverterSequenceTypeRelayFailureFfi.allocationSize(value.`keyPackageFailures`) +
+            FfiConverterTypeLocalCleanupReportFfi.allocationSize(value.`localCleanup`)
+    )
+
+    override fun write(value: SignOutOutcomeFfi, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`keyPackagesDeleted`, buf)
+            FfiConverterSequenceTypeRelayFailureFfi.write(value.`keyPackageFailures`, buf)
+            FfiConverterTypeLocalCleanupReportFfi.write(value.`localCleanup`, buf)
+    }
+}
+
+
+
 data class TimelineMessageQueryFfi (
     var `groupIdHex`: kotlin.String?, 
     var `search`: kotlin.String?, 
@@ -12674,6 +12931,72 @@ sealed class MarmotKitException: kotlin.Exception() {
             get() = "details=${ `details` }"
     }
     
+    /**
+     * The account exists but its raw private key could not be located in the
+     * keystore — e.g. a public-only / watch-only account, or a secret that was
+     * never loaded. Distinct, typed variant (#543) so a key-backup surface can
+     * tell "this account has no exportable key" apart from a generic runtime
+     * failure without string-parsing.
+     */
+    class SecretNotFound(
+        
+        val `details`: kotlin.String
+        ) : MarmotKitException() {
+        override val message
+            get() = "details=${ `details` }"
+    }
+    
+    /**
+     * The platform secret store / keychain is locked, uninitialized, or
+     * otherwise unavailable, so the raw private key could not be read. Typed
+     * variant (#543) so a key-backup surface can prompt the user to unlock the
+     * keystore rather than reporting an opaque runtime error.
+     */
+    class KeystoreUnavailable(
+        
+        val `details`: kotlin.String
+        ) : MarmotKitException() {
+        override val message
+            get() = "details=${ `details` }"
+    }
+    
+    /**
+     * The user supplied an empty passphrase for NIP-49 encrypted key export.
+     * Distinct typed variant (#544) so backup UI can keep the user in the
+     * passphrase sheet instead of showing a generic runtime failure.
+     */
+    class EmptyPassphrase(
+        ) : MarmotKitException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * NIP-49 encryption failed after keystore access succeeded. Carries only
+     * library/error classification text, never passphrase or key material.
+     */
+    class EncryptionFailed(
+        
+        val `details`: kotlin.String
+        ) : MarmotKitException() {
+        override val message
+            get() = "details=${ `details` }"
+    }
+    
+    /**
+     * A filesystem IO error while reading the key, appending the reveal audit
+     * entry, or persisting the NIP-49 key-security byte. Typed variant (#543)
+     * so a key-backup surface can distinguish disk failures from arbitrary
+     * runtime faults.
+     */
+    class Io(
+        
+        val `details`: kotlin.String
+        ) : MarmotKitException() {
+        override val message
+            get() = "details=${ `details` }"
+    }
+    
     class Runtime(
         
         val `details`: kotlin.String
@@ -12745,7 +13068,20 @@ public object FfiConverterTypeMarmotKitError : FfiConverterRustBuffer<MarmotKitE
             16 -> MarmotKitException.StorageBusy(
                 FfiConverterString.read(buf),
                 )
-            17 -> MarmotKitException.Runtime(
+            17 -> MarmotKitException.SecretNotFound(
+                FfiConverterString.read(buf),
+                )
+            18 -> MarmotKitException.KeystoreUnavailable(
+                FfiConverterString.read(buf),
+                )
+            19 -> MarmotKitException.EmptyPassphrase()
+            20 -> MarmotKitException.EncryptionFailed(
+                FfiConverterString.read(buf),
+                )
+            21 -> MarmotKitException.Io(
+                FfiConverterString.read(buf),
+                )
+            22 -> MarmotKitException.Runtime(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -12831,6 +13167,30 @@ public object FfiConverterTypeMarmotKitError : FfiConverterRustBuffer<MarmotKitE
                 + FfiConverterString.allocationSize(value.`memberIdHex`)
             )
             is MarmotKitException.StorageBusy -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`details`)
+            )
+            is MarmotKitException.SecretNotFound -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`details`)
+            )
+            is MarmotKitException.KeystoreUnavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`details`)
+            )
+            is MarmotKitException.EmptyPassphrase -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is MarmotKitException.EncryptionFailed -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`details`)
+            )
+            is MarmotKitException.Io -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`details`)
@@ -12926,8 +13286,32 @@ public object FfiConverterTypeMarmotKitError : FfiConverterRustBuffer<MarmotKitE
                 FfiConverterString.write(value.`details`, buf)
                 Unit
             }
-            is MarmotKitException.Runtime -> {
+            is MarmotKitException.SecretNotFound -> {
                 buf.putInt(17)
+                FfiConverterString.write(value.`details`, buf)
+                Unit
+            }
+            is MarmotKitException.KeystoreUnavailable -> {
+                buf.putInt(18)
+                FfiConverterString.write(value.`details`, buf)
+                Unit
+            }
+            is MarmotKitException.EmptyPassphrase -> {
+                buf.putInt(19)
+                Unit
+            }
+            is MarmotKitException.EncryptionFailed -> {
+                buf.putInt(20)
+                FfiConverterString.write(value.`details`, buf)
+                Unit
+            }
+            is MarmotKitException.Io -> {
+                buf.putInt(21)
+                FfiConverterString.write(value.`details`, buf)
+                Unit
+            }
+            is MarmotKitException.Runtime -> {
+                buf.putInt(22)
                 FfiConverterString.write(value.`details`, buf)
                 Unit
             }
