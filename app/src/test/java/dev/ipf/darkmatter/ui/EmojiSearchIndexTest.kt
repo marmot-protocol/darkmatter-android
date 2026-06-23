@@ -23,6 +23,8 @@ class EmojiSearchIndexTest {
         assertEquals(listOf("🦊"), index.search("FOX").map { it.emoji })
         assertEquals(listOf("🔥"), index.search("flam").map { it.emoji })
         assertEquals(listOf("😀", "😄"), index.search("smile").map { it.emoji })
+        assertEquals(emptyList<EmojiSearchEntry>(), index.search("smile", limit = 0))
+        assertEquals(emptyList<EmojiSearchEntry>(), index.search("smile", limit = -1))
         assertEquals(emptyList<EmojiSearchEntry>(), index.search("no-match"))
     }
 
@@ -32,7 +34,8 @@ class EmojiSearchIndexTest {
             listOf(
                 File("src/main/res/raw/emoji_annotations_en.json"),
                 File("app/src/main/res/raw/emoji_annotations_en.json"),
-            ).first { it.exists() }
+            ).firstOrNull { it.exists() }
+                ?: error("emoji_annotations_en.json not found in src/main/res/raw or app/src/main/res/raw")
         val index = EmojiSearchIndex.fromJson(resourceFile.readText())
 
         assertTrue(index.search("fox").any { it.emoji == "🦊" })

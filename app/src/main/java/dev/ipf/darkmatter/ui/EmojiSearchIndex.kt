@@ -29,6 +29,7 @@ internal class EmojiSearchIndex private constructor(
         query: String,
         limit: Int = DefaultSearchResultLimit,
     ): List<EmojiSearchEntry> {
+        if (limit <= 0) return emptyList()
         val normalizedQuery = query.trim().lowercase(Locale.ROOT)
         if (normalizedQuery.isEmpty()) return emptyList()
         return entries

@@ -13853,7 +13853,6 @@ private fun EmojiPickerSheet(
                             EmojiPickerView(context).apply {
                                 emojiGridColumns = 8
                                 emojiGridRows = 5.25f
-                                setOnEmojiPickedListener { item -> onEmojiPicked(item.emoji) }
                                 // The body grid RecyclerView is built asynchronously once emoji data
                                 // loads, so enable nested scrolling on every descendant after layout to
                                 // guarantee the scrolling child dispatches deltas to the interop parent.
@@ -13861,6 +13860,9 @@ private fun EmojiPickerSheet(
                                 // NestedScrollingChild, so this safely targets only the RecyclerViews.
                                 post { enableNestedScrollingOnDescendants(this) }
                             }
+                        },
+                        update = { view ->
+                            view.setOnEmojiPickedListener { item -> onEmojiPicked(item.emoji) }
                         },
                     )
                 }
