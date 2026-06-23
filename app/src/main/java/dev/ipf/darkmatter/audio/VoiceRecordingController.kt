@@ -75,6 +75,7 @@ class VoiceRecordingController(
     private var finalizeJob: Job? = null
     private var tailCut: CompletableDeferred<Unit>? = null
     private var restarting = false
+    private var restartJob: Job? = null
 
     fun start(): Boolean {
         if (isRecording) return true
@@ -92,11 +93,13 @@ class VoiceRecordingController(
             VoicePlaybackController.pause()
             isRecording = true
             resetRecordingUiState()
-            scope.launch(Dispatchers.Main) {
-                pending.join()
-                restarting = false
-                if (isRecording) beginRecording()
-            }
+            restartJob =
+                scope.launch(Dispatchers.Main) {
+                    pending.join()
+                    restarting = false
+                    restartJob = null
+                    if (isRecording) beginRecording()
+                }
             return true
         }
 
@@ -157,7 +160,24 @@ class VoiceRecordingController(
         willLock = false
     }
 
+    // A restart deferred the new recorder's creation while isRecording is already
+    // true; if the user stops/cancels in that window, abort the deferred start so
+    // it can't create an orphaned recorder, and release the reused focus. The old
+    // take's finalize keeps delivering its result independently.
+    private fun abortPendingRestart(): Boolean {
+        val restart = restartJob ?: return false
+        if (!restart.isActive) return false
+        restart.cancel()
+        restartJob = null
+        restarting = false
+        isRecording = false
+        resetRecordingUiState()
+        abandonRecordingFocus()
+        return true
+    }
+
     fun stop() {
+        if (abortPendingRestart()) return
         val r = recorder ?: return
         recorder = null
         tickJob?.cancel()
@@ -206,6 +226,7 @@ class VoiceRecordingController(
     }
 
     fun cancel() {
+        if (abortPendingRestart()) return
         val r = recorder ?: return
         recorder = null
         tickJob?.cancel()
