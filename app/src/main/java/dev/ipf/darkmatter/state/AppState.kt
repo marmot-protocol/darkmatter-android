@@ -1387,7 +1387,10 @@ class DarkMatterAppState(
      *
      * On a per-notification hot path we only ever need the one account that
      * changed, so we avoid fanning out an all-account scan (#473) while still
-     * applying removed-group suppression for that account (#662).
+     * applying removed-group suppression for that account (#662). This remains
+     * intentionally more expensive than the old raw-row fold: it loads the
+     * account's chat list plus member rosters for unread rows, so keep callers
+     * scoped to the changed account until Marmot exposes a suppressed summary.
      */
     private suspend fun refreshAccountUnreadCount(accountRef: String) {
         val ref = accountRef.takeIf { it.isNotBlank() } ?: return
