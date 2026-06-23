@@ -13787,7 +13787,9 @@ private fun EmojiPickerSheet(
 ) {
     val context = LocalContext.current
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    val browseEmoji = remember { EmojiData.load(context) }
+    val browseEmoji by produceState(initialValue = emptyList<EmojiEntry>(), context) {
+        value = withContext(Dispatchers.IO) { EmojiData.load(context) }
+    }
     val searchResults =
         remember(searchQuery, browseEmoji) {
             EmojiData.search(browseEmoji, searchQuery)
