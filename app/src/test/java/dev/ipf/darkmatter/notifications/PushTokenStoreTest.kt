@@ -43,6 +43,7 @@ class PushTokenStoreTest {
     fun pendingClearsHonorApiContracts() {
         val preferences = FakeSharedPreferences()
         val store = PushTokenStore(preferences)
+        // Write-count checks document that idempotent/no-op inputs skip SharedPreferences writes.
 
         store.recordPendingClear("account-a")
         assertEquals(setOf("account-a"), store.pendingClears())
@@ -79,6 +80,7 @@ class PushTokenStoreTest {
     fun pendingDisablesHonorApiContracts() {
         val preferences = FakeSharedPreferences()
         val store = PushTokenStore(preferences)
+        // Write-count checks document that idempotent/no-op inputs skip SharedPreferences writes.
 
         store.recordPendingDisable("account-a")
         assertEquals(setOf("account-a"), store.pendingDisables())
@@ -113,6 +115,7 @@ class PushTokenStoreTest {
 
     @Test
     fun pendingClearsSurviveConcurrentRecordsAndClearsAcrossStoreInstances() {
+        // Delayed writes widen the read-modify-write race window; final set assertions stay deterministic.
         val preferences = FakeSharedPreferences(writeDelayMillis = 2)
         val accounts = (0 until 64).map { "account-$it" }
 
@@ -137,6 +140,35 @@ class PushTokenStoreTest {
                 .map { it.value }
                 .toSet()
         assertEquals(expectedRemaining, PushTokenStore(preferences).pendingClears())
+    }
+
+    @Test
+    fun pendingDisablesSurviveConcurrentRecordsAndClearsAcrossStoreInstances() {
+        // Delayed writes widen the read-modify-write race window; final set assertions stay deterministic.
+        val preferences = FakeSharedPreferences(writeDelayMillis = 2)
+        val accounts = (0 until 64).map { "account-$it" }
+
+        runConcurrently(accounts) { account ->
+            PushTokenStore(preferences).recordPendingDisable(account)
+        }
+        assertEquals(accounts.toSet(), PushTokenStore(preferences).pendingDisables())
+
+        runConcurrently(accounts.withIndex().toList()) { (index, account) ->
+            val store = PushTokenStore(preferences)
+            if (index % 2 == 0) {
+                store.clearPendingDisable(account)
+            } else {
+                store.recordPendingDisable(account)
+            }
+        }
+
+        val expectedRemaining =
+            accounts
+                .withIndex()
+                .filter { it.index % 2 == 1 }
+                .map { it.value }
+                .toSet()
+        assertEquals(expectedRemaining, PushTokenStore(preferences).pendingDisables())
     }
 
     private fun <T> runConcurrently(
