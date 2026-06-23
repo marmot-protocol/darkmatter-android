@@ -27,33 +27,15 @@ class ZapstoreReleaseClient(
         appId: String = AppUpdateConstants.DARKMATTER_ZAPSTORE_APP_ID,
         installedVersion: String? = null,
     ): ZapstoreLatestRelease? {
-        val appEvent =
-            fetchEvents(appEventFilter(appId), FETCH_TIMEOUT_MS)
-                .filter { event ->
-                    event.kind == KIND_ZAPSTORE_APP &&
-                        event.pubkey == publisherPubkey &&
-                        event.hasTag("d", appId) &&
-                        NostrEventVerifier.verifies(event)
-                }.maxByOrNull { it.createdAt }
-                ?: return null
-
-        val address = appEvent.tagValues("a").firstNotNullOfOrNull { ZapstoreAddress.parse(it, publisherPubkey, appId) } ?: return null
-        val releaseEvent =
-            latestVerifiedReleaseEvent(
-                events = fetchEvents(releaseEventFilter(address.dTag), FETCH_TIMEOUT_MS),
-                publisherPubkey = publisherPubkey,
-                dTag = address.dTag,
-                verifies = NostrEventVerifier::verifies,
-            ) ?: return null
-
-        val version = releaseEvent.firstTagValue("d")?.let { ZapstoreAddress.versionFromReleaseDTag(it, appId) } ?: address.version
+        // Zapstore's kind-32267 app event carries no release pointer, so the
+        // latest version comes from the signed kind-30063 release events directly.
+        val versions = fetchReleaseHistoryVersions(appId)
+        val latest = versions.maxWithOrNull { left, right -> CalVer.compare(left, right) } ?: return null
         val releasesBehind =
             installedVersion
                 ?.takeIf { it.isNotBlank() }
-                ?.let { installed ->
-                    runCatching { CalVer.releasesBehind(installed, fetchReleaseHistoryVersions(appId)) }.getOrNull()
-                }
-        return ZapstoreLatestRelease(version = version, releasesBehind = releasesBehind)
+                ?.let { installed -> runCatching { CalVer.releasesBehind(installed, versions) }.getOrNull() }
+        return ZapstoreLatestRelease(version = latest, releasesBehind = releasesBehind)
     }
 
     private suspend fun fetchReleaseHistoryVersions(appId: String): List<String> =
@@ -65,20 +47,6 @@ class ZapstoreReleaseClient(
                     NostrEventVerifier.verifies(event)
             }.mapNotNull { event -> event.firstTagValue("d")?.let { ZapstoreAddress.versionFromReleaseDTag(it, appId) } }
             .toList()
-
-    private fun appEventFilter(appId: String): JSONObject =
-        JSONObject()
-            .put("kinds", JSONArray().put(KIND_ZAPSTORE_APP))
-            .put("authors", JSONArray().put(publisherPubkey))
-            .put("#d", JSONArray().put(appId))
-            .put("limit", REPLACEABLE_EVENT_LIMIT)
-
-    private fun releaseEventFilter(dTag: String): JSONObject =
-        JSONObject()
-            .put("kinds", JSONArray().put(KIND_ZAPSTORE_RELEASE))
-            .put("authors", JSONArray().put(publisherPubkey))
-            .put("#d", JSONArray().put(dTag))
-            .put("limit", REPLACEABLE_EVENT_LIMIT)
 
     private fun releaseHistoryFilter(): JSONObject =
         JSONObject()
@@ -173,10 +141,8 @@ class ZapstoreReleaseClient(
     companion object {
         const val ZAPSTORE_RELAY = "wss://relay.zapstore.dev"
         const val ZAPSTORE_PUBLISHER_PUBKEY = "75d737c3472471029c44876b330d2284288a42779b591a2ed4daa1c6c07efaf7"
-        private const val KIND_ZAPSTORE_APP = 32267
         private const val KIND_ZAPSTORE_RELEASE = 30063
         private const val FETCH_TIMEOUT_MS = 10_000L
-        private const val REPLACEABLE_EVENT_LIMIT = 10
         private const val RELEASE_HISTORY_LIMIT = 100
 
         internal fun latestVerifiedReleaseEvent(
