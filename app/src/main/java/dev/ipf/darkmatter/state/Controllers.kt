@@ -3074,15 +3074,25 @@ class ConversationController(
             // overlay so the bubble doesn't flicker back to the old body in the
             // gap before the kind-1009 lands in the timeline. The overlay is
             // pruned once `aggregateEdits` reflects the same latest text.
-            optimisticEdits[target]?.let { optimisticEdits[target] = it.copy(status = MessageStatus.Sent) }
+            // Only act if this attempt still owns the overlay: if the user
+            // re-edited the same target while this publish was in flight, a
+            // newer Pending overlay (different text) has superseded us, and
+            // flipping it to Sent would wrongly confirm the newer attempt.
+            optimisticEdits[target]
+                ?.takeIf { it.status == MessageStatus.Pending && it.text == trimmed }
+                ?.let { optimisticEdits[target] = it.copy(status = MessageStatus.Sent) }
             publishTimelineFromIndexes()
         } catch (throwable: Throwable) {
             throwable.rethrowIfCancellation()
             // Revert the displayed body to the pre-edit text and flip the
             // bubble to Failed, lighting the same retry/discard affordance a
             // failed send shows. Retry re-runs this edit; discard clears the
-            // overlay and restores the original body.
-            optimisticEdits[target] = OptimisticEdit(trimmed, preEditText, MessageStatus.Failed)
+            // overlay and restores the original body. Guarded the same way as
+            // the success path: a newer in-flight attempt's overlay must not be
+            // clobbered back to this stale attempt's Failed/pre-edit text.
+            optimisticEdits[target]
+                ?.takeIf { it.status == MessageStatus.Pending && it.text == trimmed }
+                ?.let { optimisticEdits[target] = OptimisticEdit(trimmed, preEditText, MessageStatus.Failed) }
             publishTimelineFromIndexes()
             appState.present(R.string.toast_couldnt_edit_message, AppText.Plain(throwable.message ?: throwable.javaClass.simpleName))
         }
@@ -4472,11 +4482,18 @@ class ConversationController(
         if (optimisticEdits.isEmpty()) return aggregated
         val merged = LinkedHashMap(aggregated)
         for ((target, edit) in optimisticEdits) {
-            val displayText = if (edit.status == MessageStatus.Failed) edit.preEditText else edit.text
+            val failed = edit.status == MessageStatus.Failed
+            val displayText = if (failed) edit.preEditText else edit.text
             val base = merged[target]
-            merged[target] =
-                base?.copy(latestText = displayText)
-                    ?: EditState(latestText = displayText, count = 1, versions = emptyList())
+            when {
+                base != null -> merged[target] = base.copy(latestText = displayText)
+                // No real kind-1009 was accepted yet (null base). Synthesize an edit
+                // aggregate only for an applied overlay (Pending/Sent) so the bubble
+                // shows the optimistic body with an edited indicator. A Failed edit
+                // reverts to the original text and never accepted a kind-1009, so
+                // leave the target absent — no spurious "edited" badge.
+                !failed -> merged[target] = EditState(latestText = displayText, count = 1, versions = emptyList())
+            }
         }
         return merged
     }

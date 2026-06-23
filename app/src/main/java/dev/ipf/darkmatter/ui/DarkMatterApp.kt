@@ -3495,14 +3495,15 @@ private fun NewChatSheet(
     val keyboardController = LocalSoftwareKeyboardController.current
 
     // Focus the name field and raise the IME as the sheet settles, exactly once
-    // per open, gated by a plain-`remember` flag (NOT rememberSaveable) so it
-    // fires per composition and never re-fires on a config change. Requesting
-    // focus then `show()` synchronously — without first waiting a frame —
-    // lets the keyboard rise while the panel is still settling, so the first
-    // composed frame already reserves the IME inset and the input arrives in
-    // its keyboard-adjusted position in one motion instead of jumping up after
-    // a rest-position layout (mirrors the conversation composer auto-focus).
-    var autoFocusConsumed by remember { mutableStateOf(false) }
+    // per open. The consumed flag is rememberSaveable so it survives Activity
+    // recreation: a plain `remember` resets on a config change (rotation), which
+    // would re-fire the focus + keyboard mid-session. Requesting focus then
+    // `show()` synchronously — without first waiting a frame — lets the keyboard
+    // rise while the panel is still settling, so the first composed frame already
+    // reserves the IME inset and the input arrives in its keyboard-adjusted
+    // position in one motion instead of jumping up after a rest-position layout
+    // (mirrors the conversation composer auto-focus).
+    var autoFocusConsumed by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(directMessage) {
         if (!directMessage && !autoFocusConsumed) {
             autoFocusConsumed = true
