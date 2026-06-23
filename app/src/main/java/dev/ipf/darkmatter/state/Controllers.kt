@@ -109,6 +109,37 @@ data class ChatListItem(
     val hasUnread: Boolean
         get() = projection?.hasUnread ?: false
 
+    /**
+     * Whether the active account is no longer a member of this group, per the
+     * locally-cached member roster. The chat-list projection itself carries no
+     * membership flag, so this reads [memberSnapshot] — populated from the
+     * engine's live `groupMembers` roster by [ChatsController]'s member fetch,
+     * and dropped synchronously when an admin removes self
+     * (`markActiveAccountRemovedFromMembers`) or on a self-leave. Only a
+     * *loaded* roster that omits self counts as removed: a null snapshot means
+     * the fetch hasn't landed yet, and an empty one means a best-effort fetch
+     * failure — neither is evidence of removal, so both stay non-removed and
+     * keep the row's badge until the roster is actually known. Returns false
+     * with a blank/absent active account, matching [GroupProjector] semantics.
+     */
+    fun removedFromGroup(activeAccountIdHex: String?): Boolean {
+        val active = activeAccountIdHex?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val snapshot = memberSnapshot?.takeIf { it.members.isNotEmpty() } ?: return false
+        return !snapshot.containsAccount(active)
+    }
+
+    /**
+     * The unread badge to render for this row given the active account. A group
+     * the user has been removed from keeps a frozen [unreadCount] in the
+     * projection (the engine stops advancing reads once self is evicted), which
+     * reads as a stale alert; suppress it to zero so a removed group shows no
+     * badge (#625).
+     */
+    fun effectiveUnreadCount(activeAccountIdHex: String?): ULong = if (removedFromGroup(activeAccountIdHex)) 0uL else unreadCount
+
+    /** [hasUnread] with the removed-group suppression applied (#625). */
+    fun effectiveHasUnread(activeAccountIdHex: String?): Boolean = hasUnread && !removedFromGroup(activeAccountIdHex)
+
     fun projectedPreviewText(
         copy: MessageTextCopy = MessageTextCopy.Default,
         empty: String = "No messages yet",
@@ -1216,6 +1247,7 @@ class ChatsController(
                             override val deleted = record.deleted
                             override val plaintext = record.plaintext
                             override val messageIdHex = record.messageIdHex
+                            override val timelineAt = record.timelineAt
                         }
                     },
                     ciNeedle,
@@ -1226,6 +1258,7 @@ class ChatsController(
                     groupIdHex = groupIdHex,
                     messageIdHex = match.messageIdHex,
                     snippet = snippet,
+                    timelineAt = match.timelineAt,
                 )
             }
             // No eligible match in this page. Stop if the engine has no older

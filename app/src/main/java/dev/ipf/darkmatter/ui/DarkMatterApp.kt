@@ -1457,6 +1457,10 @@ fun AccountAvatarButton(
     size: Dp = 40.dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    // Cross-account unread dot (#592): a small accent dot on the active
+    // account's avatar when another signed-in account has unread. Hidden on
+    // single-account devices (the caller passes false).
+    showUnreadDot: Boolean = false,
 ) {
     val openSettingsDescription = stringResource(R.string.open_settings)
     IconButton(
@@ -1466,12 +1470,28 @@ fun AccountAvatarButton(
                 .size(56.dp)
                 .semantics { contentDescription = openSettingsDescription },
     ) {
-        Avatar(
-            title = title,
-            seed = seed,
-            size = size,
-            pictureUrl = pictureUrl,
-        )
+        Box {
+            Avatar(
+                title = title,
+                seed = seed,
+                size = size,
+                pictureUrl = pictureUrl,
+            )
+            if (showUnreadDot) {
+                Box(
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 1.dp, y = (-1).dp)
+                            .size(11.dp)
+                            // Border in the bar background so the dot reads as
+                            // a separate marker against a busy avatar.
+                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                )
+            }
+        }
     }
 }
 
@@ -2251,6 +2271,7 @@ private fun ChatListTopBar(
                         seed = active?.accountIdHex ?: "darkmatter",
                         pictureUrl = active?.let { appState.avatarUrl(it.accountIdHex) },
                         onClick = onOpenSettings,
+                        showUnreadDot = appState.hasUnreadOnOtherAccounts,
                     )
                 }
             }
@@ -2695,6 +2716,17 @@ private fun ChatRow(
     val title by remember(item, groupTitleCopy) {
         derivedStateOf { chatListItemDisplayTitle(item, appState, groupTitleCopy) }
     }
+    // Membership-aware unread state (#625): a group the local user has been
+    // removed from keeps a frozen unread badge in the projection. Suppress it
+    // once the cached roster confirms self is no longer a member.
+    val activeAccountIdHex = appState.activeAccount?.accountIdHex
+    val rowHasUnread = item.effectiveHasUnread(activeAccountIdHex)
+    val rowUnreadCount = item.effectiveUnreadCount(activeAccountIdHex)
+    // On a message-body search hit (#594) the row's timestamp points at the
+    // matched message, which may be far older than the conversation's last
+    // activity. A title/preview-only hit (bodyMatch null) keeps the chat's
+    // last-message time.
+    val timestampAt = bodyMatch?.timelineAt ?: item.latestAt ?: 0uL
     val inviteAccount = GroupProjector.inviteAccount(item.group, item.otherMemberAccount)
     val avatarAccount =
         inviteAccount
@@ -2805,10 +2837,10 @@ private fun ChatRow(
         trailingContent = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    rememberedRelativeTime(item.latestAt ?: 0uL),
+                    rememberedRelativeTime(timestampAt),
                     style = MaterialTheme.typography.labelSmall,
                     color =
-                        if (item.hasUnread) {
+                        if (rowHasUnread) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -2818,8 +2850,8 @@ private fun ChatRow(
                     Badge { Text(stringResource(R.string.invited)) }
                 } else if (item.group.pendingConfirmation) {
                     Badge { Text(stringResource(R.string.invite)) }
-                } else if (item.hasUnread) {
-                    UnreadCountBadge(item.unreadCount)
+                } else if (rowHasUnread) {
+                    UnreadCountBadge(rowUnreadCount)
                 }
             }
         },
