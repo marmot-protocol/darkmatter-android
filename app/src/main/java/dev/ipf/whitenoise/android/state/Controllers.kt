@@ -3933,6 +3933,29 @@ class ConversationController(
             }.getOrDefault(false)
         }
 
+    /**
+     * Set the per-group disappearing-message retention. `0` disables it; any
+     * positive value is the NIP-40 expiration the engine applies to outgoing
+     * kind:445 events. Optimistically updates the local group so the row
+     * reflects the new value without waiting for the group-state subscription.
+     */
+    suspend fun updateMessageRetention(disappearingMessageSecs: ULong): Boolean =
+        withMutationLockResult(false) {
+            lastMutationError = null
+            val account = appState.activeAccountRef ?: return@withMutationLockResult false
+            runCatching {
+                appState.marmotIo { updateMessageRetention(account, group.groupIdHex, disappearingMessageSecs) }
+                group = group.copy(disappearingMessageSecs = disappearingMessageSecs)
+                appState.present(R.string.toast_disappearing_messages_updated)
+                true
+            }.onFailure {
+                it.rethrowIfCancellation()
+                val message = mutationError(it)
+                lastMutationError = message
+                appState.present(R.string.toast_couldnt_update_disappearing, AppText.Plain(message))
+            }.getOrDefault(false)
+        }
+
     suspend fun stepDownAsAdmin(): Boolean =
         withMutationLockResult(false) {
             lastMutationError = null

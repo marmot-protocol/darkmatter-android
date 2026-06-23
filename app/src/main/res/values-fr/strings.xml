@@ -735,4 +735,24 @@
     <string name="shared_media_saved">Enregistré</string>
     <string name="shared_media_save_failed">Impossible d\'enregistrer le fichier</string>
     <string name="shared_media_voice_failed">Impossible de lire le message vocal</string>
+    <string name="disappearing_messages">Messages éphémères</string>
+    <string name="disappearing_off">Désactivé</string>
+    <string name="disappearing_1_day">1 jour</string>
+    <string name="disappearing_7_days">7 jours</string>
+    <string name="disappearing_30_days">30 jours</string>
+    <string name="disappearing_90_days">90 jours</string>
+    <string name="disappearing_custom">Personnalisé</string>
+    <string name="disappearing_days_format">%1$d jours</string>
+    <string name="disappearing_hours_format">%1$d heures</string>
+    <string name="disappearing_minutes_format">%1$d minutes</string>
+    <string name="disappearing_unit_minutes">Minutes</string>
+    <string name="disappearing_unit_hours">Heures</string>
+    <string name="disappearing_unit_days">Jours</string>
+    <string name="disappearing_custom_amount_label">Quantité</string>
+    <string name="disappearing_row_hint_admin">Appuyez pour définir la durée de vie des nouveaux messages</string>
+    <string name="disappearing_row_hint_readonly">Seuls les administrateurs peuvent le modifier</string>
+    <string name="toast_disappearing_messages_updated">Messages éphémères mis à jour</string>
+    <string name="toast_couldnt_update_disappearing">Impossible de mettre à jour les messages éphémères</string>
+    <string name="save">Enregistrer</string>
+
 </resources>

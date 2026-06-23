@@ -10434,6 +10434,7 @@ private fun GroupDetailsScreen(
 
     val sharedMediaTiles = rememberSharedMediaTiles(controller, appState)
     var showMediaLibrary by remember(controller.group.groupIdHex) { mutableStateOf(false) }
+    var showDisappearingPicker by remember(controller.group.groupIdHex) { mutableStateOf(false) }
 
     if (showMediaLibrary) {
         BackHandler { showMediaLibrary = false }
@@ -10589,6 +10590,49 @@ private fun GroupDetailsScreen(
                 onSeeAll = { showMediaLibrary = true },
                 onJumpToMessage = onJumpToMessage,
             )
+
+            SectionCard(title = stringResource(R.string.disappearing_messages)) {
+                val canEdit = controller.isSelfMember && controller.isSelfAdmin
+                val inProgress = activeMutation?.action == GroupMutationAction.DisappearingMessages
+                ListItem(
+                    modifier =
+                        if (canEdit && activeMutation == null && !controller.mutationInFlight) {
+                            Modifier.clickable { showDisappearingPicker = true }
+                        } else {
+                            Modifier
+                        },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    leadingContent = { Icon(Icons.Default.Schedule, contentDescription = null) },
+                    headlineContent = { Text(disappearingMessagesLabel(controller.group.disappearingMessageSecs.toLong())) },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                if (canEdit) R.string.disappearing_row_hint_admin else R.string.disappearing_row_hint_readonly,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    trailingContent = {
+                        if (inProgress) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        }
+                    },
+                )
+            }
+
+            if (showDisappearingPicker) {
+                DisappearingMessagesPickerDialog(
+                    currentSecs = controller.group.disappearingMessageSecs.toLong(),
+                    onDismiss = { showDisappearingPicker = false },
+                    onPick = { secs ->
+                        showDisappearingPicker = false
+                        runGroupMutation(
+                            action = GroupMutationAction.DisappearingMessages,
+                            mutation = { controller.updateMessageRetention(secs.toULong()) },
+                        )
+                    },
+                )
+            }
 
             SectionCardWithAction(
                 title = "${stringResource(R.string.members)} · ${controller.members.size}",
@@ -11709,6 +11753,119 @@ private sealed class DetailsConfirm {
     ) : DetailsConfirm()
 }
 
+// Disappearing-message timer presets, in seconds. 0 = off. Custom durations
+// fall outside this set and render via [disappearingMessagesLabel]'s day/hour/
+// minute fallback.
+private val disappearingPresetSecs = listOf(0L, 86_400L, 604_800L, 2_592_000L, 7_776_000L)
+
+@Composable
+private fun disappearingMessagesLabel(secs: Long): String =
+    when (secs) {
+        0L -> stringResource(R.string.disappearing_off)
+        86_400L -> stringResource(R.string.disappearing_1_day)
+        604_800L -> stringResource(R.string.disappearing_7_days)
+        2_592_000L -> stringResource(R.string.disappearing_30_days)
+        7_776_000L -> stringResource(R.string.disappearing_90_days)
+        else ->
+            when {
+                secs % 86_400L == 0L -> stringResource(R.string.disappearing_days_format, secs / 86_400L)
+                secs % 3_600L == 0L -> stringResource(R.string.disappearing_hours_format, secs / 3_600L)
+                else -> stringResource(R.string.disappearing_minutes_format, (secs + 59L) / 60L)
+            }
+    }
+
+// Preset + Custom picker. Custom opens a secondary numeric dialog. Each tap
+// commits immediately via [onPick] (the caller routes it through the group
+// mutation lock), matching the rest of the details-sheet actions.
+@Composable
+private fun DisappearingMessagesPickerDialog(
+    currentSecs: Long,
+    onDismiss: () -> Unit,
+    onPick: (Long) -> Unit,
+) {
+    var showCustom by remember { mutableStateOf(false) }
+    if (showCustom) {
+        DisappearingCustomDialog(
+            onDismiss = { showCustom = false },
+            onConfirm = onPick,
+        )
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.disappearing_messages)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                disappearingPresetSecs.forEach { secs ->
+                    SelectableSettingsRow(
+                        title = disappearingMessagesLabel(secs),
+                        selected = currentSecs == secs,
+                        onClick = { onPick(secs) },
+                    )
+                }
+                SelectableSettingsRow(
+                    title = stringResource(R.string.disappearing_custom),
+                    selected = currentSecs !in disappearingPresetSecs,
+                    onClick = { showCustom = true },
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun DisappearingCustomDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    val units =
+        listOf(
+            R.string.disappearing_unit_minutes to 60L,
+            R.string.disappearing_unit_hours to 3_600L,
+            R.string.disappearing_unit_days to 86_400L,
+        )
+    var amount by remember { mutableStateOf("") }
+    var unitIndex by remember { mutableStateOf(2) }
+    val count = amount.toLongOrNull() ?: 0L
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.disappearing_custom)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it.filter(Char::isDigit).take(6) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    label = { Text(stringResource(R.string.disappearing_custom_amount_label)) },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    units.forEachIndexed { i, (labelRes, _) ->
+                        FilterChip(
+                            selected = unitIndex == i,
+                            onClick = { unitIndex = i },
+                            label = { Text(stringResource(labelRes)) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = count > 0L,
+                onClick = { onConfirm(count * units[unitIndex].second) },
+            ) { Text(stringResource(R.string.save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
 private enum class GroupMutationAction {
     SaveProfile,
     InviteMember,
@@ -11717,6 +11874,7 @@ private enum class GroupMutationAction {
     DemoteAdmin,
     SelfDemoteAdmin,
     TransferAdmin,
+    DisappearingMessages,
     Archive,
     Leave,
 }

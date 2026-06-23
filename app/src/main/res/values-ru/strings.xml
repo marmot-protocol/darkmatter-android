@@ -746,4 +746,24 @@
     <string name="shared_media_saved">Сохранено</string>
     <string name="shared_media_save_failed">Не удалось сохранить файл</string>
     <string name="shared_media_voice_failed">Не удалось воспроизвести голосовое сообщение</string>
+    <string name="disappearing_messages">Исчезающие сообщения</string>
+    <string name="disappearing_off">Выключено</string>
+    <string name="disappearing_1_day">1 день</string>
+    <string name="disappearing_7_days">7 дней</string>
+    <string name="disappearing_30_days">30 дней</string>
+    <string name="disappearing_90_days">90 дней</string>
+    <string name="disappearing_custom">Другое</string>
+    <string name="disappearing_days_format">%1$d дн.</string>
+    <string name="disappearing_hours_format">%1$d ч.</string>
+    <string name="disappearing_minutes_format">%1$d мин.</string>
+    <string name="disappearing_unit_minutes">Минуты</string>
+    <string name="disappearing_unit_hours">Часы</string>
+    <string name="disappearing_unit_days">Дни</string>
+    <string name="disappearing_custom_amount_label">Количество</string>
+    <string name="disappearing_row_hint_admin">Нажмите, чтобы задать срок жизни новых сообщений</string>
+    <string name="disappearing_row_hint_readonly">Изменить это могут только администраторы</string>
+    <string name="toast_disappearing_messages_updated">Исчезающие сообщения обновлены</string>
+    <string name="toast_couldnt_update_disappearing">Не удалось обновить исчезающие сообщения</string>
+    <string name="save">Сохранить</string>
+
 </resources>

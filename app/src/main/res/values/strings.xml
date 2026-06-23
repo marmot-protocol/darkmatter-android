@@ -749,4 +749,24 @@
     <string name="shared_media_saved">Saved</string>
     <string name="shared_media_save_failed">Couldn\'t save file</string>
     <string name="shared_media_voice_failed">Couldn\'t play voice message</string>
+    <string name="disappearing_messages">Disappearing messages</string>
+    <string name="disappearing_off">Off</string>
+    <string name="disappearing_1_day">1 day</string>
+    <string name="disappearing_7_days">7 days</string>
+    <string name="disappearing_30_days">30 days</string>
+    <string name="disappearing_90_days">90 days</string>
+    <string name="disappearing_custom">Custom</string>
+    <string name="disappearing_days_format">%1$d days</string>
+    <string name="disappearing_hours_format">%1$d hours</string>
+    <string name="disappearing_minutes_format">%1$d minutes</string>
+    <string name="disappearing_unit_minutes">Minutes</string>
+    <string name="disappearing_unit_hours">Hours</string>
+    <string name="disappearing_unit_days">Days</string>
+    <string name="disappearing_custom_amount_label">Amount</string>
+    <string name="disappearing_row_hint_admin">Tap to set how long new messages last</string>
+    <string name="disappearing_row_hint_readonly">Only admins can change this</string>
+    <string name="toast_disappearing_messages_updated">Disappearing messages updated</string>
+    <string name="toast_couldnt_update_disappearing">Couldn\'t update disappearing messages</string>
+    <string name="save">Save</string>
+
 </resources>

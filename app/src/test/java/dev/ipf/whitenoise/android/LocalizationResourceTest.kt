@@ -265,6 +265,10 @@ class LocalizationResourceTest {
                 // in some locales ("Images" in French, "Videos" in German).
                 "shared_media_tab_images",
                 "shared_media_tab_videos",
+                // "minute(s)" is spelled identically in French; the unit label
+                // and the custom-duration format legitimately match English.
+                "disappearing_unit_minutes",
+                "disappearing_minutes_format",
             )
     }
 }

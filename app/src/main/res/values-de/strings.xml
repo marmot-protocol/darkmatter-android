@@ -732,4 +732,24 @@
     <string name="shared_media_saved">Gespeichert</string>
     <string name="shared_media_save_failed">Datei konnte nicht gespeichert werden</string>
     <string name="shared_media_voice_failed">Sprachnachricht konnte nicht abgespielt werden</string>
+    <string name="disappearing_messages">Verschwindende Nachrichten</string>
+    <string name="disappearing_off">Aus</string>
+    <string name="disappearing_1_day">1 Tag</string>
+    <string name="disappearing_7_days">7 Tage</string>
+    <string name="disappearing_30_days">30 Tage</string>
+    <string name="disappearing_90_days">90 Tage</string>
+    <string name="disappearing_custom">Benutzerdefiniert</string>
+    <string name="disappearing_days_format">%1$d Tage</string>
+    <string name="disappearing_hours_format">%1$d Stunden</string>
+    <string name="disappearing_minutes_format">%1$d Minuten</string>
+    <string name="disappearing_unit_minutes">Minuten</string>
+    <string name="disappearing_unit_hours">Stunden</string>
+    <string name="disappearing_unit_days">Tage</string>
+    <string name="disappearing_custom_amount_label">Anzahl</string>
+    <string name="disappearing_row_hint_admin">Tippen, um die Lebensdauer neuer Nachrichten festzulegen</string>
+    <string name="disappearing_row_hint_readonly">Nur Admins können das ändern</string>
+    <string name="toast_disappearing_messages_updated">Verschwindende Nachrichten aktualisiert</string>
+    <string name="toast_couldnt_update_disappearing">Verschwindende Nachrichten konnten nicht aktualisiert werden</string>
+    <string name="save">Speichern</string>
+
 </resources>

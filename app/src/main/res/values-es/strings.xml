@@ -735,4 +735,24 @@
     <string name="shared_media_saved">Guardado</string>
     <string name="shared_media_save_failed">No se pudo guardar el archivo</string>
     <string name="shared_media_voice_failed">No se pudo reproducir el mensaje de voz</string>
+    <string name="disappearing_messages">Mensajes temporales</string>
+    <string name="disappearing_off">Desactivado</string>
+    <string name="disappearing_1_day">1 día</string>
+    <string name="disappearing_7_days">7 días</string>
+    <string name="disappearing_30_days">30 días</string>
+    <string name="disappearing_90_days">90 días</string>
+    <string name="disappearing_custom">Personalizado</string>
+    <string name="disappearing_days_format">%1$d días</string>
+    <string name="disappearing_hours_format">%1$d horas</string>
+    <string name="disappearing_minutes_format">%1$d minutos</string>
+    <string name="disappearing_unit_minutes">Minutos</string>
+    <string name="disappearing_unit_hours">Horas</string>
+    <string name="disappearing_unit_days">Días</string>
+    <string name="disappearing_custom_amount_label">Cantidad</string>
+    <string name="disappearing_row_hint_admin">Toca para definir cuánto duran los mensajes nuevos</string>
+    <string name="disappearing_row_hint_readonly">Solo los administradores pueden cambiarlo</string>
+    <string name="toast_disappearing_messages_updated">Mensajes temporales actualizados</string>
+    <string name="toast_couldnt_update_disappearing">No se pudieron actualizar los mensajes temporales</string>
+    <string name="save">Guardar</string>
+
 </resources>
