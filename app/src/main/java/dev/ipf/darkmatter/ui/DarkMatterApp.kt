@@ -1463,12 +1463,20 @@ fun AccountAvatarButton(
     showUnreadDot: Boolean = false,
 ) {
     val openSettingsDescription = stringResource(R.string.open_settings)
+    val otherAccountUnreadDescription =
+        stringResource(R.string.other_account_unread_indicator)
+    val avatarContentDescription =
+        if (showUnreadDot) {
+            "$openSettingsDescription, $otherAccountUnreadDescription"
+        } else {
+            openSettingsDescription
+        }
     IconButton(
         onClick = onClick,
         modifier =
             modifier
                 .size(56.dp)
-                .semantics { contentDescription = openSettingsDescription },
+                .semantics { contentDescription = avatarContentDescription },
     ) {
         Box {
             Avatar(
