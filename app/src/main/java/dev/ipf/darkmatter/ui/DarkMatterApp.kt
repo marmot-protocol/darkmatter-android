@@ -1526,6 +1526,88 @@ fun AccountAvatarButton(
     }
 }
 
+// Cap of non-active account avatars shown inline in the chat-list top bar; past
+// this the rightmost slot becomes a "+N" that opens the full switcher.
+private const val MAX_TOP_BAR_OTHER_ACCOUNTS = 3
+
+// Other signed-in accounts shown beside the active-account avatar (#343): tap to
+// switch (lands on that account's chat list), long-press for the full switcher,
+// each carrying the same unread dot as the active avatar. Hidden when the active
+// account is the only one signed in.
+@Composable
+private fun OtherAccountAvatarsRow(
+    appState: DarkMatterAppState,
+    onSwitchAccount: (String) -> Unit,
+    onOpenSwitcher: () -> Unit,
+) {
+    val activeLabel = appState.activeAccount?.label
+    val others = appState.accounts.filterNot { it.label == activeLabel }
+    if (others.isEmpty()) return
+    val shown = others.take(MAX_TOP_BAR_OTHER_ACCOUNTS)
+    val overflow = others.size - shown.size
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        shown.forEach { account ->
+            OtherAccountAvatar(
+                title = appState.displayName(account.accountIdHex),
+                seed = account.accountIdHex,
+                pictureUrl = appState.avatarUrl(account.accountIdHex),
+                showUnreadDot = appState.unreadCountForAccount(account.label) > 0uL,
+                onClick = { onSwitchAccount(account.label) },
+                onLongClick = onOpenSwitcher,
+            )
+        }
+        if (overflow > 0) {
+            Box(
+                modifier =
+                    Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onOpenSwitcher)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text("+$overflow", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun OtherAccountAvatar(
+    title: String,
+    seed: String,
+    pictureUrl: String?,
+    showUnreadDot: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val switchDescription = "${stringResource(R.string.switch_account)}: $title"
+    Box(
+        modifier =
+            Modifier
+                .clip(CircleShape)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(3.dp)
+                .semantics { contentDescription = switchDescription },
+    ) {
+        Avatar(title = title, seed = seed, size = 28.dp, pictureUrl = pictureUrl)
+        if (showUnreadDot) {
+            Box(
+                modifier =
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 1.dp, y = (-1).dp)
+                        .size(9.dp)
+                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatsScreen(
@@ -1781,6 +1863,7 @@ private fun ChatsScreen(
                 onSearchQueryChange = { searchQuery = it },
                 onSearchOpen = { searchOpen = true },
                 onSearchClose = { searchOpen = false },
+                onSwitchAccount = { label -> scope.launch { appState.setActiveAccount(label) } },
                 onMic = {
                     val intent =
                         android.content
@@ -2497,6 +2580,7 @@ private fun ChatListTopBar(
     onSearchClose: () -> Unit,
     onMic: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSwitchAccount: (String) -> Unit,
 ) {
     TopAppBar(
         title = {
@@ -2565,6 +2649,11 @@ private fun ChatListTopBar(
                     )
                 }
             } else {
+                OtherAccountAvatarsRow(
+                    appState = appState,
+                    onSwitchAccount = onSwitchAccount,
+                    onOpenSwitcher = onOpenSettings,
+                )
                 IconButton(onClick = onSearchOpen) {
                     Icon(
                         Icons.Default.Search,
