@@ -9470,6 +9470,28 @@ private fun ConversationScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
+                                // Read-only disappearing-timer indicator; the whole
+                                // title strip already opens Details, where the picker
+                                // lives (sub-issue 2/7). Hidden when the timer is off.
+                                val disappearingSecs = controller.group.disappearingMessageSecs.toLong()
+                                if (disappearingSecs > 0L) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Schedule,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(13.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            disappearingMessagesLabel(disappearingSecs),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
                             }
                         }
                     },
