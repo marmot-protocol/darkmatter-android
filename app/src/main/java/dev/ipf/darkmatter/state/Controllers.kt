@@ -4015,6 +4015,9 @@ class ConversationController(
 
     suspend fun exportConversationTranscriptFile(cacheDir: java.io.File): java.io.File? {
         val account = conversationAccountRef ?: return null
+        // One timestamp for the whole export so the JSON `exported_at` and the
+        // file name stamp match instead of drifting across two now() reads.
+        val exportedAt = java.time.Instant.now()
         return runCatching {
             val messages =
                 withContext(Dispatchers.Default) {
@@ -4032,7 +4035,7 @@ class ConversationController(
                 }
             val data =
                 withContext(Dispatchers.Default) {
-                    val document = ConversationTranscriptExport.makeDocument(group, messages)
+                    val document = ConversationTranscriptExport.makeDocument(group, messages, exportedAt)
                     ConversationTranscriptExport.encodeJson(document)
                 }
             withContext(Dispatchers.IO) {
@@ -4040,6 +4043,7 @@ class ConversationController(
                     cacheDir = cacheDir,
                     data = data,
                     groupIdHex = group.groupIdHex,
+                    exportedAt = exportedAt,
                 )
             }
         }.onFailure {
