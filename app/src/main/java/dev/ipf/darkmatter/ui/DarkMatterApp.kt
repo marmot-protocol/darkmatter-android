@@ -4077,25 +4077,26 @@ private fun MediaImageBubble(
     LaunchedEffect(key, attachmentIndex, epoch, startDownload, reloadToken) {
         if (bitmap != null) return@LaunchedEffect // already have a decoded thumbnail
         if (!startDownload) return@LaunchedEffect
+        // Own optimistic sends still have their bytes only in the pending list
+        // (the projection hasn't reconciled them into the L1 cache yet). Use those
+        // directly so the bubble paints during the upload window instead of hanging
+        // on a missing-epoch FFI.
+        val pendingBytes =
+            if (mine) {
+                controller.pendingAttachmentsList(key).getOrNull(attachmentIndex)?.plaintextBytes
+            } else {
+                null
+            }
         // The imeta-tag parser falls back to sourceEpoch=0 (the wire format
         // doesn't carry it). Calling downloadMedia with epoch=0 errors with
         // "missing encrypted media secret for epoch 0". Wait for the typed
         // reference upgrade via `refreshMediaReferences` — once it lands,
         // `epoch` re-keys this effect with the real value. The spinner stays
         // visible during the wait (bitmap=null, failed=false, startDownload).
-        if (epoch == 0uL) return@LaunchedEffect
+        // Skip the wait when we already hold the pending bytes (own upload window).
+        if (pendingBytes == null && epoch == 0uL) return@LaunchedEffect
         failed = false
         try {
-            // Own optimistic sends still have their bytes only in the
-            // pending list (the projection hasn't reconciled them into the
-            // L1 cache yet). Use those directly so the bubble paints during
-            // the upload window instead of hanging on a missing-epoch FFI.
-            val pendingBytes =
-                if (mine) {
-                    controller.pendingAttachmentsList(key).getOrNull(attachmentIndex)?.plaintextBytes
-                } else {
-                    null
-                }
             val data = pendingBytes ?: controller.downloadAttachment(key, attachmentIndex, reference)
             // Decode a sampled bitmap sized to the bubble — a full 1920px
             // image would be a ~14 MB ARGB_8888 bitmap per visible row.
