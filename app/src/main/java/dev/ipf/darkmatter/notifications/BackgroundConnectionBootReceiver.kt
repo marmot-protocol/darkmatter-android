@@ -29,6 +29,10 @@ class BackgroundConnectionBootReceiver : BroadcastReceiver() {
                 if (!BackgroundConnectionPolicy.shouldStartFromSystemWake(action, enabled)) return@launch
                 val started = NotificationStreamForegroundService.start(appContext)
                 if (BuildConfig.DEBUG) Log.i("DMForegroundSvc", "system wake action=$action started=$started")
+            } catch (t: Throwable) {
+                // SupervisorJob has no exception handler; an uncaught throwable here
+                // would reach the default handler and crash during the boot window.
+                if (BuildConfig.DEBUG) Log.w("DMForegroundSvc", "system wake failed action=$action", t)
             } finally {
                 pending.finish()
                 scope.cancel()
