@@ -3,32 +3,13 @@ package dev.ipf.darkmatter.core
 import java.util.Locale
 
 /**
- * Pure, Compose-free matching/derivation for the New Chat / Create Group
- * display-name search (issue #291).
- *
- * The Android app must not keep its own cache of Dark Matter protocol data
- * (see AGENTS.md), so there is no "list all known profiles" / "search
- * profiles" FFI to call. The candidate set is instead DERIVED in the UI from
- * the already-loaded chat-list state (each chat's member snapshot) and the
- * existing per-account profile accessors, then fed into [filterByDisplayName]
- * here. Keeping the matching here makes it unit-testable without standing up
- * Compose, mirroring [ChatListIdentifierSearch].
- *
- * Matching semantics mirror the chat-list search (`applyChatListSearchAndFilter`
- * in the UI): case-insensitive, trimmed, substring containment. Results are
- * de-duped by account hex and ordered prefix-matches-first so the closest
- * names surface at the top of the list.
+ * Pure, Compose-free name matching for the New Chat / Create Group recipient
+ * search. Candidates are derived in the UI from already-loaded chat-list state
+ * (no profile-enumeration FFI exists); this only does the matching, so it stays
+ * unit-testable. Semantics mirror the chat-list search: case-insensitive,
+ * trimmed, substring, de-duped by hex, prefix matches first.
  */
 object RecipientSearch {
-    /**
-     * One searchable recipient candidate derived from local chat-list state.
-     *
-     * @param accountIdHex the member's Nostr account id (lowercase hex). The
-     *   de-dupe + active-account exclusion key.
-     * @param displayName the resolved display label (kind:0 name, account
-     *   label, or short-npub fallback) used for substring matching.
-     * @param npub the bech32 npub for display in the result row.
-     */
     data class Candidate(
         val accountIdHex: String,
         val displayName: String,
@@ -36,18 +17,9 @@ object RecipientSearch {
     )
 
     /**
-     * Filter [candidates] to those whose [Candidate.displayName] contains the
-     * trimmed, lowercased [query] as a substring, excluding the active account
-     * ([activeAccountIdHex], compared case-insensitively) and de-duping by
-     * account hex (first occurrence wins).
-     *
-     * Ordering: prefix matches (name starts with the query) come before
-     * contained-only matches; within each bucket the original candidate order
-     * is preserved (a stable sort), so the caller can pre-sort by recency or
-     * name if it wants a secondary tie-break.
-     *
-     * A blank [query] returns an empty list — the name search only kicks in
-     * once the user has typed something to match against.
+     * Display-name substring matches for [query], excluding [activeAccountIdHex],
+     * de-duped by hex (first wins), prefix matches before contained (stable
+     * within each). Blank query returns empty.
      */
     fun filterByDisplayName(
         query: String,

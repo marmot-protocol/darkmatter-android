@@ -2193,7 +2193,7 @@ private fun RecipientPreviewCard(
     // resolve (npub validation, NIP-05 lookup) and starts fresh. A plain-text
     // name isn't an identifier to resolve — it drives the local name search —
     // so it must never enter the Resolving state, or the card flashes a spinner
-    // on every keystroke and hides the name results (#291).
+    // on every keystroke and hides the name results.
     var resolving by remember(trimmed) { mutableStateOf(trimmed.isNotEmpty() && !isPlainNameQuery(trimmed)) }
     var resolvedHex by remember(trimmed) { mutableStateOf<String?>(null) }
 
@@ -2289,7 +2289,7 @@ private fun RecipientPreviewCard(
                     )
                 }
             }
-        // A plain display-name query (#291) isn't a malformed identifier — it
+        // A plain display-name query isn't a malformed identifier — it
         // drives the local name search ([RecipientSearchResults]) instead, so
         // suppress the "couldn't resolve" card here rather than painting an
         // error above the valid name-search rows. The reported state stays
@@ -2410,12 +2410,8 @@ private fun RecipientPreviewCard(
 }
 
 /**
- * Whether [query] should drive the local display-name search (#291) rather
- * than the single-result [RecipientPreviewCard]. Plain text routes to the name
- * search; an npub / profile link / NIP-05 / bare hex routes to the preview card
- * (the identifier path resolves to exactly one key). Mirrors the precedence the
- * preview card uses: [ChatListIdentifierSearch.classify] for npub/NIP-05 and
- * [RecipientReference.normalize] for the bare-hex case.
+ * True when [query] is plain text (name search) rather than an identifier
+ * (npub / profile link / NIP-05 / bare hex) that routes to the preview card.
  */
 private fun isPlainNameQuery(query: String): Boolean {
     val trimmed = query.trim()
@@ -2426,16 +2422,9 @@ private fun isPlainNameQuery(query: String): Boolean {
 }
 
 /**
- * Distinct, non-active-account recipient candidates derived from the
- * already-loaded chat-list state (#291). Each chat carries a member snapshot;
- * we enumerate every member hex across all chats, drop the active account, and
- * resolve each to a display name + npub via the existing per-account accessors.
- *
- * This is UI-derived state over data already in memory — NOT a new Android-owned
- * cache of protocol data (AGENTS.md): nothing is persisted, and the list is
- * recomputed from [DarkMatterAppState.chatListItems] on demand. There is no FFI
- * to enumerate known profiles, so the chat-list rosters are the candidate set,
- * exactly as the issue prescribes.
+ * Distinct, non-active-account recipient candidates derived on demand from the
+ * already-loaded chat-list state — UI-derived, not a new cache of protocol data
+ * (AGENTS.md), since no profile-enumeration FFI exists.
  */
 private fun deriveRecipientCandidates(
     appState: DarkMatterAppState,
@@ -2461,7 +2450,7 @@ private fun deriveRecipientCandidates(
         // Group rosters give the members. A DM's roster, though, often holds only
         // the active account — the counterpart isn't an enumerable member — so
         // also take the resolved DM counterpart and the latest message's sender
-        // (the "recent senders" source #291 calls for) to surface DM partners.
+        // (the recent-sender source) to surface DM partners.
         item.memberSnapshot?.members?.forEach { add(it.memberIdHex) }
         add(item.otherMemberAccount)
         add(item.latest?.sender)
@@ -2472,7 +2461,7 @@ private fun deriveRecipientCandidates(
 
 /**
  * Display-name search result list shown below the recipient input in
- * [NewChatSheet] (DM branch) and the Add-member sheet (#291). Renders only for
+ * [NewChatSheet] (DM branch) and the Add-member sheet. Renders only for
  * a plain-text [query] ([isPlainNameQuery]); identifier inputs keep using
  * [RecipientPreviewCard]. Each row shows the avatar + display name + (verified)
  * NIP-05 + truncated npub.
@@ -2511,12 +2500,7 @@ private fun RecipientSearchResults(
     }
 }
 
-/**
- * One row of the [RecipientSearchResults] list (#291). Resolves the NIP-05
- * verification state the same way [RecipientPreviewCard] does — a kind:0 nip05
- * earns a verified check only when it independently resolves back to this
- * pubkey — so the row never paints a false trust signal.
- */
+/** One row of the [RecipientSearchResults] list: avatar, display name, npub. */
 @Composable
 private fun RecipientSearchResultRow(
     candidate: RecipientSearch.Candidate,
@@ -2524,80 +2508,36 @@ private fun RecipientSearchResultRow(
     onSelect: () -> Unit,
 ) {
     val hex = candidate.accountIdHex
-    val profile = appState.userProfile(hex)
-    val pictureUrl = appState.avatarUrl(hex) ?: ProfileSanitizer.imageUrl(profile?.picture)
-    val nip05 =
-        profile
-            ?.nip05
-            ?.trim()
-            ?.takeIf { ProfileFieldValidation.isAcceptableNip05(it) }
-    // A kind:0 nip05 is a self-assertion until it resolves back to this pubkey;
-    // only then earns a verified check (mirrors RecipientPreviewCard / #631).
-    var nip05ResolvedHex by remember(nip05, hex) { mutableStateOf<String?>(null) }
-    LaunchedEffect(nip05, hex) {
-        nip05ResolvedHex = null
-        val declared = nip05 ?: return@LaunchedEffect
-        nip05ResolvedHex = Nip05Resolver.resolve(declared)
-    }
-    val nip05Verified = recipientNip05Verified(nip05, nip05ResolvedHex, hex)
+    val pictureUrl = appState.avatarUrl(hex) ?: ProfileSanitizer.imageUrl(appState.userProfile(hex)?.picture)
     val shortNpub = IdentityFormatter.short(candidate.npub, prefix = 12, suffix = 8)
     val title = candidate.displayName.takeUnless { it.isBlank() } ?: IdentityFormatter.short(candidate.npub)
     OutlinedCard(
         modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { onSelect() },
     ) {
-        Column(
+        Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Avatar(
-                    title = title,
-                    seed = hex,
-                    size = 48.dp,
-                    pictureUrl = pictureUrl,
+            Avatar(title = title, seed = hex, size = 48.dp, pictureUrl = pictureUrl)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (nip05 != null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            if (nip05Verified) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = stringResource(R.string.recipient_preview_nip05_verified),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp),
-                                )
-                            }
-                            Text(
-                                nip05,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    Text(
-                        shortNpub,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    shortNpub,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -3794,7 +3734,7 @@ private fun NewChatSheet(
                     appState = appState,
                     onResolutionChanged = { recipientPreview = it },
                 )
-                // Plain-text name search over local chat-list contacts (#291).
+                // Plain-text name search over local chat-list contacts.
                 // Tapping a row fills the npub into the field so the existing
                 // submit/resolve path uses it; "Open existing chat" reuses the
                 // sheet's onOpenConversation handoff instead of starting a dupe.
@@ -10522,7 +10462,7 @@ private fun GroupDetailsScreen(
                     appState = appState,
                     onResolutionChanged = { pendingMemberPreview = it },
                 )
-                // Plain-text name search over local chat-list contacts (#291).
+                // Plain-text name search over local chat-list contacts.
                 // The Create Group flow keeps every row addable (tapping fills
                 // the npub into the field), but still shows the "Already in
                 // chats" badge — it does NOT offer "Open existing chat".
