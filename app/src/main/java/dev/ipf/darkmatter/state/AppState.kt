@@ -1342,7 +1342,16 @@ class DarkMatterAppState(
                         ?: 0uL
                 }
         }
-        accountUnreadCounts = refreshedCounts
+        // Re-read after the FFI suspension: a single-key merge
+        // (updateAccountUnreadCount / refreshAccountUnreadCount) may have landed
+        // while we were suspended. Those values are fresher than our snapshot, so
+        // let them win for keys we still track; a wholesale assign would clobber
+        // them. Accounts absent from refreshedCounts (removed) are still dropped.
+        val merged = refreshedCounts.toMutableMap()
+        accountUnreadCounts.forEach { (ref, count) ->
+            if (previous[ref] != count && merged.containsKey(ref)) merged[ref] = count
+        }
+        accountUnreadCounts = merged
     }
 
     /**
