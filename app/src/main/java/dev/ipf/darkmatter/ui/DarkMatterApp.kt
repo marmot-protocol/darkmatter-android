@@ -6266,7 +6266,9 @@ internal fun FullScreenMediaViewer(
             initialPage = startIndex.coerceIn(0, pages.lastIndex),
             pageCount = { pages.size },
         )
-    val currentPage = pages[pagerState.currentPage]
+    // pagerState outlives a shrinking pages list (album reconcile): currentPage
+    // isn't re-clamped to the new lastIndex for a frame, so clamp at the read.
+    val currentPage = pages[pagerState.currentPage.coerceIn(0, pages.lastIndex)]
     val currentReference = currentPage.reference
     val currentAttachmentIndex = currentPage.attachmentIndex
     val currentMessageIdHex = currentPage.messageIdHex
@@ -6300,7 +6302,7 @@ internal fun FullScreenMediaViewer(
                 // the horizontal drag. At scale 1× the pager wins.
                 userScrollEnabled = scale <= 1f,
             ) { page ->
-                val pageDescriptor = pages[page]
+                val pageDescriptor = pages[page.coerceIn(0, pages.lastIndex)]
                 if (MediaReferenceParser.isVideoMedia(pageDescriptor.reference)) {
                     VideoViewerPage(
                         controller = controller,
