@@ -3639,7 +3639,6 @@ private fun NewChatSheet(
                             emptyList()
                         }
                     val recipients = newChatMemberRefs(directMessage, normalizedPending)
-                    pending = ""
                     val account = appState.activeAccountRef ?: return@Button
                     // Reuse an existing 1:1 instead of creating a duplicate.
                     if (directMessage) {
@@ -3665,6 +3664,7 @@ private fun NewChatSheet(
                                 )
                             }
                         }.onSuccess { groupIdHex ->
+                            pending = ""
                             appState.present(R.string.toast_chat_created)
                             // #321/#385: navigate straight into the new
                             // conversation instead of leaving the user on the
