@@ -5813,6 +5813,9 @@ private fun VoiceWaveform(
                     // Consume so the bubble's parent swipe-to-reply gesture
                     // doesn't snatch a rightward drag mid-scrub.
                     down.consume()
+                    // Before the first onSizeChanged, widthPx is 0 → x/0 = NaN → a
+                    // stray seek-to-zero. Skip the gesture until the size is known.
+                    if (widthPx <= 0f) return@awaitEachGesture
                     onSeek((down.position.x / widthPx).coerceIn(0f, 1f))
                     while (true) {
                         val event = awaitPointerEvent()
