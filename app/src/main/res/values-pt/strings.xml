@@ -761,4 +761,11 @@
 
     <string name="disappearing_tooltip_text">As mensagens desta conversa desaparecem após o tempo definido.</string>
 
+    <string name="group_system_disappearing_set">%1$s definiu que as mensagens desaparecem após %2$s</string>
+    <string name="group_system_disappearing_set_you">Você definiu que as mensagens desaparecem após %1$s</string>
+    <string name="group_system_disappearing_set_passive">As mensagens agora desaparecem após %1$s</string>
+    <string name="group_system_disappearing_off">%1$s desativou as mensagens temporárias</string>
+    <string name="group_system_disappearing_off_you">Você desativou as mensagens temporárias</string>
+    <string name="group_system_disappearing_off_passive">As mensagens temporárias estão desativadas</string>
+
 </resources>

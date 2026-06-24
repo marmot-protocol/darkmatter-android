@@ -546,6 +546,12 @@ private fun rememberGroupSystemCopy(): GroupSystemCopy =
         adminRemovedYouPassive = stringResource(R.string.group_system_admin_removed_you_passive),
         youRenamedFormat = stringResource(R.string.group_system_you_renamed),
         youAvatarChanged = stringResource(R.string.group_system_you_avatar_changed),
+        disappearingSetFormat = stringResource(R.string.group_system_disappearing_set),
+        disappearingSetYouFormat = stringResource(R.string.group_system_disappearing_set_you),
+        disappearingSetPassiveFormat = stringResource(R.string.group_system_disappearing_set_passive),
+        disappearingOffFormat = stringResource(R.string.group_system_disappearing_off),
+        disappearingOffYou = stringResource(R.string.group_system_disappearing_off_you),
+        disappearingOffPassive = stringResource(R.string.group_system_disappearing_off_passive),
         someone = stringResource(R.string.group_system_someone),
         fallback = stringResource(R.string.group_system_fallback),
     )
@@ -7601,6 +7607,9 @@ private fun GroupSystemRow(
 ) {
     val copy = rememberGroupSystemCopy()
     val event = remember(record.plaintext, groupSystem) { GroupSystemEvents.resolve(record.plaintext, groupSystem) }
+    // Localized new-window label for the disappearing-timer "set to …" rows; null
+    // when the event isn't a timer-on change (off/other rows need no duration).
+    val retentionLabel = event?.newRetentionSeconds?.takeIf { it > 0uL }?.let { disappearingMessagesLabel(it.toLong()) }
     val summary =
         if (event != null) {
             run {
@@ -7612,6 +7621,7 @@ private fun GroupSystemRow(
                     subjectName = event.subject?.let { appState.displayName(it) },
                     actorIsSelf = GroupSystemEvents.isSelf(selfHex, actorHex),
                     subjectIsSelf = GroupSystemEvents.isSelf(selfHex, event.subject),
+                    retentionLabel = retentionLabel,
                     copy = copy,
                 )
             }

@@ -761,4 +761,11 @@
 
     <string name="disappearing_tooltip_text">Les messages de cette discussion disparaissent après le délai défini.</string>
 
+    <string name="group_system_disappearing_set">%1$s a réglé la disparition des messages sur %2$s</string>
+    <string name="group_system_disappearing_set_you">Vous avez réglé la disparition des messages sur %1$s</string>
+    <string name="group_system_disappearing_set_passive">Les messages disparaissent désormais après %1$s</string>
+    <string name="group_system_disappearing_off">%1$s a désactivé les messages éphémères</string>
+    <string name="group_system_disappearing_off_you">Vous avez désactivé les messages éphémères</string>
+    <string name="group_system_disappearing_off_passive">Les messages éphémères sont désactivés</string>
+
 </resources>

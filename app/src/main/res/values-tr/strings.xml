@@ -758,4 +758,11 @@
 
     <string name="disappearing_tooltip_text">Bu sohbetteki mesajlar ayarladığınız süre sonunda kaybolur.</string>
 
+    <string name="group_system_disappearing_set">%1$s mesajların %2$s sonra kaybolmasını ayarladı</string>
+    <string name="group_system_disappearing_set_you">Mesajların %1$s sonra kaybolmasını ayarladın</string>
+    <string name="group_system_disappearing_set_passive">Mesajlar artık %1$s sonra kayboluyor</string>
+    <string name="group_system_disappearing_off">%1$s kaybolan mesajları kapattı</string>
+    <string name="group_system_disappearing_off_you">Kaybolan mesajları kapattın</string>
+    <string name="group_system_disappearing_off_passive">Kaybolan mesajlar kapalı</string>
+
 </resources>
