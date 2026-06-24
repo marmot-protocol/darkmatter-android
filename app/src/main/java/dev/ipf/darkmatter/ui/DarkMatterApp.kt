@@ -1512,9 +1512,9 @@ fun AccountAvatarButton(
                 Box(
                     modifier =
                         Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 1.dp, y = (-1).dp)
-                            .size(11.dp)
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 1.dp, y = 1.dp)
+                            .size(12.dp)
                             // Border in the bar background so the dot reads as
                             // a separate marker against a busy avatar.
                             .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
@@ -1527,13 +1527,18 @@ fun AccountAvatarButton(
 }
 
 // Cap of non-active account avatars shown inline in the chat-list top bar; past
-// this the rightmost slot becomes a "+N" that opens the full switcher.
+// this the stack ends in a "+N" circle that opens the full switcher.
 private const val MAX_TOP_BAR_OTHER_ACCOUNTS = 3
+private val TOP_BAR_OTHER_ACCOUNT_SIZE = 34.dp
+private val TOP_BAR_OTHER_ACCOUNT_RING = 2.dp
 
-// Other signed-in accounts shown beside the active-account avatar (#343): tap to
-// switch (lands on that account's chat list), long-press for the full switcher,
-// each carrying the same unread dot as the active avatar. Hidden when the active
-// account is the only one signed in.
+// How far each avatar overlaps the previous one to read as a single stacked group.
+private val TOP_BAR_OTHER_ACCOUNT_OVERLAP = 12.dp
+
+// Other signed-in accounts, stacked beside the active-account avatar (#343): tap
+// to switch (lands on that account's chat list), long-press for the full
+// switcher, each carrying its own unread dot. Hidden when the active account is
+// the only one signed in.
 @Composable
 private fun OtherAccountAvatarsRow(
     appState: DarkMatterAppState,
@@ -1545,9 +1550,12 @@ private fun OtherAccountAvatarsRow(
     if (others.isEmpty()) return
     val shown = others.take(MAX_TOP_BAR_OTHER_ACCOUNTS)
     val overflow = others.size - shown.size
+    // Natural draw order stacks each avatar on top of the previous, so the "+N"
+    // (drawn last) sits fully on top and stays legible. Each avatar's left edge —
+    // and its unread dot — stays visible under the one in front.
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(-TOP_BAR_OTHER_ACCOUNT_OVERLAP),
     ) {
         shown.forEach { account ->
             OtherAccountAvatar(
@@ -1560,15 +1568,7 @@ private fun OtherAccountAvatarsRow(
             )
         }
         if (overflow > 0) {
-            Box(
-                modifier =
-                    Modifier
-                        .clip(CircleShape)
-                        .clickable(onClick = onOpenSwitcher)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Text("+$overflow", style = MaterialTheme.typography.labelMedium)
-            }
+            OverflowAccountChip(count = overflow, onClick = onOpenSwitcher)
         }
     }
 }
@@ -1587,22 +1587,62 @@ private fun OtherAccountAvatar(
     Box(
         modifier =
             Modifier
+                // Ring in the bar background so stacked avatars read as separate.
+                .size(TOP_BAR_OTHER_ACCOUNT_SIZE)
                 .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface)
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(3.dp)
                 .semantics { contentDescription = switchDescription },
+        contentAlignment = Alignment.Center,
     ) {
-        Avatar(title = title, seed = seed, size = 28.dp, pictureUrl = pictureUrl)
+        Avatar(
+            title = title,
+            seed = seed,
+            size = TOP_BAR_OTHER_ACCOUNT_SIZE - TOP_BAR_OTHER_ACCOUNT_RING * 2,
+            pictureUrl = pictureUrl,
+        )
         if (showUnreadDot) {
+            // Bottom-start: the left edge stays exposed when the next avatar
+            // stacks on top, so the dot isn't hidden under it.
             Box(
                 modifier =
                     Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 1.dp, y = (-1).dp)
-                        .size(9.dp)
-                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                        .align(Alignment.BottomStart)
+                        .size(10.dp)
+                        .border(TOP_BAR_OTHER_ACCOUNT_RING, MaterialTheme.colorScheme.surface, CircleShape)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+    }
+}
+
+@Composable
+private fun OverflowAccountChip(
+    count: Int,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .size(TOP_BAR_OTHER_ACCOUNT_SIZE)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .size(TOP_BAR_OTHER_ACCOUNT_SIZE - TOP_BAR_OTHER_ACCOUNT_RING * 2)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "+$count",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -2608,7 +2648,14 @@ private fun ChatListTopBar(
                                 imeAction = ImeAction.Search,
                             ),
                     )
-                else -> Unit
+                // Other signed-in accounts sit immediately right of the active
+                // avatar (the navigationIcon), i.e. on the left of the bar.
+                else ->
+                    OtherAccountAvatarsRow(
+                        appState = appState,
+                        onSwitchAccount = onSwitchAccount,
+                        onOpenSwitcher = onOpenSettings,
+                    )
             }
         },
         navigationIcon = {
@@ -2626,6 +2673,7 @@ private fun ChatListTopBar(
                         title = active?.let { appState.displayName(it.accountIdHex) } ?: stringResource(R.string.app_name),
                         seed = active?.accountIdHex ?: "darkmatter",
                         pictureUrl = active?.let { appState.avatarUrl(it.accountIdHex) },
+                        size = 44.dp,
                         onClick = onOpenSettings,
                         showUnreadDot = appState.hasUnreadOnOtherAccounts,
                     )
@@ -2649,11 +2697,6 @@ private fun ChatListTopBar(
                     )
                 }
             } else {
-                OtherAccountAvatarsRow(
-                    appState = appState,
-                    onSwitchAccount = onSwitchAccount,
-                    onOpenSwitcher = onOpenSettings,
-                )
                 IconButton(onClick = onSearchOpen) {
                     Icon(
                         Icons.Default.Search,
