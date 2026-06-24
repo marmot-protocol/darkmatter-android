@@ -13797,7 +13797,9 @@ private fun EmojiPickerSheet(
             EmojiData.search(browseEmoji, searchQuery)
         }
     val grouped = remember(browseEmoji) { browseEmoji.groupBy { it.group } }
-    val recents = remember { RecentEmojiPreferences.load(context).filter { it.isNotBlank() } }
+    val recents by produceState(initialValue = emptyList<String>(), context) {
+        value = withContext(Dispatchers.IO) { RecentEmojiPreferences.load(context).filter { it.isNotBlank() } }
+    }
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     // Grid item index of each section's header, so a bottom category tab scrolls
@@ -13816,7 +13818,7 @@ private fun EmojiPickerSheet(
         }
 
     fun pick(emoji: String) {
-        RecentEmojiPreferences.recordPicked(context, emoji)
+        scope.launch { withContext(Dispatchers.IO) { RecentEmojiPreferences.recordPicked(context, emoji) } }
         onEmojiPicked(emoji)
     }
 
