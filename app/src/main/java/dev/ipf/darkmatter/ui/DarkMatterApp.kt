@@ -17383,7 +17383,6 @@ private fun AddIdentitySheet(
     WindowSecureFlag()
     var identity by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val creatingIdentityDescription = stringResource(R.string.creating_identity)
 
     // ModalBottomSheet renders in its own window on Android, separate from
@@ -17401,7 +17400,7 @@ private fun AddIdentitySheet(
             Button(
                 onClick = {
                     busy = true
-                    scope.launch {
+                    appState.launchMutation {
                         try {
                             appState.createIdentity()
                         } finally {
@@ -17451,9 +17450,12 @@ private fun AddIdentitySheet(
                     KeyboardActions(
                         onDone = {
                             busy = true
-                            scope.launch {
-                                appState.importIdentity(identity)
-                                busy = false
+                            appState.launchMutation {
+                                try {
+                                    appState.importIdentity(identity)
+                                } finally {
+                                    busy = false
+                                }
                             }
                         },
                     ),
@@ -17461,9 +17463,12 @@ private fun AddIdentitySheet(
             OutlinedButton(
                 onClick = {
                     busy = true
-                    scope.launch {
-                        appState.importIdentity(identity)
-                        busy = false
+                    appState.launchMutation {
+                        try {
+                            appState.importIdentity(identity)
+                        } finally {
+                            busy = false
+                        }
                     }
                 },
                 enabled = !busy && identity.isNotBlank(),
