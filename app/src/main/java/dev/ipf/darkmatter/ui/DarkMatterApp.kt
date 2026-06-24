@@ -4457,8 +4457,9 @@ internal fun MediaVideoGridTile(
     var startDownload by remember(messageIdHex, attachmentIndex, appState.mediaAutoDownloadMatrix) {
         mutableStateOf(mine || appState.shouldAutoDownloadMedia(MediaAutoDownloadType.Video))
     }
+    var reloadToken by remember(messageIdHex, attachmentIndex, epoch) { mutableStateOf(0) }
 
-    LaunchedEffect(messageIdHex, attachmentIndex, epoch, startDownload) {
+    LaunchedEffect(messageIdHex, attachmentIndex, epoch, startDownload, reloadToken) {
         if (localFile != null) return@LaunchedEffect
         if (!startDownload) return@LaunchedEffect
         if (!mine && epoch == 0uL) return@LaunchedEffect
@@ -4510,7 +4511,14 @@ internal fun MediaVideoGridTile(
                 onLongClick = onLongPress,
                 onClick = {
                     val f = localFile
-                    if (f != null) onTap(f) else startDownload = true
+                    when {
+                        f != null -> onTap(f)
+                        failed -> {
+                            failed = false
+                            reloadToken++
+                        }
+                        else -> startDownload = true
+                    }
                 },
             ),
     ) {
