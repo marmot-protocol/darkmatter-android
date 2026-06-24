@@ -17048,9 +17048,13 @@ private fun bindQrScannerCamera(
                 scanner
                     .process(image)
                     .addOnSuccessListener { codes ->
+                        // process() can resolve after the sheet is dismissed; don't
+                        // call back into torn-down UI state.
+                        if (disposedRef.get()) return@addOnSuccessListener
                         val raw = codes.firstOrNull { it.rawValue != null }?.rawValue
                         if (raw != null && didScan.compareAndSet(false, true)) onScan(raw)
                     }.addOnFailureListener {
+                        if (disposedRef.get()) return@addOnFailureListener
                         onError(it.message ?: it.javaClass.simpleName)
                     }.addOnCompleteListener {
                         analyzerBusy.set(false)
