@@ -5,8 +5,7 @@
 #   - JAVA_HOME or a JBR pointing at JDK 17+
 #   - Android SDK + NDK installed
 #   - Signing creds in local.properties (see scripts/release.sh --help)
-#   - Sibling checkout of the Marmot binding workspace at $WHITENOISE_MARMOT_DIR
-#     (default: ../darkmatter; legacy override: $DARKMATTER_MARMOT_DIR)
+#   - Marmot binding workspace at $WHITENOISE_MARMOT_DIR
 #
 # Outputs signed per-ABI and universal APKs under app/build/outputs/apk/<flavor>/release/.
 
@@ -29,8 +28,7 @@ Production signing creds (in local.properties or env):
   WHITENOISE_PRODUCTION_KEYSTORE_PASSWORD   Keystore password
   WHITENOISE_PRODUCTION_KEY_PASSWORD        Key password (same as keystore for PKCS12)
 
-Production also accepts WHITENOISE_KEYSTORE_* and legacy DARKMATTER_KEYSTORE_*
-names as fallbacks.
+Production also accepts WHITENOISE_KEYSTORE_* names as fallbacks.
 
 Staging signing creds:
   WHITENOISE_STAGING_KEYSTORE_PATH
@@ -39,8 +37,7 @@ Staging signing creds:
   WHITENOISE_STAGING_KEY_PASSWORD
 
 Optional env:
-  WHITENOISE_MARMOT_DIR          Path to Marmot binding workspace (default: ../darkmatter)
-  DARKMATTER_MARMOT_DIR          Legacy alias for WHITENOISE_MARMOT_DIR
+  WHITENOISE_MARMOT_DIR          Path to Marmot binding workspace when rebuilding bindings
   ANDROID_ABIS                   Space-separated ABIs to build (default: all 4)
 EOF
 }
@@ -75,7 +72,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MARMOT_DIR="${WHITENOISE_MARMOT_DIR:-${DARKMATTER_MARMOT_DIR:-$(cd "$REPO_DIR/../darkmatter" 2>/dev/null && pwd || true)}}"
+MARMOT_DIR="${WHITENOISE_MARMOT_DIR:-}"
 
 android_build_tool() {
   local tool="$1"
@@ -201,7 +198,7 @@ flavor_signing_value() {
   local flavor="$1"
   local suffix="$2"
   case "$flavor" in
-    production) prop_value "WHITENOISE_PRODUCTION_${suffix}" "WHITENOISE_${suffix}" "DARKMATTER_${suffix}" ;;
+    production) prop_value "WHITENOISE_PRODUCTION_${suffix}" "WHITENOISE_${suffix}" ;;
     staging) prop_value "WHITENOISE_STAGING_${suffix}" ;;
     *) return 1 ;;
   esac

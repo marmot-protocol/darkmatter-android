@@ -109,8 +109,8 @@ a broken layout (issue #551). The tests render real composables on the JVM via
 Robolectric — no emulator — so they add no device-test runtime. The pilot
 covers two surfaces:
 
-- `DarkMatterThemeScreenshotTest` — a representative swatch through
-  `DarkMatterTheme` in light, dark, and AMOLED, guarding the theme color roles
+- `WhiteNoiseThemeScreenshotTest` — a representative swatch through
+  `WhiteNoiseTheme` in light, dark, and AMOLED, guarding the theme color roles
   (e.g. the AMOLED true-black audit, #446/#495).
 - `OnboardingContentScreenshotTest` — the onboarding entry screen, light theme.
 
@@ -145,8 +145,6 @@ Production also accepts global signing values as fallbacks:
 - `WHITENOISE_KEYSTORE_PASSWORD`
 - `WHITENOISE_KEY_ALIAS`
 - `WHITENOISE_KEY_PASSWORD`
-
-Legacy `DARKMATTER_KEYSTORE_*` names are still accepted as fallbacks.
 
 Staging release builds use staging-only signing values:
 
@@ -184,7 +182,7 @@ Dev also accepts `OTLP_TOKEN_WHITENOISE_ANDROID_DEV` as an OTLP auth-token alias
 - `WHITENOISE_PRODUCTION_AUDIT_LOG_AUTH_TOKEN`
 - `WHITENOISE_PRODUCTION_TELEMETRY_TENANT` (defaults to `whitenoise-android`)
 
-Production also accepts `OTLP_TOKEN_WHITENOISE_ANDROID` as an OTLP auth-token alias. Legacy global `DARKMATTER_*` runtime names and `OTLP_TOKEN_DARKMATTER_ANDROID` are accepted as production fallbacks.
+Production also accepts `OTLP_TOKEN_WHITENOISE_ANDROID` as an OTLP auth-token alias. Global `WHITENOISE_*` runtime names are accepted as production fallbacks.
 
 **Production push (MIP-05):**
 
@@ -228,7 +226,7 @@ Builds the signed staging `arm64-v8a` APK. The output filename is `whitenoise-st
 just release
 ```
 
-Builds all signed production and staging APKs (per-ABI + universal) and rebuilds the Marmot bindings. Assumes a sibling checkout of the current Marmot binding workspace at `../darkmatter`; override with `WHITENOISE_MARMOT_DIR` or the legacy `DARKMATTER_MARMOT_DIR`.
+Builds all signed production and staging APKs (per-ABI + universal) and rebuilds the Marmot bindings. Set `WHITENOISE_MARMOT_DIR` to the Marmot binding workspace before running this command.
 
 ```bash
 just release-fast
