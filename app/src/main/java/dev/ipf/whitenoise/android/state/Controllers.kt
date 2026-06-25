@@ -251,7 +251,7 @@ internal fun chatListItemFromProjection(
                     // ChatsController), not this synthesized record. Parsing
                     // here would force an FFI hop into a pure projection
                     // helper.
-                    contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+                    contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
                     kind = preview.kind,
                     tags = emptyList(),
                     recordedAt = preview.timelineAt,
@@ -1768,7 +1768,7 @@ internal suspend fun WhiteNoiseAppState.parseMarkdownOrEmpty(text: String): Mark
         marmotIo { parseMarkdown(text) }
     } catch (throwable: Throwable) {
         rethrowIfCancellation(throwable)
-        MarkdownDocumentFfi(blocks = emptyList())
+        MarkdownDocumentFfi(truncated = false, blocks = emptyList())
     }
 
 private fun AppGroupRecordFfi.debugSummary(): String =
@@ -2159,15 +2159,23 @@ class ConversationController(
                 // group-state + timeline subscriptions below still fold in
                 // peer commits as they arrive.
                 launch { appState.catchUpAccounts() }
-                // Local NIP-40 enforcement (#333): re-publish on a slow cadence so
-                // a message crossing the retention window disappears from the open
-                // timeline without waiting for a sync or re-entry. Lifecycle-bound
-                // to this conversation; skipped while the timer is off. Deliberately
-                // coarse (60s) to tolerate clock skew and stay off the hot path.
+                // Local NIP-40 enforcement (#333) + secure delete (#334): on open
+                // and then on a slow cadence, securely wipe plaintext past the
+                // retention window via the engine, then re-publish so the pruned
+                // rows leave the open timeline without waiting for a sync or
+                // re-entry. Lifecycle-bound to this conversation; skipped while the
+                // timer is off. Coarse (60s) to tolerate clock skew and stay off the
+                // hot path. The secure-delete failure is swallowed — the local
+                // filter still hides expired rows even if the wipe transiently
+                // fails, and the next tick retries.
                 launch {
                     while (isActive) {
+                        if (group.disappearingMessageSecs > 0uL) {
+                            runCatching { appState.marmotIo { secureDeleteExpired(account, group.groupIdHex) } }
+                                .onFailure { it.rethrowIfCancellation() }
+                            publishTimelineFromIndexes()
+                        }
                         delay(60_000L)
-                        if (group.disappearingMessageSecs > 0uL) publishTimelineFromIndexes()
                     }
                 }
                 runConversationSubscriptionLoop(account)
@@ -5208,7 +5216,7 @@ class ConversationController(
                     groupIdHex = group.groupIdHex,
                     sender = inferStreamSender(streamId),
                     plaintext = "",
-                    contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+                    contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
                     kind = 1200uL,
                     tags = listOf(MessageProjector.streamTag(streamId)),
                     recordedAt = nowSeconds(),
@@ -5221,7 +5229,7 @@ class ConversationController(
                 // chunks, failure copy), reset to empty — carrying forward a
                 // previous revision's tokens would render stale markdown
                 // against the new text. Empty falls back to plain rendering.
-                contentTokens = tokens ?: MarkdownDocumentFfi(blocks = emptyList()),
+                contentTokens = tokens ?: MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
             )
         val updated =
             TimelineMessage(
