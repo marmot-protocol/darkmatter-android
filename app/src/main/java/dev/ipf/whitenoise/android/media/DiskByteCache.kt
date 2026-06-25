@@ -164,6 +164,20 @@ class DiskByteCache(
         bytes: ByteArray,
     ) = put(key, bytes, generation)
 
+    /**
+     * Drop a single entry — delete its backing file and index row. Used by the
+     * disappearing-message sweep to evict an expired attachment's decrypted
+     * plaintext from disk once the engine reports it secure-deleted, so it isn't
+     * recoverable from the L2 cache after expiry. No-op if absent.
+     */
+    @Synchronized
+    fun remove(key: String) {
+        ensureHydrated()
+        val entry = index.remove(fileNameFor(key)) ?: return
+        residentBytes -= entry.size
+        runCatching { entry.file.delete() }
+    }
+
     @Synchronized
     fun clear() {
         // Bump first so any put scheduled against the prior generation is

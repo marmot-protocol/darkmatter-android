@@ -2172,6 +2172,7 @@ class ConversationController(
                     while (isActive) {
                         if (group.disappearingMessageSecs > 0uL) {
                             runCatching { appState.marmotIo { secureDeleteExpired(account, group.groupIdHex) } }
+                                .onSuccess { evictExpiredMediaCaches(account, it.mediaCiphertextSha256.toSet()) }
                                 .onFailure { it.rethrowIfCancellation() }
                             publishTimelineFromIndexes()
                         }
@@ -2307,7 +2308,7 @@ class ConversationController(
                 withContext(Dispatchers.IO) {
                     groupStream.snapshot()
                 }
-            groupSnapshot?.let { group = it }
+            groupSnapshot?.let(::applyGroupState)
             refreshMembers()
             isLoading = false
             error = null
@@ -2349,13 +2350,26 @@ class ConversationController(
         return false to false
     }
 
+    // Apply a fresh group-state snapshot/update, republishing the timeline when
+    // the disappearing-message window changed. A controller seeded from
+    // emptyGroupRecord() starts at retention 0, so the first real snapshot can
+    // flip it on — without this republish the expiry filter wouldn't apply until
+    // the next 60s sweep, flashing expired messages for up to a minute (#674).
+    private fun applyGroupState(update: AppGroupRecordFfi) {
+        val previousRetention = group.disappearingMessageSecs
+        group = update
+        if (previousRetention != update.disappearingMessageSecs) {
+            publishTimelineFromIndexes()
+        }
+    }
+
     private suspend fun runGroupStateSubscriptionLoop(groupStream: GroupStateSubscription) {
         while (coroutineContext.isActive) {
             val update =
                 withContext(Dispatchers.IO) {
                     groupStream.next()
                 } ?: break
-            group = update
+            applyGroupState(update)
             refreshMembers()
         }
     }
@@ -3279,6 +3293,29 @@ class ConversationController(
         attachmentIndex: Int,
     ): String = "$account|${group.groupIdHex}|$messageIdHex|$attachmentIndex"
 
+    // Evict decrypted media (L1 plaintext, decoded thumbnails, L2 disk) for the
+    // attachments the engine just secure-deleted on expiry, matched by ciphertext
+    // hash through the cached references. Without this the decrypted bytes stay
+    // recoverable from the local caches after the row is gone (#674 review).
+    private suspend fun evictExpiredMediaCaches(
+        account: String,
+        expiredCiphertextSha256: Set<String>,
+    ) {
+        if (expiredCiphertextSha256.isEmpty()) return
+        val keys =
+            mediaReferences.flatMap { (messageIdHex, refs) ->
+                refs.mapIndexedNotNull { index, ref ->
+                    if (ref.ciphertextSha256 in expiredCiphertextSha256) mediaCacheKey(account, messageIdHex, index) else null
+                }
+            }
+        if (keys.isEmpty()) return
+        keys.forEach { key ->
+            appState.mediaPlaintextCache.remove(key)
+            appState.mediaThumbnailCache.remove(key)
+        }
+        withContext(Dispatchers.IO) { keys.forEach { appState.diskMediaCache.remove(it) } }
+    }
+
     /**
      * Yes/no probe: are the decrypted bytes for [messageIdHex] /
      * [attachmentIndex] already resident in either cache tier? Lets a file
@@ -3968,8 +4005,15 @@ class ConversationController(
                 // The engine prunes plaintext older than the new window during the
                 // call above. Reload the open timeline so the admin who just set
                 // the timer sees the pruned state immediately, instead of only
-                // after leaving and re-entering the chat.
-                refreshCurrentTimeline(account)
+                // after leaving and re-entering the chat. The retention change has
+                // already succeeded, so a refresh failure must NOT flip this to a
+                // failure toast — log it and fall back to an in-memory re-filter.
+                runCatching { refreshCurrentTimeline(account) }
+                    .onFailure { refreshError ->
+                        refreshError.rethrowIfCancellation()
+                        Log.w("DMConversation", "refresh after retention update failed for ${group.groupIdHex.take(8)}", refreshError)
+                        publishTimelineFromIndexes()
+                    }
                 appState.present(R.string.toast_disappearing_messages_updated)
                 true
             }.onFailure {
@@ -5149,7 +5193,7 @@ class ConversationController(
                 groupIdHex = group.groupIdHex,
                 sender = inferStreamSender(streamId),
                 plaintext = event.detail,
-                contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+                contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
                 kind = STREAM_DEBUG_KIND,
                 tags = listOf(MessageProjector.streamTag(streamId), MessageTagFfi(listOf("dbg", event.eventKind))),
                 recordedAt = now,

@@ -10692,17 +10692,21 @@ private fun GroupDetailsScreen(
                     onDismiss = { showDisappearingPicker = false },
                     onPick = { secs ->
                         showDisappearingPicker = false
-                        // Turning the timer ON (or shortening it) permanently prunes
-                        // history older than the window, so gate any non-Off choice
-                        // behind a confirm. Off only stops future pruning — apply it
-                        // directly.
-                        if (secs == 0L) {
-                            runGroupMutation(
-                                action = GroupMutationAction.DisappearingMessages,
-                                mutation = { controller.updateMessageRetention(0uL) },
-                            )
-                        } else {
-                            pendingDisappearingSecs = secs
+                        val currentSecs = controller.group.disappearingMessageSecs.toLong()
+                        // Only turning the timer ON (from off) or SHORTENING it prunes
+                        // existing history, so confirm just those. An unchanged pick is
+                        // a no-op; turning off or relaxing (lengthening) the window
+                        // prunes nothing, so apply it directly without the destructive
+                        // warning (#674 review).
+                        val needsConfirm = secs > 0L && (currentSecs == 0L || secs < currentSecs)
+                        when {
+                            secs == currentSecs -> Unit
+                            needsConfirm -> pendingDisappearingSecs = secs
+                            else ->
+                                runGroupMutation(
+                                    action = GroupMutationAction.DisappearingMessages,
+                                    mutation = { controller.updateMessageRetention(secs.toULong()) },
+                                )
                         }
                     },
                 )

@@ -2500,7 +2500,10 @@ class WhiteNoiseAppState(
     fun markDisappearingTooltipShown() {
         if (disappearingTooltipShown) return
         disappearingTooltipShown = true
-        preferences.edit().putBoolean(DISAPPEARING_TOOLTIP_SHOWN_KEY, true).apply()
+        // commit() (not apply()) so the flag is on disk before we return — the
+        // mark-before-show ordering means an apply()'s async write losing a
+        // process-death race would re-arm the one-time tooltip on next launch.
+        preferences.edit().putBoolean(DISAPPEARING_TOOLTIP_SHOWN_KEY, true).commit()
     }
 
     suspend fun enableDefaultNotificationsIfReady(): Boolean {
