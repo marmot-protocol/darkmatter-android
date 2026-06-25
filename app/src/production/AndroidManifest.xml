@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity android:name=".MainActivity">
+            <!--
+                Verified Android App Links only work for http(s) URLs backed by
+                https://<host>/.well-known/assetlinks.json. The custom
+                whitenoise:// scheme in the main manifest is retained only for
+                backward-compatible inbound links.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="www.whitenoise.chat"
+                    android:pathPrefix="/profile/"
+                    android:scheme="https" />
+                <data
+                    android:host="whitenoise.chat"
+                    android:pathPrefix="/profile/"
+                    android:scheme="https" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

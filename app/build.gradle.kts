@@ -167,6 +167,7 @@ android {
             versionNameSuffix = "-dev"
             manifestPlaceholders["deepLinkScheme"] = "whitenoise-dev"
             buildConfigField("String", "WHITENOISE_DEEP_LINK_SCHEME", "whitenoise-dev".asBuildConfigString())
+            buildConfigField("String", "WHITENOISE_PROFILE_LINK_BASE_URL", "".asBuildConfigString())
             buildConfigField(
                 "String",
                 "DARKMATTER_OTLP_ENDPOINT",
@@ -220,6 +221,11 @@ android {
             }
             manifestPlaceholders["deepLinkScheme"] = "whitenoise"
             buildConfigField("String", "WHITENOISE_DEEP_LINK_SCHEME", "whitenoise".asBuildConfigString())
+            buildConfigField(
+                "String",
+                "WHITENOISE_PROFILE_LINK_BASE_URL",
+                "https://www.whitenoise.chat/profile".asBuildConfigString(),
+            )
 
             buildConfigField(
                 "String",
@@ -309,6 +315,7 @@ android {
             }
             manifestPlaceholders["deepLinkScheme"] = "whitenoise-staging"
             buildConfigField("String", "WHITENOISE_DEEP_LINK_SCHEME", "whitenoise-staging".asBuildConfigString())
+            buildConfigField("String", "WHITENOISE_PROFILE_LINK_BASE_URL", "".asBuildConfigString())
             buildConfigField(
                 "String",
                 "DARKMATTER_OTLP_ENDPOINT",

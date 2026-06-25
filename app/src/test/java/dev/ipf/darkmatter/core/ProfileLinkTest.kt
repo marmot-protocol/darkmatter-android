@@ -17,6 +17,18 @@ class ProfileLinkTest {
     }
 
     @Test
+    fun buildsHttpsProfileLinksWhenConfigured() {
+        assertEquals(
+            "https://www.whitenoise.chat/profile/$sampleNpub",
+            ProfileLink.buildUri(
+                npub = sampleNpub,
+                appLinkBaseUrl = "https://www.whitenoise.chat/profile",
+                customScheme = "whitenoise",
+            ),
+        )
+    }
+
+    @Test
     fun parsesWhiteNoiseNostrAndBareNpubPayloads() {
         assertEquals(ProfileLink(sampleNpub), ProfileLink.parse("whitenoise://profile/$sampleNpub"))
         assertEquals(ProfileLink(sampleNpub), ProfileLink.parse("whitenoise://$sampleNpub"))
@@ -27,6 +39,12 @@ class ProfileLinkTest {
     }
 
     @Test
+    fun parsesVerifiedHttpsProfileLinks() {
+        assertEquals(ProfileLink(sampleNpub), ProfileLink.parse("https://www.whitenoise.chat/profile/$sampleNpub"))
+        assertEquals(ProfileLink(sampleNpub), ProfileLink.parse("https://whitenoise.chat/profile/$sampleNpub"))
+    }
+
+    @Test
     fun parsesLegacyDarkMatterProfileLinks() {
         assertEquals(ProfileLink(sampleNpub), ProfileLink.parse("darkmatter://profile/$sampleNpub"))
     }
@@ -34,6 +52,8 @@ class ProfileLinkTest {
     @Test
     fun rejectsNonProfilePayloads() {
         assertNull(ProfileLink.parse("https://example.com/$sampleNpub"))
+        assertNull(ProfileLink.parse("http://www.whitenoise.chat/profile/$sampleNpub"))
+        assertNull(ProfileLink.parse("https://www.whitenoise.chat/not-profile/$sampleNpub"))
         assertNull(ProfileLink.parse("whitenoise://profile/not-a-profile"))
         assertNull(ProfileLink.parse(""))
     }
