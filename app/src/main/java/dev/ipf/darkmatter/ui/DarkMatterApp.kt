@@ -6996,7 +6996,7 @@ private fun ViewerPage(
 }
 
 /**
- * Persist [bytes] to the device gallery (Pictures/DarkMatter). Returns success.
+ * Persist [bytes] to the device gallery (Pictures/White Noise). Returns success.
  * Uses the IS_PENDING dance so other apps never see a half-written entry, and
  * sanitizes the remote-supplied [fileName] to a basename.
  */
@@ -7013,7 +7013,7 @@ internal fun saveImageToGallery(
             // Preserve the attachment's real MIME (a peer may send PNG/WebP/HEIC),
             // so gallery indexing matches the actual bytes.
             put(android.provider.MediaStore.Images.Media.MIME_TYPE, mediaType.ifBlank { MediaPipeline.RECOMPRESSED_MIME })
-            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DarkMatter")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/White Noise")
             put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
         }
     val uri =
@@ -7034,7 +7034,7 @@ internal fun saveImageToGallery(
     }
 }
 
-/** Persist a decrypted video to the public Movies/DarkMatter folder via the
+/** Persist a decrypted video to the public Movies/White Noise folder via the
  *  Video MediaStore so it shows up in the system gallery. Mirrors the image
  *  save flow's IS_PENDING dance. */
 internal fun saveVideoToGallery(
@@ -7048,7 +7048,7 @@ internal fun saveVideoToGallery(
         android.content.ContentValues().apply {
             put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, MediaPipeline.safeDisplayName(fileName))
             put(android.provider.MediaStore.Video.Media.MIME_TYPE, mediaType.ifBlank { "video/mp4" })
-            put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/DarkMatter")
+            put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/White Noise")
             put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
         }
     val uri =

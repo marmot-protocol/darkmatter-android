@@ -2044,7 +2044,7 @@ class ConversationController(
     // Transient streaming-debug rows keyed by their synthetic timeline id.
     // Lifecycle-scoped UI state for the live agent-stream watch — NOT a
     // persistent cache of protocol data (AGENTS.md): they exist only while the
-    // developer toggle is on, are never written to the Dark Matter store, and
+    // developer toggle is on, are never written to the White Noise store, and
     // are dropped wholesale when the toggle turns off. Bounded so a long-lived
     // agent-heavy conversation can't grow them without limit.
     private val streamDebugTimelineItems = linkedMapOf<String, TimelineMessage>()

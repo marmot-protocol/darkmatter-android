@@ -1059,7 +1059,7 @@ object MediaPipeline {
 
     /**
      * Read the picked video URI as-is — no transcoding, matching the
-     * darkmatter-ios and darkmatter-desktop behavior. Extracts dimensions
+     * White Noise iOS and desktop behavior. Extracts dimensions
      * and a thumbhash from the poster frame so receivers paint a blurred
      * preview before the full payload downloads. Returns a typed result so
      * callers can surface "too large" vs "decode failed" as distinct

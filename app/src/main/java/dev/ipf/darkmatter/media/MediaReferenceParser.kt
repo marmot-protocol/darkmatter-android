@@ -12,7 +12,7 @@ import java.net.URI
  * used for optimistic UI bridge records that Android creates locally before
  * the projected event echoes back.
  *
- * Wire shape — per `darkmatter/crates/marmot-app/src/media.rs::imeta_tag`:
+ * Wire shape from the native chat media `imeta` tag:
  * ```
  * ["imeta", "v encrypted-media-v1",
  *           "locator blossom-v1 <URL>",

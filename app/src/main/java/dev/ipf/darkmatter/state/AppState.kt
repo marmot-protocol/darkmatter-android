@@ -2903,7 +2903,7 @@ class DarkMatterAppState(
                         serviceVersion = telemetryServiceVersion(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
                         serviceInstanceId = installId,
                         deploymentEnvironment = telemetryDeploymentEnvironment(BuildConfig.DARKMATTER_DEPLOYMENT_ENVIRONMENT),
-                        tenant = BuildConfig.DARKMATTER_TELEMETRY_TENANT.ifBlank { "darkmatter-android" },
+                        tenant = BuildConfig.DARKMATTER_TELEMETRY_TENANT.ifBlank { "whitenoise-android" },
                         osType = "linux",
                         osVersion = Build.VERSION.RELEASE.ifBlank { Build.VERSION.SDK_INT.toString() },
                         deviceModelIdentifier = telemetryDeviceModelIdentifier(Build.MODEL),

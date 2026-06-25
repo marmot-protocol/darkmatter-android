@@ -73,7 +73,7 @@ class LocalizationResourceTest {
     // `nip_05` / `nip_65` resource *keys* are unaffected). If you need to
     // reference a NIP for power users, keep it in a developer-facing log or
     // comment, not in a user-visible string.
-    // See https://github.com/marmot-protocol/darkmatter-android/issues/381
+    // Historical localization issue: no default locale should carry incomplete strings.
     @Test
     fun userVisibleStringsDoNotExposeRawNipIdentifiers() {
         val resDir =

@@ -198,7 +198,7 @@ android {
                 environmentRuntimeConfigProperty(
                     environment = "dev",
                     suffix = "TELEMETRY_TENANT",
-                    defaultValue = "whitenoise-rs-android-dev",
+                    defaultValue = "whitenoise-android-dev",
                 ).asBuildConfigString(),
             )
             buildConfigField(
@@ -269,7 +269,7 @@ android {
                 environmentRuntimeConfigProperty(
                     environment = "production",
                     suffix = "TELEMETRY_TENANT",
-                    defaultValue = "whitenoise-rs-android",
+                    defaultValue = "whitenoise-android",
                     includeGlobalFallbacks = true,
                 ).asBuildConfigString(),
             )
@@ -340,7 +340,7 @@ android {
                 environmentRuntimeConfigProperty(
                     environment = "staging",
                     suffix = "TELEMETRY_TENANT",
-                    defaultValue = "whitenoise-rs-android-staging",
+                    defaultValue = "whitenoise-android-staging",
                 ).asBuildConfigString(),
             )
             buildConfigField(

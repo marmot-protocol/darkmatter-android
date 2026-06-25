@@ -84,7 +84,7 @@ private fun ThemeSwatch() {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(text = "Dark Matter", fontSize = 18.sp)
+            Text(text = "White Noise", fontSize = 18.sp)
             Button(onClick = {}) {
                 Text(text = "Primary")
             }

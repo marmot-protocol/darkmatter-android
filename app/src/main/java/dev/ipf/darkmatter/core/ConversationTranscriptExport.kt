@@ -28,7 +28,7 @@ interface ConversationTranscriptTimelineReader {
 object ConversationTranscriptExport {
     val PageLimit: UInt = 200u
     const val CacheDirName = "transcripts"
-    private const val FilePrefix = "darkmatter-transcript"
+    private const val FilePrefix = "whitenoise-transcript"
 
     suspend fun fetchAllMessages(
         timelineReader: ConversationTranscriptTimelineReader,

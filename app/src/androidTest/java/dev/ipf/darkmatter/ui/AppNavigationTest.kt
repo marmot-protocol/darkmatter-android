@@ -68,7 +68,7 @@ class AppNavigationTest {
             }
         }
 
-        composeRule.onNodeWithText("Loading Dark Matter").assertDoesNotExist()
+        composeRule.onNodeWithText("Loading White Noise").assertDoesNotExist()
         composeRule.onNodeWithText("Starting Marmot").assertDoesNotExist()
     }
 

@@ -5,7 +5,8 @@
 #   - JAVA_HOME or a JBR pointing at JDK 17+
 #   - Android SDK + NDK installed
 #   - Signing creds in local.properties (see scripts/release.sh --help)
-#   - Sibling checkout of marmot at $DARKMATTER_MARMOT_DIR (default: ../darkmatter)
+#   - Sibling checkout of the Marmot binding workspace at $WHITENOISE_MARMOT_DIR
+#     (default: ../darkmatter; legacy override: $DARKMATTER_MARMOT_DIR)
 #
 # Outputs signed per-ABI and universal APKs under app/build/outputs/apk/<flavor>/release/.
 
@@ -38,7 +39,8 @@ Staging signing creds:
   WHITENOISE_STAGING_KEY_PASSWORD
 
 Optional env:
-  DARKMATTER_MARMOT_DIR          Path to marmot workspace (default: ../darkmatter)
+  WHITENOISE_MARMOT_DIR          Path to Marmot binding workspace (default: ../darkmatter)
+  DARKMATTER_MARMOT_DIR          Legacy alias for WHITENOISE_MARMOT_DIR
   ANDROID_ABIS                   Space-separated ABIs to build (default: all 4)
 EOF
 }
@@ -73,7 +75,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MARMOT_DIR="${DARKMATTER_MARMOT_DIR:-$(cd "$REPO_DIR/../darkmatter" 2>/dev/null && pwd || true)}"
+MARMOT_DIR="${WHITENOISE_MARMOT_DIR:-${DARKMATTER_MARMOT_DIR:-$(cd "$REPO_DIR/../darkmatter" 2>/dev/null && pwd || true)}}"
 
 android_build_tool() {
   local tool="$1"
@@ -237,7 +239,7 @@ done
 # --- Rebuild Rust .so (smaller via strip=symbols) ---
 if [[ "$SKIP_BINDINGS" == "false" ]]; then
   if [[ -z "$MARMOT_DIR" || ! -d "$MARMOT_DIR" ]]; then
-    echo "error: marmot workspace not found. Set DARKMATTER_MARMOT_DIR." >&2
+    echo "error: Marmot binding workspace not found. Set WHITENOISE_MARMOT_DIR." >&2
     exit 1
   fi
   # Android release binaries include the OTLP exporter; tokens remain runtime config.

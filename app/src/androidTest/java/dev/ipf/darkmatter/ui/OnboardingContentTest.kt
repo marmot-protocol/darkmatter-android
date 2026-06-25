@@ -38,7 +38,7 @@ class OnboardingContentTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Dark Matter shield").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("White Noise shield").assertIsDisplayed()
         composeRule.onNodeWithText("Create New Identity").assertIsDisplayed()
         composeRule.onNodeWithText("Sign in").assertIsDisplayed()
         composeRule.onNodeWithText("Import Existing Identity").assertDoesNotExist()

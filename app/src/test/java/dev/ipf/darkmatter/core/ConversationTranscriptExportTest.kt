@@ -246,7 +246,7 @@ class ConversationTranscriptExportTest {
     fun writeTemporaryFileUsesTranscriptCacheDirAndStableName() {
         val root =
             kotlin.io.path
-                .createTempDirectory("dm-transcript-test-")
+                .createTempDirectory("wn-transcript-test-")
                 .toFile()
         try {
             val data = "{\"private\":true}\n".toByteArray(StandardCharsets.UTF_8)
@@ -259,7 +259,7 @@ class ConversationTranscriptExportTest {
                 )
 
             assertEquals("transcripts", file.parentFile?.name)
-            assertTrue(file.name.startsWith("darkmatter-transcript-abababab-2023-11-14T22-13-20Z"))
+            assertTrue(file.name.startsWith("whitenoise-transcript-abababab-2023-11-14T22-13-20Z"))
             assertTrue(file.name.endsWith(".json"))
             assertEquals("{\"private\":true}\n", file.readText())
             assertFalse(file.canExecute())
