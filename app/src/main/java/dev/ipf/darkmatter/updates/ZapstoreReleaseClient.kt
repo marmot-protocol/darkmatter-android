@@ -92,7 +92,11 @@ class ZapstoreReleaseClient(
                                 when (message.optString(0)) {
                                     "EVENT" -> {
                                         if (message.optString(1) != subscriptionId) return
-                                        val event = message.optJSONObject(2)?.let(NostrEvent.Companion::fromJson) ?: return
+                                        val event =
+                                            message
+                                                .optJSONObject(2)
+                                                ?.let { json -> runCatching { NostrEvent.fromJson(json) }.getOrNull() }
+                                                ?: return
                                         events += event
                                     }
 
@@ -145,20 +149,6 @@ class ZapstoreReleaseClient(
         private const val FETCH_TIMEOUT_MS = 10_000L
         private const val RELEASE_HISTORY_LIMIT = 100
 
-        internal fun latestVerifiedReleaseEvent(
-            events: Iterable<NostrEvent>,
-            publisherPubkey: String,
-            dTag: String,
-            verifies: (NostrEvent) -> Boolean,
-        ): NostrEvent? =
-            events
-                .filter { event ->
-                    event.kind == KIND_ZAPSTORE_RELEASE &&
-                        event.pubkey == publisherPubkey &&
-                        event.hasTag("d", dTag) &&
-                        verifies(event)
-                }.maxByOrNull { it.createdAt }
-
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient
                 .Builder()
@@ -168,24 +158,9 @@ class ZapstoreReleaseClient(
     }
 }
 
-internal data class ZapstoreAddress(
-    val dTag: String,
-    val version: String,
-) {
-    companion object {
-        fun parse(
-            value: String,
-            publisherPubkey: String,
-            appId: String,
-        ): ZapstoreAddress? {
-            val prefix = "30063:$publisherPubkey:$appId@"
-            val version = value.removePrefix(prefix).takeIf { it.length != value.length && it.isNotBlank() } ?: return null
-            return ZapstoreAddress(dTag = "$appId@$version", version = version)
-        }
-
-        fun versionFromReleaseDTag(
-            dTag: String,
-            appId: String,
-        ): String? = dTag.removePrefix("$appId@").takeIf { it.length != dTag.length && it.isNotBlank() }
-    }
+internal object ZapstoreAddress {
+    fun versionFromReleaseDTag(
+        dTag: String,
+        appId: String,
+    ): String? = dTag.removePrefix("$appId@").takeIf { it.length != dTag.length && it.isNotBlank() }
 }

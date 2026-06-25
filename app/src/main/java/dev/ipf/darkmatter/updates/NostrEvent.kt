@@ -14,14 +14,7 @@ internal data class NostrEvent(
     val content: String,
     val sig: String,
 ) {
-    fun hasTag(
-        name: String,
-        value: String,
-    ): Boolean = tags.any { it.firstOrNull() == name && it.getOrNull(1) == value }
-
     fun firstTagValue(name: String): String? = tags.firstOrNull { it.firstOrNull() == name }?.getOrNull(1)
-
-    fun tagValues(name: String): List<String> = tags.mapNotNull { tag -> tag.takeIf { it.firstOrNull() == name }?.getOrNull(1) }
 
     fun canonicalJson(): String =
         buildString {

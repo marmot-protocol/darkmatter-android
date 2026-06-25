@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
 
 class AppUpdateWorker(
     appContext: Context,
@@ -26,14 +27,22 @@ class AppUpdateWorker(
             }
             Result.success()
         } catch (error: IOException) {
-            Result.retry()
+            resultForRefreshFailure(error)
         } catch (error: RuntimeException) {
-            Result.retry()
+            resultForRefreshFailure(error)
         }
     }
 
     companion object {
         private const val UNIQUE_WORK_NAME = "darkmatter-zapstore-update-check"
+
+        internal fun resultForRefreshFailure(error: Throwable): Result =
+            when (error) {
+                is CancellationException -> throw error
+                is IOException -> Result.retry()
+                is RuntimeException -> Result.failure()
+                else -> Result.failure()
+            }
 
         fun schedule(context: Context) {
             val request =
