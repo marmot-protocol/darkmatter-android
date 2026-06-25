@@ -159,8 +159,13 @@ class ZapstoreReleaseClient(
 }
 
 internal object ZapstoreAddress {
+    private val calVerTagVersion = Regex("\\d+(?:\\.\\d+)*")
+
     fun versionFromReleaseDTag(
         dTag: String,
         appId: String,
-    ): String? = dTag.removePrefix("$appId@").takeIf { it.length != dTag.length && it.isNotBlank() }
+    ): String? {
+        val version = dTag.removePrefix("$appId@").takeIf { it.length != dTag.length && it.isNotBlank() } ?: return null
+        return version.takeIf(calVerTagVersion::matches)
+    }
 }
