@@ -33,6 +33,9 @@ enum class NotificationChannelSpec(
     /** Group conversation messages. */
     GROUP_MESSAGES("messages_group", ChannelImportance.HIGH),
 
+    /** Group messages that mention the local account. */
+    MENTIONS("mentions", ChannelImportance.HIGH),
+
     /**
      * Reactions to the local user's messages, on their own channel so they can
      * be muted independently. High importance so a reaction heads-up like a
@@ -71,6 +74,7 @@ enum class NotificationChannelSpec(
          * payload actually carries:
          *  - GROUP_INVITE                       -> invites
          *  - NEW_MESSAGE with a reaction emoji  -> reactions
+         *  - NEW_MESSAGE mention                -> mentions
          *  - NEW_MESSAGE, DM                    -> direct messages
          *  - NEW_MESSAGE, group                 -> group messages
          */
@@ -84,6 +88,7 @@ enum class NotificationChannelSpec(
                         // disagree and post a reaction on the REACTIONS channel
                         // while it reuses the message card's identity.
                         LocalNotificationFormatter.isReaction(update) -> REACTIONS
+                        update.isMention -> MENTIONS
                         update.isDm -> DIRECT_MESSAGES
                         else -> GROUP_MESSAGES
                     }

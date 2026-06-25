@@ -9982,6 +9982,7 @@ data class NotificationUpdateFfi (
     var `groupIdHex`: kotlin.String, 
     var `groupName`: kotlin.String?, 
     var `isDm`: kotlin.Boolean, 
+    var `isMention`: kotlin.Boolean, 
     var `messageIdHex`: kotlin.String?, 
     var `sender`: NotificationUserFfi, 
     var `receiver`: NotificationUserFfi, 
@@ -10009,6 +10010,7 @@ public object FfiConverterTypeNotificationUpdateFfi: FfiConverterRustBuffer<Noti
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterTypeNotificationUserFfi.read(buf),
             FfiConverterTypeNotificationUserFfi.read(buf),
@@ -10029,6 +10031,7 @@ public object FfiConverterTypeNotificationUpdateFfi: FfiConverterRustBuffer<Noti
             FfiConverterString.allocationSize(value.`groupIdHex`) +
             FfiConverterOptionalString.allocationSize(value.`groupName`) +
             FfiConverterBoolean.allocationSize(value.`isDm`) +
+            FfiConverterBoolean.allocationSize(value.`isMention`) +
             FfiConverterOptionalString.allocationSize(value.`messageIdHex`) +
             FfiConverterTypeNotificationUserFfi.allocationSize(value.`sender`) +
             FfiConverterTypeNotificationUserFfi.allocationSize(value.`receiver`) +
@@ -10048,6 +10051,7 @@ public object FfiConverterTypeNotificationUpdateFfi: FfiConverterRustBuffer<Noti
             FfiConverterString.write(value.`groupIdHex`, buf)
             FfiConverterOptionalString.write(value.`groupName`, buf)
             FfiConverterBoolean.write(value.`isDm`, buf)
+            FfiConverterBoolean.write(value.`isMention`, buf)
             FfiConverterOptionalString.write(value.`messageIdHex`, buf)
             FfiConverterTypeNotificationUserFfi.write(value.`sender`, buf)
             FfiConverterTypeNotificationUserFfi.write(value.`receiver`, buf)

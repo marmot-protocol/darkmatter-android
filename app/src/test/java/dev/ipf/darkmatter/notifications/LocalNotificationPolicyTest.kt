@@ -70,6 +70,7 @@ class LocalNotificationPolicyTest {
         groupIdHex = groupIdHex,
         groupName = "General",
         isDm = false,
+        isMention = false,
         messageIdHex = "message",
         sender = user(),
         receiver = user(accountIdHex = accountRef, displayName = "Me"),

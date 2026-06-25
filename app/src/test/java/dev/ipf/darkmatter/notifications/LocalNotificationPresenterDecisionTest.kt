@@ -98,6 +98,10 @@ class LocalNotificationPresenterDecisionTest {
                     NotificationChannelSpec.GROUP_MESSAGES.id,
                 update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false, reactionEmoji = "❤️") to
                     NotificationChannelSpec.REACTIONS.id,
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false, isMention = true) to
+                    NotificationChannelSpec.MENTIONS.id,
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = true, isMention = true) to
+                    NotificationChannelSpec.MENTIONS.id,
                 update(trigger = NotificationTriggerFfi.GROUP_INVITE) to
                     NotificationChannelSpec.INVITES.id,
             )
@@ -180,6 +184,7 @@ class LocalNotificationPresenterDecisionTest {
         accountRef: String = "account",
         groupIdHex: String = "group",
         isDm: Boolean = false,
+        isMention: Boolean = false,
         reactionEmoji: String? = null,
     ) = NotificationUpdateFfi(
         notificationKey = "message:$accountRef:message",
@@ -190,6 +195,7 @@ class LocalNotificationPresenterDecisionTest {
         groupIdHex = groupIdHex,
         groupName = "General",
         isDm = isDm,
+        isMention = isMention,
         messageIdHex = "message",
         sender = user(),
         receiver = user(accountIdHex = accountRef, displayName = "Me"),

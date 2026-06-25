@@ -28,6 +28,37 @@ class NotificationChannelSpecTest {
     }
 
     @Test
+    fun mentionRoutesToTheMentionsChannelBeforeMessageSplit() {
+        assertEquals(
+            NotificationChannelSpec.MENTIONS,
+            NotificationChannelSpec.forUpdate(
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = true, isMention = true),
+            ),
+        )
+        assertEquals(
+            NotificationChannelSpec.MENTIONS,
+            NotificationChannelSpec.forUpdate(
+                update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false, isMention = true),
+            ),
+        )
+    }
+
+    @Test
+    fun reactionRoutesToTheReactionsChannelEvenWhenMentioned() {
+        assertEquals(
+            NotificationChannelSpec.REACTIONS,
+            NotificationChannelSpec.forUpdate(
+                update(
+                    trigger = NotificationTriggerFfi.NEW_MESSAGE,
+                    isDm = false,
+                    isMention = true,
+                    reactionEmoji = "👍",
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun reactionRoutesToTheReactionsChannelEvenInADm() {
         // A reaction is a NEW_MESSAGE with an emoji; the emoji wins over the
         // DM/group split so reactions can be muted as one category.
@@ -93,6 +124,7 @@ class NotificationChannelSpecTest {
         // change a live channel's importance) with the old ID retired.
         assertEquals("messages_dm", NotificationChannelSpec.DIRECT_MESSAGES.id)
         assertEquals("messages_group", NotificationChannelSpec.GROUP_MESSAGES.id)
+        assertEquals("mentions", NotificationChannelSpec.MENTIONS.id)
         // Reactions and invites were re-keyed (importance raised) so they
         // heads-up; the old IDs are retired on the OS side.
         assertEquals("reactions_v2", NotificationChannelSpec.REACTIONS.id)
@@ -105,6 +137,7 @@ class NotificationChannelSpecTest {
     private fun update(
         trigger: NotificationTriggerFfi,
         isDm: Boolean = false,
+        isMention: Boolean = false,
         reactionEmoji: String? = null,
     ) = NotificationUpdateFfi(
         notificationKey = "key",
@@ -115,6 +148,7 @@ class NotificationChannelSpecTest {
         groupIdHex = "group",
         groupName = "General",
         isDm = isDm,
+        isMention = isMention,
         messageIdHex = "message",
         sender = user(),
         receiver = user(accountIdHex = "account", displayName = "Me"),

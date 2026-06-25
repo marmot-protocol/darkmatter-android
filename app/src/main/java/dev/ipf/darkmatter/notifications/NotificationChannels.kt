@@ -92,6 +92,7 @@ object NotificationChannels {
             when (spec) {
                 NotificationChannelSpec.DIRECT_MESSAGES,
                 NotificationChannelSpec.GROUP_MESSAGES,
+                NotificationChannelSpec.MENTIONS,
                 -> {
                     enableVibration(true)
                     // Single ~150ms pulse instead of the OS-default double-buzz:
@@ -115,6 +116,7 @@ object NotificationChannels {
         when (this) {
             NotificationChannelSpec.DIRECT_MESSAGES -> R.string.notification_channel_direct_messages
             NotificationChannelSpec.GROUP_MESSAGES -> R.string.notification_channel_group_messages
+            NotificationChannelSpec.MENTIONS -> R.string.notification_channel_mentions
             NotificationChannelSpec.REACTIONS -> R.string.notification_channel_reactions
             NotificationChannelSpec.INVITES -> R.string.notification_channel_invites
         }
@@ -123,6 +125,7 @@ object NotificationChannels {
         when (this) {
             NotificationChannelSpec.DIRECT_MESSAGES -> R.string.notification_channel_direct_messages_description
             NotificationChannelSpec.GROUP_MESSAGES -> R.string.notification_channel_group_messages_description
+            NotificationChannelSpec.MENTIONS -> R.string.notification_channel_mentions_description
             NotificationChannelSpec.REACTIONS -> R.string.notification_channel_reactions_description
             NotificationChannelSpec.INVITES -> R.string.notification_channel_invites_description
         }

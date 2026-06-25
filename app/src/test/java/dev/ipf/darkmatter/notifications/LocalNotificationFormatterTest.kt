@@ -523,6 +523,7 @@ class LocalNotificationFormatterTest {
         groupIdHex = groupIdHex,
         groupName = groupName,
         isDm = isDm,
+        isMention = false,
         messageIdHex = "message",
         sender = sender,
         receiver = user(accountIdHex = "account", displayName = "Me"),

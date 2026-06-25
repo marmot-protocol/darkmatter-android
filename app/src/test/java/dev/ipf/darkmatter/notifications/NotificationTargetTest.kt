@@ -390,6 +390,7 @@ class NotificationTargetTest {
             groupIdHex = groupIdHex,
             groupName = "Group",
             isDm = false,
+            isMention = false,
             messageIdHex = messageId,
             sender = NotificationUserFfi("sender-hex", "Sender", null),
             receiver = NotificationUserFfi("receiver-hex", "Me", null),
