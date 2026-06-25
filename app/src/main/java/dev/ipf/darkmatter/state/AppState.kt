@@ -44,6 +44,7 @@ import dev.ipf.darkmatter.updates.AppUpdateForegroundState
 import dev.ipf.darkmatter.updates.AppUpdateInfo
 import dev.ipf.darkmatter.updates.AppUpdateNotifier
 import dev.ipf.darkmatter.updates.AppUpdateRepository
+import dev.ipf.darkmatter.updates.shouldPostAppUpdateNotification
 import dev.ipf.marmotkit.AccountKeyPackageFfi
 import dev.ipf.marmotkit.AccountRelayListsFfi
 import dev.ipf.marmotkit.AccountSummaryFfi
@@ -2015,6 +2016,7 @@ class DarkMatterAppState(
     ): AppUpdateInfo {
         if (!force && !appUpdateRepository.shouldCheck()) {
             appUpdateInfo = appUpdateRepository.loadInfo()
+            maybeShowAppUpdateNotification(appUpdateInfo, notifyIfNewer)
             return appUpdateInfo
         }
         val info =
@@ -2026,10 +2028,17 @@ class DarkMatterAppState(
                     appUpdateRepository.loadInfo()
                 }
         appUpdateInfo = info
-        if (notifyIfNewer && !appInForeground && info.shouldShowBanner) {
+        maybeShowAppUpdateNotification(info, notifyIfNewer)
+        return info
+    }
+
+    private fun maybeShowAppUpdateNotification(
+        info: AppUpdateInfo,
+        notifyIfNewer: Boolean,
+    ) {
+        if (shouldPostAppUpdateNotification(info, notifyIfNewer, appInForeground)) {
             appUpdateNotifier.show(info)
         }
-        return info
     }
 
     suspend fun refreshAppUpdateIfStale(notifyIfNewer: Boolean = false): AppUpdateInfo = refreshAppUpdate(force = false, notifyIfNewer = notifyIfNewer)

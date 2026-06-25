@@ -73,14 +73,22 @@ class AppUpdateNotifier(
 object AppUpdateNavigation {
     const val ACTION_OPEN_UPDATE = "dev.ipf.darkmatter.action.OPEN_APP_UPDATE"
     private const val URI_SCHEME = "darkmatter-update"
+    private const val URI_HOST_AVAILABLE = "available"
 
     fun applyToIntent(
         intent: Intent,
         version: String,
     ) {
         intent.action = ACTION_OPEN_UPDATE
-        intent.data = Uri.parse("$URI_SCHEME://available/${Uri.encode(version)}")
+        intent.data = Uri.parse("$URI_SCHEME://$URI_HOST_AVAILABLE/${Uri.encode(version)}")
     }
 
-    fun isUpdateTap(intent: Intent?): Boolean = intent?.action == ACTION_OPEN_UPDATE
+    fun isUpdateTap(intent: Intent?): Boolean {
+        if (intent?.action != ACTION_OPEN_UPDATE) return false
+        val data = intent.data ?: return false
+        return data.scheme == URI_SCHEME &&
+            data.host == URI_HOST_AVAILABLE &&
+            data.pathSegments.size == 1 &&
+            !data.lastPathSegment.isNullOrBlank()
+    }
 }

@@ -18,6 +18,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+private const val KIND_ZAPSTORE_APP = 32267
+private const val KIND_ZAPSTORE_RELEASE = 30063
+
 class ZapstoreReleaseClient(
     private val httpClient: OkHttpClient = defaultHttpClient(),
     private val relayUrl: String = ZAPSTORE_RELAY,
@@ -27,32 +30,45 @@ class ZapstoreReleaseClient(
         appId: String = AppUpdateConstants.DARKMATTER_ZAPSTORE_APP_ID,
         installedVersion: String? = null,
     ): ZapstoreLatestRelease? {
-        // Zapstore's kind-32267 app event carries no release pointer, so the
-        // latest version comes from the signed kind-30063 release events directly.
-        val versions = fetchReleaseHistoryVersions(appId)
-        val latest = versions.maxWithOrNull { left, right -> CalVer.compare(left, right) } ?: return null
-        val releasesBehind =
-            installedVersion
-                ?.takeIf { it.isNotBlank() }
-                ?.let { installed -> runCatching { CalVer.releasesBehind(installed, versions) }.getOrNull() }
-        return ZapstoreLatestRelease(version = latest, releasesBehind = releasesBehind)
+        val appEvent = fetchLatestAppEvent(appId) ?: return null
+        val releaseDTag = ZapstoreEvents.releaseDTagFromAppEvent(appEvent, appId, publisherPubkey) ?: return null
+        val releaseEvent = fetchReleaseEvent(appId, releaseDTag) ?: return null
+        val latestVersion = ZapstoreEvents.versionFromReleaseEvent(releaseEvent, appId, publisherPubkey, releaseDTag) ?: return null
+        // The kind-32267 app event points at the current release but does not
+        // expose full app-scoped release history. Keep the v1 banner
+        // dismissible by leaving releasesBehind unknown instead of scanning a
+        // publisher-wide capped kind-30063 window that can miss Dark Matter.
+        return ZapstoreLatestRelease(version = latestVersion, releasesBehind = null)
     }
 
-    private suspend fun fetchReleaseHistoryVersions(appId: String): List<String> =
-        fetchEvents(releaseHistoryFilter(), FETCH_TIMEOUT_MS)
+    private suspend fun fetchLatestAppEvent(appId: String): NostrEvent? =
+        fetchEvents(appEventFilter(appId), FETCH_TIMEOUT_MS)
             .asSequence()
-            .filter { event ->
-                event.kind == KIND_ZAPSTORE_RELEASE &&
-                    event.pubkey == publisherPubkey &&
-                    NostrEventVerifier.verifies(event)
-            }.mapNotNull { event -> event.firstTagValue("d")?.let { ZapstoreAddress.versionFromReleaseDTag(it, appId) } }
-            .toList()
+            .filter { event -> ZapstoreEvents.releaseDTagFromAppEvent(event, appId, publisherPubkey) != null }
+            .maxByOrNull(NostrEvent::createdAt)
 
-    private fun releaseHistoryFilter(): JSONObject =
+    private suspend fun fetchReleaseEvent(
+        appId: String,
+        releaseDTag: String,
+    ): NostrEvent? =
+        fetchEvents(releaseEventFilter(releaseDTag), FETCH_TIMEOUT_MS)
+            .asSequence()
+            .filter { event -> ZapstoreEvents.versionFromReleaseEvent(event, appId, publisherPubkey, releaseDTag) != null }
+            .maxByOrNull(NostrEvent::createdAt)
+
+    private fun appEventFilter(appId: String): JSONObject =
+        JSONObject()
+            .put("kinds", JSONArray().put(KIND_ZAPSTORE_APP))
+            .put("authors", JSONArray().put(publisherPubkey))
+            .put("#d", JSONArray().put(appId))
+            .put("limit", FETCH_EVENT_LIMIT)
+
+    private fun releaseEventFilter(releaseDTag: String): JSONObject =
         JSONObject()
             .put("kinds", JSONArray().put(KIND_ZAPSTORE_RELEASE))
             .put("authors", JSONArray().put(publisherPubkey))
-            .put("limit", RELEASE_HISTORY_LIMIT)
+            .put("#d", JSONArray().put(releaseDTag))
+            .put("limit", FETCH_EVENT_LIMIT)
 
     private suspend fun fetchEvents(
         filter: JSONObject,
@@ -144,10 +160,12 @@ class ZapstoreReleaseClient(
 
     companion object {
         const val ZAPSTORE_RELAY = "wss://relay.zapstore.dev"
+
+        // Same Zapstore publisher key used by White Noise's canonical Zapstore
+        // lookup; this is the trust anchor for signed app/release events.
         const val ZAPSTORE_PUBLISHER_PUBKEY = "75d737c3472471029c44876b330d2284288a42779b591a2ed4daa1c6c07efaf7"
-        private const val KIND_ZAPSTORE_RELEASE = 30063
         private const val FETCH_TIMEOUT_MS = 10_000L
-        private const val RELEASE_HISTORY_LIMIT = 100
+        private const val FETCH_EVENT_LIMIT = 5
 
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient
@@ -158,8 +176,46 @@ class ZapstoreReleaseClient(
     }
 }
 
+internal object ZapstoreEvents {
+    fun releaseDTagFromAppEvent(
+        event: NostrEvent,
+        appId: String,
+        publisherPubkey: String,
+    ): String? {
+        if (event.kind != KIND_ZAPSTORE_APP) return null
+        if (event.pubkey != publisherPubkey) return null
+        if (event.firstTagValue("d") != appId) return null
+        if (!NostrEventVerifier.verifies(event)) return null
+        return event.firstTagValue("a")?.let { ZapstoreAddress.releaseDTagFromAppATag(it, appId, publisherPubkey) }
+    }
+
+    fun versionFromReleaseEvent(
+        event: NostrEvent,
+        appId: String,
+        publisherPubkey: String,
+        releaseDTag: String,
+    ): String? {
+        if (event.kind != KIND_ZAPSTORE_RELEASE) return null
+        if (event.pubkey != publisherPubkey) return null
+        val dTag = event.firstTagValue("d") ?: return null
+        if (dTag != releaseDTag) return null
+        if (!NostrEventVerifier.verifies(event)) return null
+        return ZapstoreAddress.versionFromReleaseDTag(dTag, appId)
+    }
+}
+
 internal object ZapstoreAddress {
     private val calVerTagVersion = Regex("\\d+(?:\\.\\d+)*")
+
+    fun releaseDTagFromAppATag(
+        aTag: String,
+        appId: String,
+        publisherPubkey: String,
+    ): String? {
+        val prefix = "$KIND_ZAPSTORE_RELEASE:$publisherPubkey:$appId@"
+        val version = aTag.removePrefix(prefix).takeIf { it.length != aTag.length && it.isNotBlank() } ?: return null
+        return version.takeIf(calVerTagVersion::matches)?.let { "$appId@$it" }
+    }
 
     fun versionFromReleaseDTag(
         dTag: String,

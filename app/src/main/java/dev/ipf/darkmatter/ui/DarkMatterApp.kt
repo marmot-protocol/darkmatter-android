@@ -15302,9 +15302,8 @@ private fun SettingsHomeScreen(
                         onClick = {
                             if (appState.appUpdateInfo.latestVersion == null) {
                                 scope.launch { appState.refreshAppUpdate(force = true, notifyIfNewer = false) }
-                            } else {
-                                appState.openZapstoreListing(context)
                             }
+                            appState.openZapstoreListing(context)
                         },
                     )
                 }

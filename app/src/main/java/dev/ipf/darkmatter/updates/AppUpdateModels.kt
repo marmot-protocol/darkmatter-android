@@ -34,6 +34,12 @@ data class ZapstoreLatestRelease(
     val releasesBehind: Int?,
 )
 
+internal fun shouldPostAppUpdateNotification(
+    info: AppUpdateInfo,
+    notifyIfNewer: Boolean,
+    appInForeground: Boolean,
+): Boolean = notifyIfNewer && !appInForeground && info.shouldShowBanner
+
 /** CalVer segment comparison for Zapstore version strings such as `2026.6.20`. */
 object CalVer {
     private val leadingNumber = Regex("^\\d+")
