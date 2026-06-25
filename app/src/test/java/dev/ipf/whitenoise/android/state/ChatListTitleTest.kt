@@ -216,7 +216,7 @@ class ChatListTitleTest {
                 sender = "peer-acc",
                 senderDisplayName = null,
                 plaintext = "hello",
-                contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+                contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
                 kind = 9uL,
                 timelineAt = 1uL,
                 deleted = false,

@@ -985,6 +985,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1184,6 +1186,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_reveal_nsec(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_marmot_uniffi_fn_method_marmot_secure_delete_expired(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
+    ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_self_demote_admin(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_self_demote_admin_detailed(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
@@ -1552,6 +1556,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_reveal_nsec(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_secure_delete_expired(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin_detailed(
@@ -1890,6 +1896,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_reveal_nsec() != 4639.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_secure_delete_expired() != 16091.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin() != 8845.toShort()) {
@@ -4213,6 +4222,14 @@ public interface MarmotInterface {
     fun `revealNsec`(`accountRef`: kotlin.String): kotlin.String
     
     /**
+     * Securely scrub and prune expired disappearing-message plaintext for a
+     * group according to its active retention component. The media hash list
+     * identifies pruned encrypted-media blobs so host apps can purge their own
+     * decrypted-media disk caches keyed by ciphertext hash.
+     */
+    suspend fun `secureDeleteExpired`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): SecureDeleteExpiredResultFfi
+    
+    /**
      * Step down as an admin of `group_id_hex` (demote the active account).
      */
     suspend fun `selfDemoteAdmin`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): SendSummaryFfi
@@ -6050,6 +6067,33 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
     )
     }
     
+
+    
+    /**
+     * Securely scrub and prune expired disappearing-message plaintext for a
+     * group according to its active retention component. The media hash list
+     * identifies pruned encrypted-media blobs so host apps can purge their own
+     * decrypted-media disk caches keyed by ciphertext hash.
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `secureDeleteExpired`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String) : SecureDeleteExpiredResultFfi {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_secure_delete_expired(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeSecureDeleteExpiredResultFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
 
     
     /**
@@ -9523,7 +9567,12 @@ public object FfiConverterTypeLocalPushRegistrationDebugFfi: FfiConverterRustBuf
 
 
 data class MarkdownDocumentFfi (
-    var `blocks`: List<MarkdownBlockFfi>
+    var `blocks`: List<MarkdownBlockFfi>, 
+    /**
+     * True when the input exceeded the FFI Markdown safety cap and `blocks`
+     * were parsed from a UTF-8-boundary prefix.
+     */
+    var `truncated`: kotlin.Boolean
 ) {
     
     companion object
@@ -9536,15 +9585,18 @@ public object FfiConverterTypeMarkdownDocumentFfi: FfiConverterRustBuffer<Markdo
     override fun read(buf: ByteBuffer): MarkdownDocumentFfi {
         return MarkdownDocumentFfi(
             FfiConverterSequenceTypeMarkdownBlockFfi.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: MarkdownDocumentFfi) = (
-            FfiConverterSequenceTypeMarkdownBlockFfi.allocationSize(value.`blocks`)
+            FfiConverterSequenceTypeMarkdownBlockFfi.allocationSize(value.`blocks`) +
+            FfiConverterBoolean.allocationSize(value.`truncated`)
     )
 
     override fun write(value: MarkdownDocumentFfi, buf: ByteBuffer) {
             FfiConverterSequenceTypeMarkdownBlockFfi.write(value.`blocks`, buf)
+            FfiConverterBoolean.write(value.`truncated`, buf)
     }
 }
 
@@ -10685,6 +10737,38 @@ public object FfiConverterTypeRuntimeProjectionUpdateFfi: FfiConverterRustBuffer
             FfiConverterString.write(value.`accountIdHex`, buf)
             FfiConverterString.write(value.`accountLabel`, buf)
             FfiConverterTypeTimelineProjectionUpdateFfi.write(value.`update`, buf)
+    }
+}
+
+
+
+data class SecureDeleteExpiredResultFfi (
+    var `prunedMessages`: kotlin.ULong, 
+    var `mediaCiphertextSha256`: List<kotlin.String>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSecureDeleteExpiredResultFfi: FfiConverterRustBuffer<SecureDeleteExpiredResultFfi> {
+    override fun read(buf: ByteBuffer): SecureDeleteExpiredResultFfi {
+        return SecureDeleteExpiredResultFfi(
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SecureDeleteExpiredResultFfi) = (
+            FfiConverterULong.allocationSize(value.`prunedMessages`) +
+            FfiConverterSequenceString.allocationSize(value.`mediaCiphertextSha256`)
+    )
+
+    override fun write(value: SecureDeleteExpiredResultFfi, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`prunedMessages`, buf)
+            FfiConverterSequenceString.write(value.`mediaCiphertextSha256`, buf)
     }
 }
 

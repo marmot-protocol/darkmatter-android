@@ -270,7 +270,7 @@ class OptimisticMessageReconciliationTest {
                     groupIdHex = "group",
                     sender = "alice",
                     plaintext = "📎 $filename",
-                    contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+                    contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
                     kind = 9uL,
                     tags =
                         listOf(
@@ -298,7 +298,7 @@ class OptimisticMessageReconciliationTest {
                     groupIdHex = "group",
                     sender = "alice",
                     plaintext = "",
-                    contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+                    contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
                     kind = 9uL,
                     tags =
                         listOf(
@@ -320,7 +320,7 @@ class OptimisticMessageReconciliationTest {
             groupIdHex = "group",
             sender = "alice",
             plaintext = "",
-            contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+            contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
             kind = 9uL,
             tags =
                 listOf(
@@ -387,7 +387,7 @@ class OptimisticMessageReconciliationTest {
             groupIdHex = "group",
             sender = "alice",
             plaintext = plaintext,
-            contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+            contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
             kind = 9uL,
             tags = emptyList(),
             recordedAt = recordedAt,

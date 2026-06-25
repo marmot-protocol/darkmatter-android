@@ -184,6 +184,7 @@ class ChatListProjectionReducerTest {
         val sourceRow = row(groupId = "g1", rawTitle = "Marmot Lab")
         val tokens =
             MarkdownDocumentFfi(
+                truncated = false,
                 blocks = listOf(MarkdownBlockFfi.Paragraph(listOf(MarkdownInlineFfi.Text("hi")))),
             )
 
@@ -280,7 +281,7 @@ class ChatListProjectionReducerTest {
         sender = sender,
         senderDisplayName = null,
         plaintext = plaintext,
-        contentTokens = MarkdownDocumentFfi(blocks = emptyList()),
+        contentTokens = MarkdownDocumentFfi(truncated = false, blocks = emptyList()),
         kind = kind,
         timelineAt = timelineAt,
         deleted = deleted,
