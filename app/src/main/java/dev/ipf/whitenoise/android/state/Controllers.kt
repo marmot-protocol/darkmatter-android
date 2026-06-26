@@ -643,9 +643,15 @@ internal fun optimisticMessageIdForProjection(
             val optimisticIsMediaPending = optimistic.record.tags.any { it.values.firstOrNull() == "_media_pending" }
             if (optimisticIsMediaPending && projectedIsMedia) return@firstOrNull true
 
-            // Standard match for text sends: plaintext + tags equal.
+            // Standard match for text sends: plaintext equal, and tags equal
+            // ignoring engine-derived `p` (mention) tags. The optimistic record is
+            // built from the typed text before the engine adds NIP-27 `p` tags for
+            // `@npub1…` mentions, so requiring full tag equality leaves the
+            // optimistic and projected copies unmatched — a transient double bubble
+            // until the confirmed id lands. Reply tags (e/q) still must match.
             optimistic.record.plaintext == projected.plaintext &&
-                optimistic.record.tags == projected.tags
+                optimistic.record.tags.filterNot { it.values.firstOrNull() == "p" } ==
+                projected.tags.filterNot { it.values.firstOrNull() == "p" }
         }?.record
         ?.messageIdHex
 }
