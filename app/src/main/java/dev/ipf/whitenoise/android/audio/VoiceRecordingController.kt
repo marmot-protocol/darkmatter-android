@@ -103,23 +103,10 @@ class VoiceRecordingController(
             resetRecordingUiState()
             restartJob =
                 scope.launch(Dispatchers.Main) {
-                    try {
-                        pending.join()
-                        restarting = false
-                        restartJob = null
-                        if (isRecording) beginRecording()
-                    } finally {
-                        // The reused focus is handed to the new recorder once
-                        // beginRecording() opens it. If the restart was cancelled
-                        // during teardown (or begin failed), no recorder owns the
-                        // focus and the finalize tail already skipped its abandon
-                        // because `restarting` was set — release it here so it
-                        // isn't stranded. abandonRecordingFocus() is idempotent.
-                        if (recorder == null) {
-                            restarting = false
-                            abandonRecordingFocus()
-                        }
-                    }
+                    pending.join()
+                    restarting = false
+                    restartJob = null
+                    if (isRecording) beginRecording()
                 }
             return true
         }
@@ -253,7 +240,7 @@ class VoiceRecordingController(
 
     fun cancel() {
         if (abortPendingRestart()) return
-        val r = recorder ?: return
+        val r = recorder
         recorder = null
         tickJob?.cancel()
         tickJob = null
@@ -263,13 +250,16 @@ class VoiceRecordingController(
         verticalOffsetPx = 0f
         willCancel = false
         willLock = false
+        // Abandon focus unconditionally: during a restart the previous recorder
+        // is already null while the reused focus is still held, so a teardown
+        // here (e.g. composition disposal mid-restart) must release the focus
+        // even when there's no recorder left to cancel. Idempotent when unheld.
+        abandonRecordingFocus()
         // Same off-main finalize as stop() (#372); a cancel has nothing to
         // deliver, so just release the recorder in the background. No tail delay
-        // — the take was discarded. Release focus so paused media resumes.
-        // Released on the lifecycle-independent scope so a teardown that races
-        // composition disposal still frees the mic.
-        abandonRecordingFocus()
-        recorderScope.launch { r.cancel() }
+        // — the take was discarded. Released on the lifecycle-independent scope
+        // so a teardown that races composition disposal still frees the mic.
+        if (r != null) recorderScope.launch { r.cancel() }
     }
 
     private fun requestRecordingFocus(): Boolean {
