@@ -3998,7 +3998,10 @@ class ConversationController(
     suspend fun updateMessageRetention(disappearingMessageSecs: ULong): Boolean =
         withMutationLockResult(false) {
             lastMutationError = null
-            val account = appState.activeAccountRef ?: return@withMutationLockResult false
+            // Stay bound to the conversation's account (like every other mutation
+            // here); activeAccountRef could shift if the user switches accounts
+            // before this completes, sending the retention change to the wrong store.
+            val account = conversationAccountRef ?: return@withMutationLockResult false
             runCatching {
                 appState.marmotIo { updateMessageRetention(account, group.groupIdHex, disappearingMessageSecs) }
                 group = group.copy(disappearingMessageSecs = disappearingMessageSecs)

@@ -136,8 +136,11 @@ object GroupSystemEvents {
                 actor = data?.optString("actor")?.takeIf { it.isNotBlank() },
                 subject = data?.optString("subject")?.takeIf { it.isNotBlank() },
                 name = data?.optString("name")?.takeIf { it.isNotBlank() },
-                oldRetentionSeconds = data?.takeIf { it.has("old_retention_seconds") }?.optLong("old_retention_seconds")?.toULong(),
-                newRetentionSeconds = data?.takeIf { it.has("new_retention_seconds") }?.optLong("new_retention_seconds")?.toULong(),
+                // Only accept a real non-negative number; absent or malformed
+                // (non-numeric) stays null so it falls back rather than rendering
+                // as an authoritative "turned off" (which is only secs == 0).
+                oldRetentionSeconds = data?.optLong("old_retention_seconds", -1L)?.takeIf { it >= 0L }?.toULong(),
+                newRetentionSeconds = data?.optLong("new_retention_seconds", -1L)?.takeIf { it >= 0L }?.toULong(),
             )
         }.getOrNull()
 
@@ -244,7 +247,9 @@ object GroupSystemEvents {
                     else -> copy.avatarChangedPassive
                 }
             TypeDisappearingTimerChanged -> {
-                val turnedOff = (event.newRetentionSeconds ?: 0uL) == 0uL
+                // Off only when the new window is explicitly 0; a null (absent or
+                // malformed payload) must fall back, not render as "turned off".
+                val turnedOff = event.newRetentionSeconds == 0uL
                 when {
                     turnedOff && actorIsSelf -> copy.disappearingOffYou
                     turnedOff && actorName != null -> String.format(copy.disappearingOffFormat, actorName)

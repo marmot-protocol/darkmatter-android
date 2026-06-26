@@ -9525,10 +9525,16 @@ private fun ConversationScreen(
                                     if (showTimer) {
                                         val timerTooltipState = rememberTooltipState(isPersistent = true)
                                         val timerTooltipText = stringResource(R.string.disappearing_tooltip_text)
-                                        if (!appState.disappearingTooltipShown) {
+                                        // Snapshot the one-time decision so marking the flag
+                                        // (which we do first, to persist before a quick exit
+                                        // can re-arm it) doesn't recompose this branch away and
+                                        // cancel the still-suspended show().
+                                        val showTooltipOnce =
+                                            remember(controller.group.groupIdHex) {
+                                                !appState.disappearingTooltipShown
+                                            }
+                                        if (showTooltipOnce) {
                                             LaunchedEffect(controller.group.groupIdHex) {
-                                                // Mark before showing so a quick exit doesn't
-                                                // re-arm the one-time hint on the next open.
                                                 appState.markDisappearingTooltipShown()
                                                 timerTooltipState.show()
                                             }
