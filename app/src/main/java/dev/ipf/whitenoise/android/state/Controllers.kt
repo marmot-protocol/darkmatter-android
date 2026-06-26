@@ -2069,8 +2069,11 @@ class ConversationController(
 
     // Last message id we successfully marked as read on the Rust side.
     // Dedupes scroll-driven [markReadUpTo] calls so settling on the same row
-    // doesn't issue redundant FFI hops.
-    private var lastReadMessageId: String? = null
+    // doesn't issue redundant FFI hops. Compose-observable so UI (the
+    // jump-to-mention chip) can derive unread state off the engine read
+    // watermark rather than the scroll position.
+    var lastReadMessageId: String? by mutableStateOf(null)
+        private set
 
     val title: String
         get() = title()

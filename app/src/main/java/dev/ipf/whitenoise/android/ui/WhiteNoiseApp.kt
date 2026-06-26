@@ -8118,6 +8118,40 @@ private fun ConversationScreen(
             }
         }
     }
+    // Unread messages (after the read anchor) that mention the active account,
+    // oldest first — drives the in-conversation jump-to-mention chip. Mirrors
+    // countUnreadIncoming's anchor logic; kind-9 only, matching the engine's
+    // mention classification, reusing the #414 per-message detection.
+    val selfAccountIdHexForMentions = appState.activeAccount?.accountIdHex
+    val unreadMentionMessageIds by remember {
+        derivedStateOf {
+            // Anchor on the engine read watermark (controller.lastReadMessageId),
+            // not the scroll position: it only advances on real reads / markReadUpTo,
+            // so sending a message can't resurrect already-read mentions, and the
+            // chip stays in lockstep with the chat-list @-badge (same watermark).
+            val watermark = controller.lastReadMessageId
+            val anchorIdx =
+                watermark?.let { id ->
+                    controller.timeline.indexOfFirst { it.record.messageIdHex == id }
+                } ?: -1
+            when {
+                !initialTimelineAnchored || selfAccountIdHexForMentions.isNullOrBlank() -> emptyList()
+                // Watermark older than the loaded window → everything loaded is read.
+                watermark != null && anchorIdx < 0 -> emptyList()
+                else ->
+                    controller.timeline
+                        .drop(anchorIdx + 1)
+                        .filter { it.record.direction == "received" && it.record.kind == 9uL }
+                        .filter {
+                            documentMentionsAccount(
+                                document = it.record.contentTokens,
+                                accountIdHex = selfAccountIdHexForMentions,
+                                resolveAccountIdHex = { bech32 -> appState.accountIdHexForMention(bech32) },
+                            )
+                        }.mapNotNull { it.record.messageIdHex.takeIf { id -> id.isNotBlank() } }
+            }
+        }
+    }
     // Reading the raw IME inset in the body would re-subscribe and recompose
     // this (very heavy) screen on every keyboard-animation frame. Capture the
     // ime WindowInsets (the @Composable read) once, then collapse to the
@@ -8891,6 +8925,38 @@ private fun ConversationScreen(
                 val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
                 listState.animateScrollToItem(1 + olderMessagesHeaderCount + timelineIndex)
                 highlightedMessageId = targetMessageId
+                delay(1_500L)
+                if (highlightedMessageId == targetMessageId) {
+                    highlightedMessageId = null
+                }
+            }
+    }
+
+    fun jumpToNextUnreadMention() {
+        val targetMessageId = unreadMentionMessageIds.firstOrNull() ?: return
+        navigateReplyJob?.cancel()
+        navigateReplyJob =
+            scope.launch {
+                if (!controller.loadUntilMessageAvailable(targetMessageId)) {
+                    appState.present(R.string.toast_original_message_unavailable)
+                    return@launch
+                }
+                val timelineIndex =
+                    controller.timeline
+                        .filterNot { MessageProjector.isEdit(it.record) }
+                        .indexOfFirst { it.record.messageIdHex == targetMessageId }
+                if (timelineIndex < 0) {
+                    appState.present(R.string.toast_original_message_unavailable)
+                    return@launch
+                }
+                val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
+                listState.animateScrollToItem(1 + olderMessagesHeaderCount + timelineIndex)
+                highlightedMessageId = targetMessageId
+                // Mark read up to the visited mention so the count — and the
+                // chat-list @-badge — decrement in step; advance the local read
+                // anchor so the chip's derived count updates immediately.
+                readAnchorMessageId = targetMessageId
+                controller.markReadUpTo(targetMessageId)
                 delay(1_500L)
                 if (highlightedMessageId == targetMessageId) {
                     highlightedMessageId = null
@@ -9966,40 +10032,78 @@ private fun ConversationScreen(
                         if (!initialTimelineAnchored) {
                             LoadingScreen()
                         }
-                        if (initialTimelineAnchored && !nearBottom) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                shadowElevation = 2.dp,
+                        if (initialTimelineAnchored) {
+                            Column(
                                 modifier =
                                     Modifier
                                         .align(Alignment.BottomEnd)
-                                        .padding(12.dp)
-                                        .size(34.dp)
-                                        .clickable {
-                                            scope.launch {
-                                                val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-                                                listState.animateScrollToItem(lastIndex)
-                                            }
-                                        },
+                                        .padding(12.dp),
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.ArrowDownward,
-                                        contentDescription = stringResource(R.string.jump_to_newest),
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    if (unreadIncomingCount > 0) {
-                                        Badge(
-                                            modifier =
-                                                Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .offset(x = 10.dp, y = (-10).dp),
+                                // Jump-to-mention chip: tap visits the oldest unread
+                                // mention and marks it read, so the count steps down.
+                                val mentionCount = unreadMentionMessageIds.size
+                                if (mentionCount > 0) {
+                                    val jumpToMentionLabel = stringResource(R.string.conversation_jump_to_mention)
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        shadowElevation = 2.dp,
+                                        modifier =
+                                            Modifier
+                                                .height(34.dp)
+                                                .semantics { contentDescription = jumpToMentionLabel }
+                                                .clickable { jumpToNextUnreadMention() },
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            modifier = Modifier.padding(horizontal = 12.dp),
                                         ) {
+                                            Text("@", style = MaterialTheme.typography.titleMedium)
                                             Text(
-                                                if (unreadIncomingCount > 99) "99+" else unreadIncomingCount.toString(),
+                                                if (mentionCount > 99) "99+" else mentionCount.toString(),
+                                                style = MaterialTheme.typography.labelLarge,
                                             )
+                                        }
+                                    }
+                                }
+                                if (!nearBottom) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        shadowElevation = 2.dp,
+                                        modifier =
+                                            Modifier
+                                                .size(34.dp)
+                                                .clickable {
+                                                    scope.launch {
+                                                        val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                                                        listState.animateScrollToItem(lastIndex)
+                                                    }
+                                                },
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.ArrowDownward,
+                                                contentDescription = stringResource(R.string.jump_to_newest),
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                            if (unreadIncomingCount > 0) {
+                                                Badge(
+                                                    modifier =
+                                                        Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .offset(x = 10.dp, y = (-10).dp),
+                                                ) {
+                                                    Text(
+                                                        if (unreadIncomingCount > 99) "99+" else unreadIncomingCount.toString(),
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
