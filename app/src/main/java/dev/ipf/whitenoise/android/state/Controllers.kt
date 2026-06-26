@@ -122,6 +122,10 @@ data class ChatListItem(
     val hasUnread: Boolean
         get() = projection?.hasUnread ?: false
 
+    /** At least one unread message in this chat mentions the active account. */
+    val unreadMention: Boolean
+        get() = projection?.unreadMention ?: false
+
     /**
      * Whether the active account is no longer a member of this group. Two
      * independent signals establish this:

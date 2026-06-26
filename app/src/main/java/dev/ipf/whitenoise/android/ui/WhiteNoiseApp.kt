@@ -3430,11 +3430,30 @@ private fun ChatRow(
                 } else if (item.group.pendingConfirmation) {
                     Badge { Text(stringResource(R.string.invite)) }
                 } else if (rowHasUnread) {
-                    UnreadCountBadge(rowUnreadCount)
+                    // Surface the highest-signal unread: an @ badge beside the
+                    // count when one of the unread messages mentions you (#611).
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (item.unreadMention) MentionBadge()
+                        UnreadCountBadge(rowUnreadCount)
+                    }
                 }
             }
         },
     )
+}
+
+@Composable
+private fun MentionBadge(modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.chat_list_mention_badge)
+    // Tertiary accent so a mention reads as distinct from the primary-colored
+    // unread count sitting beside it.
+    Badge(
+        modifier = modifier.semantics { contentDescription = description },
+        containerColor = MaterialTheme.colorScheme.tertiary,
+        contentColor = MaterialTheme.colorScheme.onTertiary,
+    ) {
+        Text("@")
+    }
 }
 
 @Composable

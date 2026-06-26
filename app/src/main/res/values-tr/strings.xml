@@ -359,6 +359,7 @@
     <string name="notification_channel_group_messages_description">Grup görüşmesi mesajları</string>
     <string name="notification_channel_mentions">Bahsetmeler</string>
     <string name="notification_channel_mentions_description">Sizden bahseden mesajlar</string>
+    <string name="chat_list_mention_badge">Bir bahsetme içeriyor</string>
     <string name="notification_channel_reactions">Tepkiler</string>
     <string name="notification_channel_reactions_description">Mesajlarınıza verilen tepkiler</string>
     <string name="notification_channel_invites">Davetler</string>
