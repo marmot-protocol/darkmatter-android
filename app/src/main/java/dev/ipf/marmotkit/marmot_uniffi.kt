@@ -981,6 +981,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1082,6 +1088,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_delete_audit_log_file(`ptr`: Pointer,`path`: RustBuffer.ByValue,
     ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_delete_group_local(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
+    ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_delete_message(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`targetMessageId`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_demote_admin(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`memberRef`: RustBuffer.ByValue,
@@ -1178,6 +1186,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_reveal_nsec(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_marmot_uniffi_fn_method_marmot_secure_delete_expired(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
+    ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_self_demote_admin(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_self_demote_admin_detailed(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,
@@ -1241,6 +1251,8 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_fn_method_marmot_update_group_avatar_url(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`dim`: RustBuffer.ByValue,`thumbhash`: RustBuffer.ByValue,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_update_group_profile(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,
+    ): Long
+    fun uniffi_marmot_uniffi_fn_method_marmot_update_message_retention(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`disappearingMessageSecs`: Long,
     ): Long
     fun uniffi_marmot_uniffi_fn_method_marmot_upload_media(`ptr`: Pointer,`accountRef`: RustBuffer.ByValue,`groupIdHex`: RustBuffer.ByValue,`request`: RustBuffer.ByValue,
     ): Long
@@ -1446,6 +1458,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_delete_audit_log_file(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_delete_group_local(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_delete_message(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_demote_admin(
@@ -1542,6 +1556,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_reveal_nsec(
     ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_secure_delete_expired(
+    ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin_detailed(
@@ -1605,6 +1621,8 @@ internal interface UniffiLib : Library {
     fun uniffi_marmot_uniffi_checksum_method_marmot_update_group_avatar_url(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_update_group_profile(
+    ): Short
+    fun uniffi_marmot_uniffi_checksum_method_marmot_update_message_retention(
     ): Short
     fun uniffi_marmot_uniffi_checksum_method_marmot_upload_media(
     ): Short
@@ -1731,6 +1749,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_delete_audit_log_file() != 6934.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_delete_group_local() != 3764.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_delete_message() != 13951.toShort()) {
@@ -1877,6 +1898,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_reveal_nsec() != 4639.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_secure_delete_expired() != 16091.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_self_demote_admin() != 8845.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1971,6 +1995,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_update_group_profile() != 53035.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_marmot_uniffi_checksum_method_marmot_update_message_retention() != 38717.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_marmot_uniffi_checksum_method_marmot_upload_media() != 20405.toShort()) {
@@ -3888,6 +3915,18 @@ public interface MarmotInterface {
     suspend fun `deleteAuditLogFile`(`path`: kotlin.String): AuditLogDeleteResultFfi
     
     /**
+     * Delete this group's local app data without performing an MLS leave. The
+     * caller should cancel any active UI subscriptions for the group before
+     * invoking the wipe. The runtime removes the active transport route, then
+     * transactionally drops the chat-list/account projection, plaintext app
+     * events, timeline rows, agent-stream projection rows, push-token rows, and
+     * cached encrypted-media epoch secrets. MLS/OpenMLS group state is left
+     * intact; a future fresh group delivery can recreate a local chat row.
+     * Returns true if any local rows or a live route were removed.
+     */
+    suspend fun `deleteGroupLocal`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): kotlin.Boolean
+    
+    /**
      * Mark `target_message_id` deleted for the whole group. This is a
      * tombstone — the original stays in everyone's store; clients render a
      * "message deleted" placeholder.
@@ -4183,6 +4222,14 @@ public interface MarmotInterface {
     fun `revealNsec`(`accountRef`: kotlin.String): kotlin.String
     
     /**
+     * Securely scrub and prune expired disappearing-message plaintext for a
+     * group according to its active retention component. The media hash list
+     * identifies pruned encrypted-media blobs so host apps can purge their own
+     * decrypted-media disk caches keyed by ciphertext hash.
+     */
+    suspend fun `secureDeleteExpired`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): SecureDeleteExpiredResultFfi
+    
+    /**
      * Step down as an admin of `group_id_hex` (demote the active account).
      */
     suspend fun `selfDemoteAdmin`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String): SendSummaryFfi
@@ -4396,6 +4443,14 @@ public interface MarmotInterface {
     suspend fun `updateGroupAvatarUrl`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `url`: kotlin.String?, `dim`: kotlin.String?, `thumbhash`: kotlin.String?): SendSummaryFfi
     
     suspend fun `updateGroupProfile`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `name`: kotlin.String?, `description`: kotlin.String?): SendSummaryFfi
+    
+    /**
+     * Set the per-group disappearing-message retention, wrapping the engine's
+     * `update_message_retention`. `disappearing_message_secs` of `0` disables
+     * expiry; any positive value is the retention window in seconds. Thin
+     * passthrough over the already-public engine API (darkmatter#571).
+     */
+    suspend fun `updateMessageRetention`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `disappearingMessageSecs`: kotlin.ULong): SendSummaryFfi
     
     /**
      * Encrypt plaintext attachments, upload the ciphertext blobs, and
@@ -4892,6 +4947,37 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
         { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
         // lift function
         { FfiConverterTypeAuditLogDeleteResultFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Delete this group's local app data without performing an MLS leave. The
+     * caller should cancel any active UI subscriptions for the group before
+     * invoking the wipe. The runtime removes the active transport route, then
+     * transactionally drops the chat-list/account projection, plaintext app
+     * events, timeline rows, agent-stream projection rows, push-token rows, and
+     * cached encrypted-media epoch secrets. MLS/OpenMLS group state is left
+     * intact; a future fresh group delivery can recreate a local chat row.
+     * Returns true if any local rows or a live route were removed.
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `deleteGroupLocal`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String) : kotlin.Boolean {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_delete_group_local(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_i8(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_i8(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_i8(future) },
+        // lift function
+        { FfiConverterBoolean.lift(it) },
         // Error FFI converter
         MarmotKitException.ErrorHandler,
     )
@@ -5984,6 +6070,33 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
 
     
     /**
+     * Securely scrub and prune expired disappearing-message plaintext for a
+     * group according to its active retention component. The media hash list
+     * identifies pruned encrypted-media blobs so host apps can purge their own
+     * decrypted-media disk caches keyed by ciphertext hash.
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `secureDeleteExpired`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String) : SecureDeleteExpiredResultFfi {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_secure_delete_expired(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeSecureDeleteExpiredResultFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
+
+    
+    /**
      * Step down as an admin of `group_id_hex` (demote the active account).
      */
     @Throws(MarmotKitException::class)
@@ -6754,6 +6867,33 @@ open class Marmot: Disposable, AutoCloseable, MarmotInterface {
             UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_update_group_profile(
                 thisPtr,
                 FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),FfiConverterOptionalString.lower(`name`),FfiConverterOptionalString.lower(`description`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeSendSummaryFfi.lift(it) },
+        // Error FFI converter
+        MarmotKitException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Set the per-group disappearing-message retention, wrapping the engine's
+     * `update_message_retention`. `disappearing_message_secs` of `0` disables
+     * expiry; any positive value is the retention window in seconds. Thin
+     * passthrough over the already-public engine API (darkmatter#571).
+     */
+    @Throws(MarmotKitException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `updateMessageRetention`(`accountRef`: kotlin.String, `groupIdHex`: kotlin.String, `disappearingMessageSecs`: kotlin.ULong) : SendSummaryFfi {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_marmot_uniffi_fn_method_marmot_update_message_retention(
+                thisPtr,
+                FfiConverterString.lower(`accountRef`),FfiConverterString.lower(`groupIdHex`),FfiConverterULong.lower(`disappearingMessageSecs`),
             )
         },
         { future, callback, continuation -> UniffiLib.INSTANCE.ffi_marmot_uniffi_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -7861,7 +8001,7 @@ public object FfiConverterTypeAccountKeyPackageFfi: FfiConverterRustBuffer<Accou
 
 data class AccountRelayListsFfi (
     var `complete`: kotlin.Boolean, 
-    var `missing`: List<kotlin.String>, 
+    var `missing`: List<MissingRelayListKindFfi>, 
     var `defaultRelays`: List<kotlin.String>, 
     var `bootstrapRelays`: List<kotlin.String>, 
     var `nip65`: RelayListFfi, 
@@ -7878,7 +8018,7 @@ public object FfiConverterTypeAccountRelayListsFfi: FfiConverterRustBuffer<Accou
     override fun read(buf: ByteBuffer): AccountRelayListsFfi {
         return AccountRelayListsFfi(
             FfiConverterBoolean.read(buf),
-            FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceTypeMissingRelayListKindFfi.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterTypeRelayListFfi.read(buf),
@@ -7888,7 +8028,7 @@ public object FfiConverterTypeAccountRelayListsFfi: FfiConverterRustBuffer<Accou
 
     override fun allocationSize(value: AccountRelayListsFfi) = (
             FfiConverterBoolean.allocationSize(value.`complete`) +
-            FfiConverterSequenceString.allocationSize(value.`missing`) +
+            FfiConverterSequenceTypeMissingRelayListKindFfi.allocationSize(value.`missing`) +
             FfiConverterSequenceString.allocationSize(value.`defaultRelays`) +
             FfiConverterSequenceString.allocationSize(value.`bootstrapRelays`) +
             FfiConverterTypeRelayListFfi.allocationSize(value.`nip65`) +
@@ -7897,7 +8037,7 @@ public object FfiConverterTypeAccountRelayListsFfi: FfiConverterRustBuffer<Accou
 
     override fun write(value: AccountRelayListsFfi, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`complete`, buf)
-            FfiConverterSequenceString.write(value.`missing`, buf)
+            FfiConverterSequenceTypeMissingRelayListKindFfi.write(value.`missing`, buf)
             FfiConverterSequenceString.write(value.`defaultRelays`, buf)
             FfiConverterSequenceString.write(value.`bootstrapRelays`, buf)
             FfiConverterTypeRelayListFfi.write(value.`nip65`, buf)
@@ -8218,6 +8358,11 @@ data class AppGroupRecordFfi (
     var `avatarDim`: kotlin.String?, 
     var `avatarThumbhash`: kotlin.String?, 
     var `encryptedMedia`: AppGroupEncryptedMediaComponentFfi, 
+    /**
+     * Per-group disappearing-message retention in seconds
+     * (`marmot.group.message-retention.v1`). `0` means messages never expire.
+     */
+    var `disappearingMessageSecs`: kotlin.ULong, 
     var `archived`: kotlin.Boolean, 
     var `pendingConfirmation`: kotlin.Boolean, 
     var `welcomerAccountIdHex`: kotlin.String?, 
@@ -8244,6 +8389,7 @@ public object FfiConverterTypeAppGroupRecordFfi: FfiConverterRustBuffer<AppGroup
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterTypeAppGroupEncryptedMediaComponentFfi.read(buf),
+            FfiConverterULong.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -8263,6 +8409,7 @@ public object FfiConverterTypeAppGroupRecordFfi: FfiConverterRustBuffer<AppGroup
             FfiConverterOptionalString.allocationSize(value.`avatarDim`) +
             FfiConverterOptionalString.allocationSize(value.`avatarThumbhash`) +
             FfiConverterTypeAppGroupEncryptedMediaComponentFfi.allocationSize(value.`encryptedMedia`) +
+            FfiConverterULong.allocationSize(value.`disappearingMessageSecs`) +
             FfiConverterBoolean.allocationSize(value.`archived`) +
             FfiConverterBoolean.allocationSize(value.`pendingConfirmation`) +
             FfiConverterOptionalString.allocationSize(value.`welcomerAccountIdHex`) +
@@ -8281,6 +8428,7 @@ public object FfiConverterTypeAppGroupRecordFfi: FfiConverterRustBuffer<AppGroup
             FfiConverterOptionalString.write(value.`avatarDim`, buf)
             FfiConverterOptionalString.write(value.`avatarThumbhash`, buf)
             FfiConverterTypeAppGroupEncryptedMediaComponentFfi.write(value.`encryptedMedia`, buf)
+            FfiConverterULong.write(value.`disappearingMessageSecs`, buf)
             FfiConverterBoolean.write(value.`archived`, buf)
             FfiConverterBoolean.write(value.`pendingConfirmation`, buf)
             FfiConverterOptionalString.write(value.`welcomerAccountIdHex`, buf)
@@ -8798,6 +8946,8 @@ data class ChatListRowFfi (
     var `lastMessage`: ChatListMessagePreviewFfi?, 
     var `unreadCount`: kotlin.ULong, 
     var `hasUnread`: kotlin.Boolean, 
+    var `unreadMentionCount`: kotlin.ULong, 
+    var `unreadMention`: kotlin.Boolean, 
     var `firstUnreadMessageIdHex`: kotlin.String?, 
     var `lastReadMessageIdHex`: kotlin.String?, 
     var `lastReadTimelineAt`: kotlin.ULong?, 
@@ -8823,6 +8973,8 @@ public object FfiConverterTypeChatListRowFfi: FfiConverterRustBuffer<ChatListRow
             FfiConverterOptionalTypeChatListMessagePreviewFfi.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalULong.read(buf),
@@ -8841,6 +8993,8 @@ public object FfiConverterTypeChatListRowFfi: FfiConverterRustBuffer<ChatListRow
             FfiConverterOptionalTypeChatListMessagePreviewFfi.allocationSize(value.`lastMessage`) +
             FfiConverterULong.allocationSize(value.`unreadCount`) +
             FfiConverterBoolean.allocationSize(value.`hasUnread`) +
+            FfiConverterULong.allocationSize(value.`unreadMentionCount`) +
+            FfiConverterBoolean.allocationSize(value.`unreadMention`) +
             FfiConverterOptionalString.allocationSize(value.`firstUnreadMessageIdHex`) +
             FfiConverterOptionalString.allocationSize(value.`lastReadMessageIdHex`) +
             FfiConverterOptionalULong.allocationSize(value.`lastReadTimelineAt`) +
@@ -8858,6 +9012,8 @@ public object FfiConverterTypeChatListRowFfi: FfiConverterRustBuffer<ChatListRow
             FfiConverterOptionalTypeChatListMessagePreviewFfi.write(value.`lastMessage`, buf)
             FfiConverterULong.write(value.`unreadCount`, buf)
             FfiConverterBoolean.write(value.`hasUnread`, buf)
+            FfiConverterULong.write(value.`unreadMentionCount`, buf)
+            FfiConverterBoolean.write(value.`unreadMention`, buf)
             FfiConverterOptionalString.write(value.`firstUnreadMessageIdHex`, buf)
             FfiConverterOptionalString.write(value.`lastReadMessageIdHex`, buf)
             FfiConverterOptionalULong.write(value.`lastReadTimelineAt`, buf)
@@ -9277,7 +9433,15 @@ data class GroupSystemEventFfi (
     var `text`: kotlin.String, 
     var `actorAccountIdHex`: kotlin.String?, 
     var `subjectAccountIdHex`: kotlin.String?, 
-    var `name`: kotlin.String?
+    var `name`: kotlin.String?, 
+    /**
+     * Previous disappearing-message retention in seconds; `0` means off.
+     */
+    var `oldRetentionSeconds`: kotlin.ULong?, 
+    /**
+     * New disappearing-message retention in seconds; `0` means off.
+     */
+    var `newRetentionSeconds`: kotlin.ULong?
 ) {
     
     companion object
@@ -9294,6 +9458,8 @@ public object FfiConverterTypeGroupSystemEventFfi: FfiConverterRustBuffer<GroupS
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
         )
     }
 
@@ -9302,7 +9468,9 @@ public object FfiConverterTypeGroupSystemEventFfi: FfiConverterRustBuffer<GroupS
             FfiConverterString.allocationSize(value.`text`) +
             FfiConverterOptionalString.allocationSize(value.`actorAccountIdHex`) +
             FfiConverterOptionalString.allocationSize(value.`subjectAccountIdHex`) +
-            FfiConverterOptionalString.allocationSize(value.`name`)
+            FfiConverterOptionalString.allocationSize(value.`name`) +
+            FfiConverterOptionalULong.allocationSize(value.`oldRetentionSeconds`) +
+            FfiConverterOptionalULong.allocationSize(value.`newRetentionSeconds`)
     )
 
     override fun write(value: GroupSystemEventFfi, buf: ByteBuffer) {
@@ -9311,6 +9479,8 @@ public object FfiConverterTypeGroupSystemEventFfi: FfiConverterRustBuffer<GroupS
             FfiConverterOptionalString.write(value.`actorAccountIdHex`, buf)
             FfiConverterOptionalString.write(value.`subjectAccountIdHex`, buf)
             FfiConverterOptionalString.write(value.`name`, buf)
+            FfiConverterOptionalULong.write(value.`oldRetentionSeconds`, buf)
+            FfiConverterOptionalULong.write(value.`newRetentionSeconds`, buf)
     }
 }
 
@@ -9397,7 +9567,12 @@ public object FfiConverterTypeLocalPushRegistrationDebugFfi: FfiConverterRustBuf
 
 
 data class MarkdownDocumentFfi (
-    var `blocks`: List<MarkdownBlockFfi>
+    var `blocks`: List<MarkdownBlockFfi>, 
+    /**
+     * True when the input exceeded the FFI Markdown safety cap and `blocks`
+     * were parsed from a UTF-8-boundary prefix.
+     */
+    var `truncated`: kotlin.Boolean
 ) {
     
     companion object
@@ -9410,15 +9585,18 @@ public object FfiConverterTypeMarkdownDocumentFfi: FfiConverterRustBuffer<Markdo
     override fun read(buf: ByteBuffer): MarkdownDocumentFfi {
         return MarkdownDocumentFfi(
             FfiConverterSequenceTypeMarkdownBlockFfi.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: MarkdownDocumentFfi) = (
-            FfiConverterSequenceTypeMarkdownBlockFfi.allocationSize(value.`blocks`)
+            FfiConverterSequenceTypeMarkdownBlockFfi.allocationSize(value.`blocks`) +
+            FfiConverterBoolean.allocationSize(value.`truncated`)
     )
 
     override fun write(value: MarkdownDocumentFfi, buf: ByteBuffer) {
             FfiConverterSequenceTypeMarkdownBlockFfi.write(value.`blocks`, buf)
+            FfiConverterBoolean.write(value.`truncated`, buf)
     }
 }
 
@@ -9982,6 +10160,7 @@ data class NotificationUpdateFfi (
     var `groupIdHex`: kotlin.String, 
     var `groupName`: kotlin.String?, 
     var `isDm`: kotlin.Boolean, 
+    var `isMention`: kotlin.Boolean, 
     var `messageIdHex`: kotlin.String?, 
     var `sender`: NotificationUserFfi, 
     var `receiver`: NotificationUserFfi, 
@@ -10009,6 +10188,7 @@ public object FfiConverterTypeNotificationUpdateFfi: FfiConverterRustBuffer<Noti
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterTypeNotificationUserFfi.read(buf),
             FfiConverterTypeNotificationUserFfi.read(buf),
@@ -10029,6 +10209,7 @@ public object FfiConverterTypeNotificationUpdateFfi: FfiConverterRustBuffer<Noti
             FfiConverterString.allocationSize(value.`groupIdHex`) +
             FfiConverterOptionalString.allocationSize(value.`groupName`) +
             FfiConverterBoolean.allocationSize(value.`isDm`) +
+            FfiConverterBoolean.allocationSize(value.`isMention`) +
             FfiConverterOptionalString.allocationSize(value.`messageIdHex`) +
             FfiConverterTypeNotificationUserFfi.allocationSize(value.`sender`) +
             FfiConverterTypeNotificationUserFfi.allocationSize(value.`receiver`) +
@@ -10048,6 +10229,7 @@ public object FfiConverterTypeNotificationUpdateFfi: FfiConverterRustBuffer<Noti
             FfiConverterString.write(value.`groupIdHex`, buf)
             FfiConverterOptionalString.write(value.`groupName`, buf)
             FfiConverterBoolean.write(value.`isDm`, buf)
+            FfiConverterBoolean.write(value.`isMention`, buf)
             FfiConverterOptionalString.write(value.`messageIdHex`, buf)
             FfiConverterTypeNotificationUserFfi.write(value.`sender`, buf)
             FfiConverterTypeNotificationUserFfi.write(value.`receiver`, buf)
@@ -10560,6 +10742,38 @@ public object FfiConverterTypeRuntimeProjectionUpdateFfi: FfiConverterRustBuffer
 
 
 
+data class SecureDeleteExpiredResultFfi (
+    var `prunedMessages`: kotlin.ULong, 
+    var `mediaCiphertextSha256`: List<kotlin.String>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSecureDeleteExpiredResultFfi: FfiConverterRustBuffer<SecureDeleteExpiredResultFfi> {
+    override fun read(buf: ByteBuffer): SecureDeleteExpiredResultFfi {
+        return SecureDeleteExpiredResultFfi(
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SecureDeleteExpiredResultFfi) = (
+            FfiConverterULong.allocationSize(value.`prunedMessages`) +
+            FfiConverterSequenceString.allocationSize(value.`mediaCiphertextSha256`)
+    )
+
+    override fun write(value: SecureDeleteExpiredResultFfi, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`prunedMessages`, buf)
+            FfiConverterSequenceString.write(value.`mediaCiphertextSha256`, buf)
+    }
+}
+
+
+
 data class SendSummaryFfi (
     var `published`: kotlin.UInt, 
     var `messageIds`: List<kotlin.String>
@@ -10724,6 +10938,15 @@ data class TimelineMessageRecordFfi (
     var `replyToMessageIdHex`: kotlin.String?, 
     var `replyPreview`: TimelineReplyPreviewFfi?, 
     var `mediaJson`: kotlin.String?, 
+    /**
+     * Fully-resolved, downloadable media references for this message, built
+     * from its `imeta` tags + its own `source_epoch` using the same resolution
+     * and validation as `list_media` (a `list_media` record and this row's
+     * `media` resolve identically for the same message). Empty when the message
+     * has no media; a malformed `imeta` attachment is dropped while the message
+     * still appears as text.
+     */
+    var `media`: List<MediaAttachmentReferenceFfi>, 
     var `agentTextStreamJson`: kotlin.String?, 
     /**
      * Parsed view of kind-1210 group system rows. `None` for chat, reactions,
@@ -10765,6 +10988,7 @@ public object FfiConverterTypeTimelineMessageRecordFfi: FfiConverterRustBuffer<T
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalTypeTimelineReplyPreviewFfi.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeMediaAttachmentReferenceFfi.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalTypeGroupSystemEventFfi.read(buf),
             FfiConverterTypeTimelineReactionSummaryFfi.read(buf),
@@ -10789,6 +11013,7 @@ public object FfiConverterTypeTimelineMessageRecordFfi: FfiConverterRustBuffer<T
             FfiConverterOptionalString.allocationSize(value.`replyToMessageIdHex`) +
             FfiConverterOptionalTypeTimelineReplyPreviewFfi.allocationSize(value.`replyPreview`) +
             FfiConverterOptionalString.allocationSize(value.`mediaJson`) +
+            FfiConverterSequenceTypeMediaAttachmentReferenceFfi.allocationSize(value.`media`) +
             FfiConverterOptionalString.allocationSize(value.`agentTextStreamJson`) +
             FfiConverterOptionalTypeGroupSystemEventFfi.allocationSize(value.`groupSystem`) +
             FfiConverterTypeTimelineReactionSummaryFfi.allocationSize(value.`reactions`) +
@@ -10812,6 +11037,7 @@ public object FfiConverterTypeTimelineMessageRecordFfi: FfiConverterRustBuffer<T
             FfiConverterOptionalString.write(value.`replyToMessageIdHex`, buf)
             FfiConverterOptionalTypeTimelineReplyPreviewFfi.write(value.`replyPreview`, buf)
             FfiConverterOptionalString.write(value.`mediaJson`, buf)
+            FfiConverterSequenceTypeMediaAttachmentReferenceFfi.write(value.`media`, buf)
             FfiConverterOptionalString.write(value.`agentTextStreamJson`, buf)
             FfiConverterOptionalTypeGroupSystemEventFfi.write(value.`groupSystem`, buf)
             FfiConverterTypeTimelineReactionSummaryFfi.write(value.`reactions`, buf)
@@ -10905,6 +11131,13 @@ public object FfiConverterTypeTimelineProjectionUpdateFfi: FfiConverterRustBuffe
 
 data class TimelineReactionEmojiFfi (
     var `emoji`: kotlin.String, 
+    /**
+     * Number of distinct senders that reacted with this emoji
+     * (`== senders.len()`), surfaced so clients render the tally without
+     * counting. This is the authenticated reaction count only; clients overlay
+     * their own optimistic react/unreact and "did I react" state on top.
+     */
+    var `count`: kotlin.UInt, 
     var `senders`: List<kotlin.String>
 ) {
     
@@ -10918,17 +11151,20 @@ public object FfiConverterTypeTimelineReactionEmojiFfi: FfiConverterRustBuffer<T
     override fun read(buf: ByteBuffer): TimelineReactionEmojiFfi {
         return TimelineReactionEmojiFfi(
             FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
             FfiConverterSequenceString.read(buf),
         )
     }
 
     override fun allocationSize(value: TimelineReactionEmojiFfi) = (
             FfiConverterString.allocationSize(value.`emoji`) +
+            FfiConverterUInt.allocationSize(value.`count`) +
             FfiConverterSequenceString.allocationSize(value.`senders`)
     )
 
     override fun write(value: TimelineReactionEmojiFfi, buf: ByteBuffer) {
             FfiConverterString.write(value.`emoji`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
             FfiConverterSequenceString.write(value.`senders`, buf)
     }
 }
@@ -10936,6 +11172,10 @@ public object FfiConverterTypeTimelineReactionEmojiFfi: FfiConverterRustBuffer<T
 
 
 data class TimelineReactionSummaryFfi (
+    /**
+     * Reaction tallies pre-sorted by `count` descending, ties broken by `emoji`
+     * ascending, so clients render a stable tally without re-sorting.
+     */
     var `byEmoji`: List<TimelineReactionEmojiFfi>, 
     var `userReactions`: List<TimelineUserReactionFfi>
 ) {
@@ -10974,6 +11214,13 @@ data class TimelineReplyPreviewFfi (
     var `contentTokens`: MarkdownDocumentFfi, 
     var `kind`: kotlin.ULong, 
     var `mediaJson`: kotlin.String?, 
+    /**
+     * Fully-resolved, downloadable media references for the previewed message,
+     * built from its `imeta` tags + its own `source_epoch` using the same
+     * resolution and validation as `list_media`. Empty when the previewed
+     * message has no media or its `imeta` is malformed.
+     */
+    var `media`: List<MediaAttachmentReferenceFfi>, 
     var `agentTextStreamJson`: kotlin.String?, 
     var `deleted`: kotlin.Boolean
 ) {
@@ -10993,6 +11240,7 @@ public object FfiConverterTypeTimelineReplyPreviewFfi: FfiConverterRustBuffer<Ti
             FfiConverterTypeMarkdownDocumentFfi.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeMediaAttachmentReferenceFfi.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterBoolean.read(buf),
         )
@@ -11005,6 +11253,7 @@ public object FfiConverterTypeTimelineReplyPreviewFfi: FfiConverterRustBuffer<Ti
             FfiConverterTypeMarkdownDocumentFfi.allocationSize(value.`contentTokens`) +
             FfiConverterULong.allocationSize(value.`kind`) +
             FfiConverterOptionalString.allocationSize(value.`mediaJson`) +
+            FfiConverterSequenceTypeMediaAttachmentReferenceFfi.allocationSize(value.`media`) +
             FfiConverterOptionalString.allocationSize(value.`agentTextStreamJson`) +
             FfiConverterBoolean.allocationSize(value.`deleted`)
     )
@@ -11016,6 +11265,7 @@ public object FfiConverterTypeTimelineReplyPreviewFfi: FfiConverterRustBuffer<Ti
             FfiConverterTypeMarkdownDocumentFfi.write(value.`contentTokens`, buf)
             FfiConverterULong.write(value.`kind`, buf)
             FfiConverterOptionalString.write(value.`mediaJson`, buf)
+            FfiConverterSequenceTypeMediaAttachmentReferenceFfi.write(value.`media`, buf)
             FfiConverterOptionalString.write(value.`agentTextStreamJson`, buf)
             FfiConverterBoolean.write(value.`deleted`, buf)
     }
@@ -13407,6 +13657,48 @@ public object FfiConverterTypeMessageUpdateFfi : FfiConverterRustBuffer<MessageU
 
 
 
+/**
+ * A relay list the account is missing, as a stable typed variant clients
+ * localize without parsing strings (darkmatter#565).
+ */
+
+enum class MissingRelayListKindFfi {
+    
+    /**
+     * NIP-65 relay list — where this account publishes (outbox/write-side).
+     */
+    NIP65,
+    /**
+     * Marmot inbox relay list — where this account receives (inbox/read-side).
+     */
+    INBOX;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMissingRelayListKindFfi: FfiConverterRustBuffer<MissingRelayListKindFfi> {
+    override fun read(buf: ByteBuffer) = try {
+        
+        MissingRelayListKindFfi.entries[buf.getInt() - 1]
+        
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: MissingRelayListKindFfi) = 4UL
+
+    override fun write(value: MissingRelayListKindFfi, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
 
 enum class NotificationCollectionStatusFfi {
     
@@ -15418,6 +15710,34 @@ public object FfiConverterSequenceTypeMarkdownInlineFfi: FfiConverterRustBuffer<
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeMarkdownInlineFfi.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMissingRelayListKindFfi: FfiConverterRustBuffer<List<MissingRelayListKindFfi>> {
+    override fun read(buf: ByteBuffer): List<MissingRelayListKindFfi> {
+        val len = buf.getInt()
+        return List<MissingRelayListKindFfi>(len) {
+            FfiConverterTypeMissingRelayListKindFfi.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MissingRelayListKindFfi>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMissingRelayListKindFfi.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MissingRelayListKindFfi>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMissingRelayListKindFfi.write(it, buf)
         }
     }
 }
