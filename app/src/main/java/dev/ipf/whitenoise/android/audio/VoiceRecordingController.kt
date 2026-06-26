@@ -14,6 +14,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -67,6 +68,13 @@ class VoiceRecordingController(
 
     private var recorder: VoiceRecorder? = null
     private var tickJob: Job? = null
+
+    // Releases the native recorder independently of [scope]: the conversation's
+    // composition scope is cancelled exactly when the screen closes, which is
+    // the moment a mid-recording teardown must still free the mic and the
+    // output file descriptor. Releases are idempotent, so this never
+    // double-frees a recorder that stop() already finalized.
+    private val recorderScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var focusRequest: AudioFocusRequest? = null
 
@@ -221,6 +229,11 @@ class VoiceRecordingController(
                     // A restart reuses this take's focus for the next recording;
                     // only abandon it when no restart took over.
                     if (!restarting) abandonRecordingFocus()
+                    // If this coroutine was cancelled before stop() ran (the
+                    // conversation closed during the send tail), stop() never
+                    // released the recorder. Free it on the lifecycle-independent
+                    // scope; cancel() is a no-op when stop() already released.
+                    recorderScope.launch { r.cancel() }
                 }
             }
     }
@@ -240,8 +253,10 @@ class VoiceRecordingController(
         // Same off-main finalize as stop() (#372); a cancel has nothing to
         // deliver, so just release the recorder in the background. No tail delay
         // — the take was discarded. Release focus so paused media resumes.
+        // Released on the lifecycle-independent scope so a teardown that races
+        // composition disposal still frees the mic.
         abandonRecordingFocus()
-        scope.launch(Dispatchers.IO) { r.cancel() }
+        recorderScope.launch { r.cancel() }
     }
 
     private fun requestRecordingFocus(): Boolean {
