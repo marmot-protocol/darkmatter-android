@@ -773,6 +773,32 @@ internal fun countUnreadIncoming(
 private fun isDerivedStateKind(kind: ULong): Boolean = kind == 1009uL || kind == 1210uL
 
 /**
+ * Message ids of unread received mentions in [timeline], oldest first — drives
+ * the in-conversation jump-to-mention chip. Same anchor semantics as
+ * [countUnreadIncoming]: a null [readAnchorMessageId], or one that has fallen out
+ * of the loaded window, counts from the first loaded row. Without a reliable
+ * ordering signal for an out-of-window watermark, counting (occasionally an
+ * already-read mention) is preferred over hiding genuinely-unread ones. Only
+ * kind-9 chat rows can be mentions; [mentionsActiveAccount] is passed in so this
+ * stays pure and the ui-layer NIP-27 detection isn't pulled into the state layer.
+ */
+internal fun unreadReceivedMentionIds(
+    timeline: List<TimelineMessage>,
+    readAnchorMessageId: String?,
+    mentionsActiveAccount: (TimelineMessage) -> Boolean,
+): List<String> {
+    if (timeline.isEmpty()) return emptyList()
+    val anchorIdx =
+        readAnchorMessageId?.let { id ->
+            timeline.indexOfFirst { it.record.messageIdHex == id }
+        } ?: -1
+    return timeline
+        .drop(anchorIdx + 1)
+        .filter { it.record.direction == "received" && it.record.kind == 9uL && mentionsActiveAccount(it) }
+        .mapNotNull { it.record.messageIdHex.takeIf { id -> id.isNotBlank() } }
+}
+
+/**
  * Monotonic read-anchor advance. Returns the candidate row's id (the row at
  * [candidateIndex]) only when it is strictly deeper than the current anchor's
  * live position — or when there is no current anchor, or the current anchor

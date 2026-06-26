@@ -428,6 +428,7 @@ import dev.ipf.whitenoise.android.state.outgoingIndicator
 import dev.ipf.whitenoise.android.state.shortHex
 import dev.ipf.whitenoise.android.state.shouldResetNavOnAccountChange
 import dev.ipf.whitenoise.android.state.shouldShowOriginalTimestamp
+import dev.ipf.whitenoise.android.state.unreadReceivedMentionIds
 import dev.ipf.whitenoise.android.ui.theme.Dimens
 import dev.ipf.whitenoise.android.ui.theme.amoledSurfaceBorder
 import dev.ipf.whitenoise.android.ui.theme.amoledSurfaceBorderStroke
@@ -8129,26 +8130,17 @@ private fun ConversationScreen(
             // not the scroll position: it only advances on real reads / markReadUpTo,
             // so sending a message can't resurrect already-read mentions, and the
             // chip stays in lockstep with the chat-list @-badge (same watermark).
-            val watermark = controller.lastReadMessageId
-            val anchorIdx =
-                watermark?.let { id ->
-                    controller.timeline.indexOfFirst { it.record.messageIdHex == id }
-                } ?: -1
-            when {
-                !initialTimelineAnchored || selfAccountIdHexForMentions.isNullOrBlank() -> emptyList()
-                // Watermark older than the loaded window → everything loaded is read.
-                watermark != null && anchorIdx < 0 -> emptyList()
-                else ->
-                    controller.timeline
-                        .drop(anchorIdx + 1)
-                        .filter { it.record.direction == "received" && it.record.kind == 9uL }
-                        .filter {
-                            documentMentionsAccount(
-                                document = it.record.contentTokens,
-                                accountIdHex = selfAccountIdHexForMentions,
-                                resolveAccountIdHex = { bech32 -> appState.accountIdHexForMention(bech32) },
-                            )
-                        }.mapNotNull { it.record.messageIdHex.takeIf { id -> id.isNotBlank() } }
+            // Missing-anchor handling matches countUnreadIncoming (count, don't hide).
+            if (!initialTimelineAnchored || selfAccountIdHexForMentions.isNullOrBlank()) {
+                emptyList()
+            } else {
+                unreadReceivedMentionIds(controller.timeline, controller.lastReadMessageId) { msg ->
+                    documentMentionsAccount(
+                        document = msg.record.contentTokens,
+                        accountIdHex = selfAccountIdHexForMentions,
+                        resolveAccountIdHex = { bech32 -> appState.accountIdHexForMention(bech32) },
+                    )
+                }
             }
         }
     }
