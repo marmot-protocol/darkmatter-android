@@ -45,8 +45,7 @@
     <string name="chat_row_action_mark_read">標示為已讀</string>
     <string name="chat_row_action_delete_group">刪除群組</string>
     <string name="delete_group_dialog_title">刪除群組？</string>
-    <string name="delete_group_dialog_message_member">你仍在此群組中——刪除會先退出群組，然後從此裝置移除。</string>
-    <string name="delete_group_dialog_message_left">從你的裝置刪除此群組？其訊息和歷史記錄將在本機移除。</string>
+    <string name="delete_group_dialog_message">從此裝置移除此群組？如果你仍是成員，將先退出群組。</string>
     <string name="delete_group_confirm">刪除</string>
     <string name="toast_chat_deleted_local">已從此裝置刪除聊天</string>
     <string name="toast_couldnt_delete_chat">無法刪除聊天</string>

@@ -45,8 +45,7 @@
     <string name="chat_row_action_mark_read">Marquer comme lu</string>
     <string name="chat_row_action_delete_group">Supprimer le groupe</string>
     <string name="delete_group_dialog_title">Supprimer le groupe ?</string>
-    <string name="delete_group_dialog_message_member">Vous êtes encore dans ce groupe — la suppression vous fera d\'abord quitter le groupe, puis le retirera de cet appareil.</string>
-    <string name="delete_group_dialog_message_left">Supprimer ce groupe de votre appareil ? Ses messages et son historique seront retirés localement.</string>
+    <string name="delete_group_dialog_message">Retirer ce groupe de cet appareil ? Si vous êtes encore membre, vous quitterez d\'abord le groupe.</string>
     <string name="delete_group_confirm">Supprimer</string>
     <string name="toast_chat_deleted_local">Discussion supprimée de cet appareil</string>
     <string name="toast_couldnt_delete_chat">Impossible de supprimer la discussion</string>

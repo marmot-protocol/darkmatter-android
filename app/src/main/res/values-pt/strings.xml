@@ -45,8 +45,7 @@
     <string name="chat_row_action_mark_read">Marcar como lido</string>
     <string name="chat_row_action_delete_group">Excluir grupo</string>
     <string name="delete_group_dialog_title">Excluir grupo?</string>
-    <string name="delete_group_dialog_message_member">Você ainda está neste grupo — excluir fará você sair do grupo primeiro e depois removê-lo deste dispositivo.</string>
-    <string name="delete_group_dialog_message_left">Excluir este grupo do seu dispositivo? Suas mensagens e histórico serão removidos localmente.</string>
+    <string name="delete_group_dialog_message">Remover este grupo deste dispositivo? Se você ainda for membro, sairá do grupo primeiro.</string>
     <string name="delete_group_confirm">Excluir</string>
     <string name="toast_chat_deleted_local">Conversa excluída deste dispositivo</string>
     <string name="toast_couldnt_delete_chat">Não foi possível excluir a conversa</string>

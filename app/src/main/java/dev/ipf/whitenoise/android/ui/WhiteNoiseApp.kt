@@ -2179,14 +2179,7 @@ private fun ChatsScreen(
         val alreadyLeft = item.removedFromGroup(appState.activeAccount?.accountIdHex)
         ConfirmDialog(
             title = stringResource(R.string.delete_group_dialog_title),
-            message =
-                stringResource(
-                    if (alreadyLeft) {
-                        R.string.delete_group_dialog_message_left
-                    } else {
-                        R.string.delete_group_dialog_message_member
-                    },
-                ),
+            message = stringResource(R.string.delete_group_dialog_message),
             confirmLabel = stringResource(R.string.delete_group_confirm),
             destructive = true,
             onConfirm = {

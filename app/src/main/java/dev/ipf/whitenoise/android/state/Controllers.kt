@@ -609,6 +609,13 @@ internal fun isTransientRelaySendError(throwable: Throwable): Boolean {
         ("no relay endpoints" in text)
 }
 
+internal fun mediaCacheKey(
+    account: String,
+    groupIdHex: String,
+    messageIdHex: String,
+    attachmentIndex: Int,
+): String = "$account|$groupIdHex|$messageIdHex|$attachmentIndex"
+
 internal fun optimisticMessageIdForProjection(
     optimisticMessages: Collection<TimelineMessage>,
     projected: AppMessageRecordFfi,
@@ -1589,6 +1596,25 @@ class ChatsController(
                 ?.any { it.memberIdHex.equals(activeIdHex, ignoreCase = true) }
                 ?: leaveFirstHint
         if (stillMember && !leaveGroup(groupIdHex)) return false
+        // Free the app's decrypted media caches (in-memory L1 + on-disk L2) before
+        // the engine wipe drops the reference mapping — deleteGroupLocal clears its
+        // own rows/secrets but not these client-side blobs, which would otherwise
+        // linger recoverable on disk.
+        runCatching { appState.marmotIo { listMedia(account, groupIdHex, null) } }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { media ->
+                withContext(Dispatchers.IO) {
+                    media.forEach { rec ->
+                        val key = mediaCacheKey(account, groupIdHex, rec.messageIdHex, rec.attachmentIndex.toInt())
+                        appState.mediaPlaintextCache.remove(key)
+                        appState.mediaThumbnailCache.remove(key)
+                        appState.diskMediaCache.remove(key)
+                    }
+                    val tags = media.mapNotNull { it.reference.ciphertextSha256 }.toSet()
+                    if (tags.isNotEmpty()) appState.diskMediaCache.removeByCiphertextTags(tags)
+                }
+            }
         val wipe = runCatching { appState.marmotIo { deleteGroupLocal(account, groupIdHex) } }
         wipe.exceptionOrNull()?.let {
             if (it is CancellationException) throw it
@@ -3400,7 +3426,7 @@ class ConversationController(
         account: String,
         messageIdHex: String,
         attachmentIndex: Int,
-    ): String = "$account|${group.groupIdHex}|$messageIdHex|$attachmentIndex"
+    ): String = mediaCacheKey(account, group.groupIdHex, messageIdHex, attachmentIndex)
 
     // Evict decrypted media (L1 plaintext, decoded thumbnails, L2 disk) for the
     // attachments the engine just secure-deleted on expiry, matched by ciphertext
