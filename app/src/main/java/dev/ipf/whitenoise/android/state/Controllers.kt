@@ -1645,6 +1645,18 @@ class ChatsController(
         }
     }
 
+    /**
+     * Cancel the controller-owned [recomputeScope]. The chat-list screen calls
+     * this once when it disposes the controller, which happens on every account
+     * switch and [WhiteNoiseAppState.runtimeGeneration] bump (sign-out,
+     * destructive wipe). Without it the scope — and the [ChatsController] it
+     * keeps alive, whose projection holds decrypted message previews — would
+     * leak for the process lifetime. Mirrors [ConversationController.onCleared].
+     */
+    fun onCleared() {
+        recomputeScope.cancel()
+    }
+
     private fun recompute() {
         val unreadAccountRef = accountRef
         // Project once and reuse for both the per-account aggregate and the
