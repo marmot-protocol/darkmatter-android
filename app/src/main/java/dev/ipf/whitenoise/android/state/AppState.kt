@@ -2094,6 +2094,99 @@ class WhiteNoiseAppState(
         }
     }
 
+    /**
+     * Background disappearing-message sweep across every signed-in account
+     * (#745). The in-conversation sweep ([ConversationController.start]) only
+     * runs while a chat is open; this is the closed-conversation counterpart,
+     * driven on a coarse cadence by [DisappearingMessageSweepWorker] so a
+     * message that expires while its conversation is closed is still pruned,
+     * its decrypted L2 media still secure-deleted, and a stale tray card still
+     * cleared — without waiting for the user to reopen the chat.
+     *
+     * For each group with a retention window set it performs the same work as
+     * the foreground sweep: `secureDeleteExpired` (engine prune + plaintext
+     * scrub), evict the on-disk media cache by the pruned ciphertext tags
+     * (#334 — works regardless of load state), and dismiss the conversation's
+     * notification when rows were actually pruned. Groups with the timer off
+     * are skipped per [DisappearingMessageSweep.shouldSweepGroup]. The engine
+     * is the source of truth for "expired"; Android adds nothing but the
+     * cadence and the client-side media wipe.
+     *
+     * Best-effort and per-group isolated: a failure on one account/group is
+     * logged (cancellation re-thrown) and the sweep moves on, so one bad group
+     * can't starve the rest. Bootstraps the runtime first so the worker can run
+     * after a process death with no UI attached.
+     */
+    suspend fun sweepExpiredDisappearingMessages() {
+        ensureNotificationRuntimeStarted()
+        if (client == null) return
+        val signedInAccounts = accounts.filter { it.localSigning && !it.signedOut && it.label.isNotBlank() }
+        for (account in signedInAccounts) {
+            currentCoroutineContext().ensureActive()
+            sweepExpiredForAccount(account.label)
+        }
+    }
+
+    private suspend fun sweepExpiredForAccount(accountRef: String) {
+        val rows =
+            runCatching { marmotIo { chatList(accountRef, includeArchived = true) } }
+                .onFailure {
+                    rethrowIfCancellation(it)
+                    appStateDebug(it) { "sweep chat-list load failed account=${accountRef.take(8)}: ${it.readableMessage()}" }
+                }.getOrNull()
+                ?: return
+        for (row in rows) {
+            currentCoroutineContext().ensureActive()
+            val groupIdHex = row.groupIdHex.takeIf { it.isNotBlank() } ?: continue
+            sweepExpiredForGroup(accountRef, groupIdHex)
+        }
+    }
+
+    private suspend fun sweepExpiredForGroup(
+        accountRef: String,
+        groupIdHex: String,
+    ) {
+        val retentionSecs =
+            runCatching { marmotIo { groupDetails(accountRef, groupIdHex) }.group.disappearingMessageSecs }
+                .onFailure {
+                    rethrowIfCancellation(it)
+                    appStateDebug(it) { "sweep retention read failed group=${groupIdHex.take(8)}: ${it.readableMessage()}" }
+                }.getOrNull()
+                ?: return
+        // No-op for groups with the timer off (acceptance criterion).
+        if (!DisappearingMessageSweep.shouldSweepGroup(retentionSecs)) return
+        runCatching { marmotIo { secureDeleteExpired(accountRef, groupIdHex) } }
+            .onSuccess { result ->
+                // Match the foreground sweep: when the engine actually pruned
+                // rows, clear the conversation's tray card so it can't keep
+                // pointing at a now-vanished message, and wipe the pruned
+                // attachments' decrypted bytes from the on-disk cache.
+                if (result.prunedMessages > 0uL) {
+                    dismissConversationNotifications(accountRef, groupIdHex)
+                }
+                evictExpiredDiskMediaCaches(result.mediaCiphertextSha256.toSet())
+            }.onFailure {
+                rethrowIfCancellation(it)
+                appStateDebug(it) { "sweep secureDeleteExpired failed group=${groupIdHex.take(8)}: ${it.readableMessage()}" }
+            }
+    }
+
+    /**
+     * Evict the on-disk (L2) decrypted-media entries stamped with any of
+     * [expiredCiphertextSha256]. This is the load-state-independent media wipe
+     * (#334): the closed-conversation path has no loaded `mediaReferences`
+     * map, so it can't resolve in-memory cache keys — but disk entries carry
+     * their ciphertext tag, so they're evicted directly. The session-scoped
+     * L1/thumbnail caches only hold media for conversations opened this
+     * session, where the foreground sweep already covers eviction.
+     */
+    private suspend fun evictExpiredDiskMediaCaches(expiredCiphertextSha256: Set<String>) {
+        if (expiredCiphertextSha256.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            diskMediaCache.removeByCiphertextTags(expiredCiphertextSha256)
+        }
+    }
+
     fun refreshLocalNotificationPermission() {
         localNotificationPermissionGranted = localNotificationPresenter.canPostNotifications()
     }
