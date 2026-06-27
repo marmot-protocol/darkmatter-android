@@ -306,6 +306,8 @@ class NotificationTargetTest {
 
     @Test
     fun replyActionBudget_reservesDismissHeadroomInsideGoAsyncBudget() {
+        // Use production defaults so this catches drift in the receiver's
+        // cooperative send/dismiss budget wiring, not just helper arithmetic.
         val dismissBudget = notificationReplyDismissBudgetMs()
         val sendBudget = notificationReplySendPhaseBudgetMs(dismissBudgetMs = dismissBudget)
 

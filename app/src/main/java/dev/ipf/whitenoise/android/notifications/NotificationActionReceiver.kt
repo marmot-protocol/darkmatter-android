@@ -101,6 +101,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
         var sentReplyText: String? = null
         try {
             val completed =
+                // This timeout is cooperative: slow JNI/Binder work can run past
+                // it until the next suspension point. The split still reserves a
+                // best-effort dismiss window after a successful send, trading a
+                // shorter cold-start send phase for lower duplicate-send risk.
                 withTimeoutOrNull(REPLY_SEND_PHASE_BUDGET_MS) {
                     appState.ensureNotificationRuntimeStarted()
                     val sent =
@@ -162,6 +166,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
         withContext(NonCancellable) {
             try {
                 val completed =
+                    // Also cooperative: re-post/cancel are Binder-facing and may
+                    // only observe timeout at suspension points between retries.
                     withTimeoutOrNull(REPLY_DISMISS_BUDGET_MS) {
                         // A sent direct reply leaves the notification
                         // lifetime-extended by the system; a bare cancel() can't
