@@ -304,6 +304,16 @@ class NotificationTargetTest {
         assertFalse(notificationReplyActionHandled(sent = false))
     }
 
+    @Test
+    fun replyActionBudget_reservesDismissHeadroomInsideGoAsyncBudget() {
+        val dismissBudget = notificationReplyDismissBudgetMs()
+        val sendBudget = notificationReplySendPhaseBudgetMs(dismissBudgetMs = dismissBudget)
+
+        assertEquals(950L, dismissBudget)
+        assertEquals(6_750L, sendBudget)
+        assertEquals(300L, 8_000L - sendBudget - dismissBudget)
+    }
+
     // ---- resolveNotificationNav (routing FSM) -------------------------------
 
     private val target = NotificationTarget("acct-a", "group-1", null, NotificationTargetKind.MESSAGE)
