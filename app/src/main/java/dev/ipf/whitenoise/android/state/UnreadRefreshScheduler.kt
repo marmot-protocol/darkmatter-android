@@ -2,9 +2,9 @@ package dev.ipf.whitenoise.android.state
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Coalesces per-account unread-count refreshes across a notification burst.
@@ -34,9 +34,9 @@ internal class UnreadRefreshScheduler(
     private val sleep: suspend (Long) -> Unit = { delay(it) },
     private val refresh: suspend (String) -> Unit,
 ) {
-    // Acts as a concurrent set: presence of a key means "this account still
-    // needs a refresh". Booleans are placeholder values.
-    private val pending = ConcurrentHashMap<String, Boolean>()
+    // Guarded by [lock]. Presence in the set means "this account still needs a
+    // refresh"; the actual unread count always comes from [refresh].
+    private val pending = mutableSetOf<String>()
     private val lock = Any()
     private var drainJob: Job? = null
 
@@ -47,14 +47,28 @@ internal class UnreadRefreshScheduler(
      */
     fun schedule(accountRef: String) {
         val ref = accountRef.takeIf { it.isNotBlank() } ?: return
-        pending[ref] = true
-        ensureDrain()
-    }
-
-    private fun ensureDrain() {
         synchronized(lock) {
+            pending += ref
             if (drainJob?.isActive == true) return
             drainJob = scope.launch { drain() }
+        }
+    }
+
+    /** Clears queued refreshes and cancels any active drain before teardown. */
+    internal suspend fun cancelAndClear() {
+        val job =
+            synchronized(lock) {
+                pending.clear()
+                drainJob.also { drainJob = null }
+            }
+        job?.cancelAndJoin()
+    }
+
+    /** Test synchronization point: returns after the current drain reaches idle. */
+    internal suspend fun awaitIdle() {
+        while (true) {
+            val job = synchronized(lock) { drainJob } ?: return
+            job.join()
         }
     }
 
@@ -85,11 +99,12 @@ internal class UnreadRefreshScheduler(
         }
     }
 
-    private fun drainPending(): List<String> {
-        val keys = pending.keys.toList()
-        keys.forEach { pending.remove(it) }
-        return keys
-    }
+    private fun drainPending(): List<String> =
+        synchronized(lock) {
+            val keys = pending.toList()
+            pending.clear()
+            keys
+        }
 
     internal companion object {
         // One frame's worth of slack: long enough to collapse a catch-up burst

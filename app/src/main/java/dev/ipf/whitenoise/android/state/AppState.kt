@@ -928,9 +928,10 @@ class WhiteNoiseAppState(
     }
 
     private suspend fun stopNotificationListenerForAccountTeardown() {
-        val job = notificationJob ?: return
+        val job = notificationJob
         notificationJob = null
-        job.cancelAndJoin()
+        job?.cancelAndJoin()
+        unreadRefreshScheduler.cancelAndClear()
     }
 
     // TODO(marmot): remove this UI-controller backchannel once Marmot emits a

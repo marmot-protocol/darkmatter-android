@@ -152,6 +152,64 @@ class UnreadRefreshSchedulerTest {
     }
 
     @Test
+    fun sameAccountScheduledDuringDrainRunsFollowOnRefresh() {
+        runBlocking {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val gate = FirstWindowGate()
+            val refreshes = ConcurrentLinkedQueue<String>()
+            val started = AtomicInteger(0)
+            val firstRefreshStarted = CompletableDeferred<Unit>()
+            val releaseFirstRefresh = CompletableDeferred<Unit>()
+            val secondAliceRefreshed = CountDownLatch(1)
+            val scheduler =
+                UnreadRefreshScheduler(scope = scope, sleep = gate.sleep) { ref ->
+                    val current = started.incrementAndGet()
+                    if (current == 1) {
+                        firstRefreshStarted.complete(Unit)
+                        withTimeout(2_000) { releaseFirstRefresh.await() }
+                    }
+                    refreshes += ref
+                    if (current == 2 && ref == "alice") secondAliceRefreshed.countDown()
+                }
+
+            scheduler.schedule("alice")
+            gate.awaitFirstWindow()
+            gate.openFirstWindow()
+
+            // A second update for the same account while the first refresh is in
+            // flight must survive as a follow-on wave rather than being erased by
+            // the first wave's snapshot/clear handoff.
+            withTimeout(2_000) { firstRefreshStarted.await() }
+            scheduler.schedule("alice")
+            releaseFirstRefresh.complete(Unit)
+
+            assertTrue("same-account reschedule was lost", secondAliceRefreshed.await(2, TimeUnit.SECONDS))
+            assertEquals(listOf("alice", "alice"), refreshes.toList())
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun cancelAndClearDropsPendingWorkBeforeItRefreshes() {
+        runBlocking {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val gate = FirstWindowGate()
+            val recorder = RefreshRecorder()
+            val scheduler =
+                UnreadRefreshScheduler(scope = scope, sleep = gate.sleep, refresh = recorder.refresh)
+
+            scheduler.schedule("alice")
+            gate.awaitFirstWindow()
+            scheduler.cancelAndClear()
+            gate.openFirstWindow()
+
+            Thread.sleep(50)
+            assertTrue(recorder.refreshes.isEmpty())
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun blankAccountRefIsIgnored() {
         runBlocking {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -190,6 +248,7 @@ class UnreadRefreshSchedulerTest {
 
             scheduler.schedule("alice")
             recorder.awaitRefreshes(1)
+            scheduler.awaitIdle()
 
             // A later notification, after the first drain has gone idle, must
             // start a brand-new drain.
