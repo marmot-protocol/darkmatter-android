@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.WhiteNoise" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.WhiteNoise" parent="android:Theme.Material.Light.NoActionBar">
+        <!--
+            Android draws the activity theme's window background while resuming
+            from Recents when FLAG_SECURE has blocked the task snapshot. Keep
+            that fallback in the app's dark/AMOLED surface family so secure
+            conversation routes do not flash the platform's default white frame
+            before Compose submits its first resumed frame.
+        -->
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 </resources>
