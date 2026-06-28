@@ -2121,6 +2121,28 @@ class ConversationController(
     var mediaReferences: Map<String, List<MediaAttachmentReferenceFfi>> by mutableStateOf(emptyMap())
         private set
     private var membersVerified by mutableStateOf(false)
+
+    // Authoritative local self-leave marker (issue #787). Short-lived lifecycle
+    // state (lives only as long as this controller, never persisted —
+    // AGENTS.md); it mirrors ChatsController.removedGroupIds for the chat-list
+    // row.
+    //
+    // The engine eviction (GroupStateError::UseAfterEviction) that
+    // refreshMembers() relies on may not have landed locally yet right after a
+    // self-leave, so a transient refreshMembers()/applyGroupDetails()
+    // round-trip would otherwise re-read the full roster (self still present),
+    // restore the member count and re-enable the composer. While set,
+    // isSelfMember reads false and applyGroupDetails() refuses to re-add self,
+    // keeping the left state durable.
+    //
+    // Seeded from an authoritative snapshot that already excludes self
+    // (seededMembershipKnown && !seededSelfMember): re-opening a just-left group
+    // builds a NEW controller whose own success path never ran, so without this
+    // its first refreshMembers() would re-add self and revert the left state
+    // (the exact #787 repro). A present snapshot only omits self once a
+    // leave/eviction removed self from it, so this is a sound "not a member"
+    // signal — the same one the composer gate uses for its initial NOTICE.
+    private var selfLeft by mutableStateOf(seededMembershipKnown && !seededSelfMember)
     var timeline by mutableStateOf<List<TimelineMessage>>(emptyList())
         private set
 
@@ -2318,7 +2340,7 @@ class ConversationController(
         get() = GroupProjector.isAdminRef(group, conversationAccountIdHex)
 
     val isSelfMember: Boolean
-        get() = members.any { GroupProjector.isActiveAccountMember(it, conversationAccountIdHex) }
+        get() = GroupProjector.isSelfStillMember(members, conversationAccountIdHex, selfLeft)
 
     val canSendMessages: Boolean
         get() = membersVerified && isSelfMember
@@ -3953,6 +3975,12 @@ class ConversationController(
                     appState.marmotIo { leaveGroup(account, group.groupIdHex) }
                 }
                 appState.forgetAutoAcceptedInvite(group.groupIdHex)
+                // Authoritative local self-leave: record it before the
+                // synchronous snapshot drop so any subsequent
+                // refreshMembers()/applyGroupDetails() round-trip that still
+                // sees the engine pre-eviction cannot re-add self and re-enable
+                // the composer / restore the full member count (issue #787).
+                recordSelfLeft()
                 // Drop self from the cached member snapshot synchronously so
                 // re-opening the just-left group seeds a roster without self
                 // and renders the disabled notice immediately, instead of
@@ -4006,6 +4034,10 @@ class ConversationController(
                 }
             appState.applyLocalGroupUpdate(group)
             appState.dismissConversationNotifications(account, group.groupIdHex)
+            // Accepting an invite (re-)joins the group, so clear any stale
+            // local self-left latch before refreshMembers() so applyGroupDetails
+            // is allowed to add self back to the roster (issue #787).
+            selfLeft = false
             refreshMembers()
             refreshCurrentTimeline(account).forEach { streamId ->
                 if (activeStreamIds.add(streamId)) {
@@ -5308,6 +5340,11 @@ class ConversationController(
 
     private fun markActiveAccountRemovedFromMembers(account: String) {
         val activeAccountIdHex = conversationAccountIdHex ?: return
+        // Engine-confirmed removal (UseAfterEviction). Record the same
+        // authoritative local-left marker the leaveGroup() success path sets so
+        // a later applyGroupDetails() that races ahead of eviction can't re-add
+        // self (issue #787).
+        recordSelfLeft()
         val updatedMembers =
             members.filterNot {
                 GroupProjector.isActiveAccountMember(it, activeAccountIdHex)
@@ -5316,6 +5353,17 @@ class ConversationController(
         membersLoaded = true
         membersVerified = true
         appState.cacheGroupMemberSnapshot(account, group.groupIdHex, updatedMembers)
+    }
+
+    /**
+     * Latch the authoritative local self-leave marker (issue #787). Set on a
+     * confirmed self-leave (leaveGroup success) or engine eviction
+     * ([markActiveAccountRemovedFromMembers]); honoured by [isSelfMember] and
+     * [applyGroupDetails] so a transient roster round-trip can't restore self
+     * before the engine eviction is observed locally.
+     */
+    private fun recordSelfLeft() {
+        selfLeft = true
     }
 
     private fun Throwable.isUseAfterEviction(): Boolean {
@@ -5336,7 +5384,11 @@ class ConversationController(
     ) {
         val applied = applyAuthoritativeGroupDetails(details)
         group = applied.group
-        members = applied.members
+        // Once a self-leave has been recorded locally, refuse to re-add self
+        // from a details round-trip that still predates the engine eviction —
+        // otherwise the full roster (self included) would restore the member
+        // count and re-enable the composer right after a leave (issue #787).
+        members = GroupProjector.rosterHonoringSelfLeft(applied.members, conversationAccountIdHex, selfLeft)
         membersLoaded = true
         membersVerified = true
         appState.cacheGroupMemberSnapshot(account, group.groupIdHex, members)
