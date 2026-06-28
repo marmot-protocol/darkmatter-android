@@ -876,6 +876,32 @@ internal fun applyAuthoritativeGroupDetails(details: GroupDetailsFfi): AppliedGr
             },
     )
 
+internal class ConversationSelfLeftState(
+    seededMembershipKnown: Boolean,
+    seededSelfMember: Boolean,
+) {
+    var selfLeft by mutableStateOf(seededMembershipKnown && !seededSelfMember)
+        private set
+
+    fun recordSelfLeft() {
+        selfLeft = true
+    }
+
+    fun clearSelfLeft() {
+        selfLeft = false
+    }
+
+    fun isSelfMember(
+        members: List<AppGroupMemberRecordFfi>,
+        activeAccountIdHex: String?,
+    ): Boolean = GroupProjector.isSelfStillMember(members, activeAccountIdHex, selfLeft)
+
+    fun rosterHonoringSelfLeft(
+        members: List<AppGroupMemberRecordFfi>,
+        activeAccountIdHex: String?,
+    ): List<AppGroupMemberRecordFfi> = GroupProjector.rosterHonoringSelfLeft(members, activeAccountIdHex, selfLeft)
+}
+
 internal fun agentStreamFailureText(
     throwable: Throwable,
     copy: ConversationControllerCopy,
@@ -2142,7 +2168,7 @@ class ConversationController(
     // (the exact #787 repro). A present snapshot only omits self once a
     // leave/eviction removed self from it, so this is a sound "not a member"
     // signal — the same one the composer gate uses for its initial NOTICE.
-    private var selfLeft by mutableStateOf(seededMembershipKnown && !seededSelfMember)
+    private val selfMembership = ConversationSelfLeftState(seededMembershipKnown, seededSelfMember)
     var timeline by mutableStateOf<List<TimelineMessage>>(emptyList())
         private set
 
@@ -2340,7 +2366,7 @@ class ConversationController(
         get() = GroupProjector.isAdminRef(group, conversationAccountIdHex)
 
     val isSelfMember: Boolean
-        get() = GroupProjector.isSelfStillMember(members, conversationAccountIdHex, selfLeft)
+        get() = selfMembership.isSelfMember(members, conversationAccountIdHex)
 
     val canSendMessages: Boolean
         get() = membersVerified && isSelfMember
@@ -4037,7 +4063,7 @@ class ConversationController(
             // Accepting an invite (re-)joins the group, so clear any stale
             // local self-left latch before refreshMembers() so applyGroupDetails
             // is allowed to add self back to the roster (issue #787).
-            selfLeft = false
+            selfMembership.clearSelfLeft()
             refreshMembers()
             refreshCurrentTimeline(account).forEach { streamId ->
                 if (activeStreamIds.add(streamId)) {
@@ -5363,7 +5389,7 @@ class ConversationController(
      * before the engine eviction is observed locally.
      */
     private fun recordSelfLeft() {
-        selfLeft = true
+        selfMembership.recordSelfLeft()
     }
 
     private fun Throwable.isUseAfterEviction(): Boolean {
@@ -5388,7 +5414,7 @@ class ConversationController(
         // from a details round-trip that still predates the engine eviction —
         // otherwise the full roster (self included) would restore the member
         // count and re-enable the composer right after a leave (issue #787).
-        members = GroupProjector.rosterHonoringSelfLeft(applied.members, conversationAccountIdHex, selfLeft)
+        members = selfMembership.rosterHonoringSelfLeft(applied.members, conversationAccountIdHex)
         membersLoaded = true
         membersVerified = true
         appState.cacheGroupMemberSnapshot(account, group.groupIdHex, members)
