@@ -8624,7 +8624,8 @@ public object FfiConverterTypeAuditLogFileFfi: FfiConverterRustBuffer<AuditLogFi
 
 
 data class AuditLogSettingsFfi (
-    var `enabled`: kotlin.Boolean
+    var `enabled`: kotlin.Boolean, 
+    var `dataMode`: AuditDataModeFfi
 ) {
     
     companion object
@@ -8637,15 +8638,18 @@ public object FfiConverterTypeAuditLogSettingsFfi: FfiConverterRustBuffer<AuditL
     override fun read(buf: ByteBuffer): AuditLogSettingsFfi {
         return AuditLogSettingsFfi(
             FfiConverterBoolean.read(buf),
+            FfiConverterTypeAuditDataModeFfi.read(buf),
         )
     }
 
     override fun allocationSize(value: AuditLogSettingsFfi) = (
-            FfiConverterBoolean.allocationSize(value.`enabled`)
+            FfiConverterBoolean.allocationSize(value.`enabled`) +
+            FfiConverterTypeAuditDataModeFfi.allocationSize(value.`dataMode`)
     )
 
     override fun write(value: AuditLogSettingsFfi, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`enabled`, buf)
+            FfiConverterTypeAuditDataModeFfi.write(value.`dataMode`, buf)
     }
 }
 
@@ -8760,7 +8764,6 @@ public object FfiConverterTypeAuditLogUploadResultFfi: FfiConverterRustBuffer<Au
 
 
 data class AuditLogUploadSourceFfi (
-    var `accountLabel`: kotlin.String?, 
     var `deviceLabel`: kotlin.String?, 
     var `platform`: kotlin.String?, 
     var `appVersion`: kotlin.String?
@@ -8778,19 +8781,16 @@ public object FfiConverterTypeAuditLogUploadSourceFfi: FfiConverterRustBuffer<Au
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
         )
     }
 
     override fun allocationSize(value: AuditLogUploadSourceFfi) = (
-            FfiConverterOptionalString.allocationSize(value.`accountLabel`) +
             FfiConverterOptionalString.allocationSize(value.`deviceLabel`) +
             FfiConverterOptionalString.allocationSize(value.`platform`) +
             FfiConverterOptionalString.allocationSize(value.`appVersion`)
     )
 
     override fun write(value: AuditLogUploadSourceFfi, buf: ByteBuffer) {
-            FfiConverterOptionalString.write(value.`accountLabel`, buf)
             FfiConverterOptionalString.write(value.`deviceLabel`, buf)
             FfiConverterOptionalString.write(value.`platform`, buf)
             FfiConverterOptionalString.write(value.`appVersion`, buf)
@@ -11660,6 +11660,47 @@ public object FfiConverterTypeAppGroupHydrationQuarantineReasonFfi: FfiConverter
     override fun allocationSize(value: AppGroupHydrationQuarantineReasonFfi) = 4UL
 
     override fun write(value: AppGroupHydrationQuarantineReasonFfi, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Forensic audit data mode exposed to host apps.
+ */
+
+enum class AuditDataModeFfi {
+    
+    /**
+     * Default safety posture: obfuscated/hashed identifiers, no plaintext.
+     */
+    OBFUSCATED_SENSITIVE_DATA,
+    /**
+     * Explicit opt-in: decrypted content and full identifiers where useful.
+     */
+    FULL_DATA;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAuditDataModeFfi: FfiConverterRustBuffer<AuditDataModeFfi> {
+    override fun read(buf: ByteBuffer) = try {
+        
+        AuditDataModeFfi.entries[buf.getInt() - 1]
+        
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AuditDataModeFfi) = 4UL
+
+    override fun write(value: AuditDataModeFfi, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
