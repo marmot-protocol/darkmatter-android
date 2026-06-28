@@ -610,6 +610,8 @@
     <string name="group_system_renamed_passive">Группа переименована в «%1$s»</string>
     <string name="group_system_renamed_diff">%1$s переименовал(а) группу из «%2$s» в «%3$s»</string>
     <string name="group_system_renamed_diff_passive">Группа переименована из «%1$s» в «%2$s»</string>
+    <string name="group_system_named">%1$s назвал(а) группу «%2$s»</string>
+    <string name="group_system_named_passive">Группа названа «%1$s»</string>
     <string name="group_system_avatar_changed">%1$s изменил(а) аватар группы</string>
     <string name="group_system_avatar_changed_passive">Аватар группы изменён</string>
     <string name="group_system_someone">Кто-то</string>
@@ -629,6 +631,7 @@
     <string name="group_system_admin_removed_you_passive">Вы больше не администратор</string>
     <string name="group_system_you_renamed">Вы переименовали группу в «%1$s»</string>
     <string name="group_system_you_renamed_diff">Вы переименовали группу из «%1$s» в «%2$s»</string>
+    <string name="group_system_you_named">Вы назвали группу «%1$s»</string>
     <string name="group_system_you_avatar_changed">Вы изменили аватар группы</string>
     <string name="media_attachment_add_more">Добавить ещё</string>
     <string name="media_attachment_remove">Удалить вложение</string>

@@ -600,6 +600,8 @@
     <string name="group_system_renamed_passive">Die Gruppe wurde in „%1$s“ umbenannt</string>
     <string name="group_system_renamed_diff">%1$s hat die Gruppe von „%2$s“ in „%3$s“ umbenannt</string>
     <string name="group_system_renamed_diff_passive">Die Gruppe wurde von „%1$s“ in „%2$s“ umbenannt</string>
+    <string name="group_system_named">%1$s hat der Gruppe den Namen „%2$s“ gegeben</string>
+    <string name="group_system_named_passive">Die Gruppe wurde „%1$s“ genannt</string>
     <string name="group_system_avatar_changed">%1$s hat das Gruppenbild geändert</string>
     <string name="group_system_avatar_changed_passive">Das Gruppenbild wurde geändert</string>
     <string name="group_system_someone">Jemand</string>
@@ -619,6 +621,7 @@
     <string name="group_system_admin_removed_you_passive">Du bist kein Admin mehr</string>
     <string name="group_system_you_renamed">Du hast die Gruppe in „%1$s“ umbenannt</string>
     <string name="group_system_you_renamed_diff">Du hast die Gruppe von „%1$s“ in „%2$s“ umbenannt</string>
+    <string name="group_system_you_named">Du hast der Gruppe den Namen „%1$s“ gegeben</string>
     <string name="group_system_you_avatar_changed">Du hast das Gruppenbild geändert</string>
     <string name="media_attachment_add_more">Mehr hinzufügen</string>
     <string name="media_attachment_remove">Anhang entfernen</string>

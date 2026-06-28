@@ -191,7 +191,7 @@ class GroupSystemEventsTest {
     @Test
     fun summaryDoesNotFakeADiffForFirstNameSet() {
         // First-ever name set / blank old name must not synthesize a diff; it
-        // renders the plain new-name form.
+        // renders the dedicated named-the-group form instead.
         val event =
             GroupSystemEvent(
                 systemType = "group_renamed",
@@ -203,7 +203,7 @@ class GroupSystemEventsTest {
             )
 
         assertEquals(
-            "alice renamed the group to “Marmot Lab”",
+            "alice named the group “Marmot Lab”",
             GroupSystemEvents.summary(event, actorName = "alice", subjectName = null),
         )
     }
@@ -285,6 +285,33 @@ class GroupSystemEventsTest {
 
         assertEquals("Marmot Protocol", event.name)
         assertEquals("Marmot Lab", event.oldName)
+    }
+
+    @Test
+    fun resolveUsesLocalPreviousNameForCurrentProjectionShape() {
+        // Current Marmot group-rename rows expose only data.name / FFI.name. The
+        // Android local snapshot supplies the previous name without requiring a
+        // hypothetical data.old_name field.
+        val structured =
+            GroupSystemEventFfi(
+                systemType = "group_renamed",
+                text = "Group renamed",
+                actorAccountIdHex = "alice",
+                subjectAccountIdHex = null,
+                name = "Marmot Protocol",
+                oldRetentionSeconds = null,
+                newRetentionSeconds = null,
+            )
+        val json =
+            """{"v":1,"system_type":"group_renamed",""" +
+                """"data":{"name":"Marmot Protocol"}}"""
+
+        val event = GroupSystemEvents.resolve(json, structured, GroupRenamePreviousName("Marmot Lab"))!!
+
+        assertEquals(
+            "alice renamed the group from “Marmot Lab” to “Marmot Protocol”",
+            GroupSystemEvents.summary(event, actorName = "alice", subjectName = null),
+        )
     }
 
     @Test

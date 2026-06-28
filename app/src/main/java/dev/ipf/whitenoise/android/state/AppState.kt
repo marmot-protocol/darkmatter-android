@@ -42,6 +42,7 @@ import dev.ipf.whitenoise.android.BuildConfig
 import dev.ipf.whitenoise.android.R
 import dev.ipf.whitenoise.android.core.AvatarImageLoader
 import dev.ipf.whitenoise.android.core.GroupProjector
+import dev.ipf.whitenoise.android.core.GroupRenamePreviousName
 import dev.ipf.whitenoise.android.core.GroupSystemEvents
 import dev.ipf.whitenoise.android.core.GroupTitleCopy
 import dev.ipf.whitenoise.android.core.HostSafety
@@ -618,6 +619,7 @@ class WhiteNoiseAppState(
     private val profilePresentationLock = Any()
     private val groupMemberSnapshots = BoundedEntryCache<String, GroupMemberSnapshot>(MAX_GROUP_MEMBER_SNAPSHOT_CACHE_ENTRIES)
     private val groupMemberSnapshotLock = Any()
+    private val groupRenameNameSnapshots = GroupRenameNameSnapshots()
     private val conversationStateLock = Any()
     private val optimisticMessagesByConversation = mutableMapOf<String, SnapshotStateMap<String, TimelineMessage>>()
     private val projectedMessageIdsByConversation = mutableMapOf<String, MutableSet<String>>()
@@ -971,8 +973,38 @@ class WhiteNoiseAppState(
     // stream can lag behind local mutations and we forward the accepted/archived
     // group record so rows stop rendering stale pending/archived state.
     fun applyLocalGroupUpdate(record: AppGroupRecordFfi) {
+        activeAccountRef?.let { account -> recordGroupNameSnapshot(account, record.groupIdHex, record.name) }
         chatsController?.applyLocalGroupUpdate(record)
     }
+
+    internal fun rememberGroupNameSnapshot(
+        accountRef: String?,
+        groupIdHex: String?,
+        name: String?,
+    ) {
+        groupRenameNameSnapshots.remember(accountRef, groupIdHex, name)
+    }
+
+    internal fun setGroupNameSnapshot(
+        accountRef: String?,
+        groupIdHex: String?,
+        name: String?,
+    ) {
+        groupRenameNameSnapshots.setCurrent(accountRef, groupIdHex, name)
+    }
+
+    internal fun recordGroupNameSnapshot(
+        accountRef: String?,
+        groupIdHex: String?,
+        name: String,
+    ): GroupRenamePreviousName? = groupRenameNameSnapshots.record(accountRef, groupIdHex, name)
+
+    internal fun previousGroupRenameName(
+        accountRef: String?,
+        groupIdHex: String?,
+        newName: String?,
+        eventId: String? = null,
+    ): GroupRenamePreviousName? = groupRenameNameSnapshots.previousFor(accountRef, groupIdHex, newName, eventId)
 
     // A self-leave stops that group's subscription, so the engine pushes no
     // chat-list update to flip the row to its left state. The chat-list
@@ -3299,7 +3331,18 @@ class WhiteNoiseAppState(
         senderName: String?,
     ): NotificationSystemText? {
         val record = notificationTimelineRecord(update) ?: return null
-        val event = GroupSystemEvents.resolve(record.plaintext, record.groupSystem) ?: return null
+        val baseEvent = GroupSystemEvents.resolve(record.plaintext, record.groupSystem) ?: return null
+        val localPreviousName =
+            GroupSystemEvents.renameNewName(baseEvent)?.let { newName ->
+                if (baseEvent.oldNameKnown) {
+                    setGroupNameSnapshot(update.accountRef, update.groupIdHex, newName)
+                    null
+                } else {
+                    recordGroupNameSnapshot(update.accountRef, update.groupIdHex, newName)
+                        ?: previousGroupRenameName(update.accountRef, update.groupIdHex, newName, record.messageIdHex)
+                }
+            }
+        val event = localPreviousName?.let { GroupSystemEvents.withLocalRenamePreviousName(baseEvent, it) } ?: baseEvent
         val diff = GroupSystemEvents.renameDiffNames(event) ?: return null
         val actorHex = GroupSystemEvents.actorHex(event, record.sender)
         val actorName =
@@ -3362,6 +3405,7 @@ class WhiteNoiseAppState(
         update: NotificationUpdateFfi,
         autoAcceptedInvite: AppGroupRecordFfi? = null,
     ) {
+        rememberGroupNameSnapshot(update.accountRef, update.groupIdHex, update.groupName)
         val activeConversation = activeConversationGroupIdHex
         val shouldPost =
             LocalNotificationPolicy.shouldPost(
