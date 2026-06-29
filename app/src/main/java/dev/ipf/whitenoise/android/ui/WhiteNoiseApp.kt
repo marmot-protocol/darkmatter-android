@@ -7713,10 +7713,10 @@ private fun GroupSystemRow(
                     ).padding(horizontal = 10.dp, vertical = 4.dp),
         )
         // Developer-mode only: keep the one-line summary as the default and tuck
-        // the MLS commit dump behind a per-row tap (#857). Local UI state, so each
-        // row expands independently and nothing persists.
+        // the MLS commit dump behind a per-row tap (#857). Saveable row-keyed UI
+        // state lets an expanded row survive lazy-list disposal without leaking to others.
         if (appState.streamingDebugEnabled) {
-            var detailsExpanded by remember { mutableStateOf(false) }
+            var detailsExpanded by rememberSaveable(record.messageIdHex) { mutableStateOf(false) }
             val debugStyle = remember(record) { MessageDebugClassifier.debugStyle(record) }
             Spacer(Modifier.height(4.dp))
             Row(
