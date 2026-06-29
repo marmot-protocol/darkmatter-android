@@ -3,7 +3,10 @@ package dev.ipf.whitenoise.android.core
 import java.text.BreakIterator
 import java.time.Instant
 import java.time.ZoneId
+import java.time.chrono.IsoChronology
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
+import java.time.format.FormatStyle
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -90,11 +93,11 @@ object IdentityFormatter {
         epochSeconds: ULong,
         copy: RelativeTimeCopy = RelativeTimeCopy.Default,
         locale: Locale = Locale.getDefault(),
+        now: Instant = Instant.now(),
     ): String {
         if (epochSeconds == 0uL) return ""
         val seconds = epochSeconds.toLong().coerceIn(0L, MAX_DISPLAYABLE_EPOCH_SECONDS)
         val instant = runCatching { Instant.ofEpochSecond(seconds) }.getOrNull() ?: return copy.now
-        val now = Instant.now()
         val delta = now.epochSecond - instant.epochSecond
         return when {
             // Clock skew within tolerance reads as "now", not "future".
@@ -119,14 +122,93 @@ object IdentityFormatter {
                         // at least the previous calendar day.
                         days <= 1L -> copy.yesterday
                         days < 7L -> messageDate.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
-                        // Day + month, no year (e.g. "14 Jun").
-                        days < 365L -> DateTimeFormatter.ofPattern("d MMM", locale).format(messageDate)
-                        // Two-digit year past a year old (e.g. "14 May '25").
-                        else -> DateTimeFormatter.ofPattern("d MMM ''yy", locale).format(messageDate)
+                        // Month + day in locale order, no year and no clock
+                        // component (US "Jun 14", German "14.06", CJK "6月14日").
+                        // Derived from the locale's MEDIUM date pattern with the
+                        // year field stripped so the element order and separators
+                        // follow the locale rather than a hard-coded "d MMM".
+                        days < 365L -> monthDayFormatter(locale).format(messageDate)
+                        // Locale-equivalent SHORT date past a year old, using a
+                        // 2-digit year where the locale's convention does (US
+                        // "5/14/25", German "14.05.25"; CJK keeps its 4-digit
+                        // "2025/5/14"), and carrying no clock component.
+                        else ->
+                            DateTimeFormatter
+                                .ofLocalizedDate(FormatStyle.SHORT)
+                                .withLocale(locale)
+                                .format(messageDate)
                     }
                 }.getOrDefault(copy.now)
             }
         }
+    }
+
+    // CLDR date pattern fields are ASCII letters. CJK markers such as 年/月/日 are
+    // literals, so Character.isLetter would classify too much here.
+    private fun isPatternFieldChar(c: Char): Boolean = c in 'a'..'z' || c in 'A'..'Z'
+
+    /** Locale-aware month/day formatter with the year removed from the localized pattern. */
+    private fun monthDayFormatter(locale: Locale): DateTimeFormatter {
+        val mediumPattern =
+            DateTimeFormatterBuilder.getLocalizedDateTimePattern(
+                FormatStyle.MEDIUM,
+                null,
+                IsoChronology.INSTANCE,
+                locale,
+            )
+        return DateTimeFormatter.ofPattern(stripYearFromPattern(mediumPattern), locale)
+    }
+
+    private fun stripYearFromPattern(pattern: String): String {
+        val yearRange = findYearRange(pattern) ?: return pattern
+        var start = yearRange.first
+        var end = yearRange.last + 1
+
+        // Remove the separator/literal that only attached the year to the date:
+        // the following separator for leading-year patterns (`y年M月d日`, `y/MM/dd`),
+        // otherwise the preceding separator for trailing-year patterns (`MMM d, y`).
+        if (end < pattern.length) {
+            while (end < pattern.length && !isPatternFieldChar(pattern[end])) end++
+        } else {
+            while (start > 0 && !isPatternFieldChar(pattern[start - 1])) start--
+        }
+
+        return pattern.removeRange(start, end).trim().ifBlank { "MMM d" }
+    }
+
+    private fun findYearRange(pattern: String): IntRange? {
+        var index = 0
+        while (index < pattern.length) {
+            when (val c = pattern[index]) {
+                '\'' -> index = skipQuotedLiteral(pattern, index)
+                'u', 'y', 'Y' -> {
+                    val start = index
+                    while (index < pattern.length && pattern[index] == c) index++
+                    return start until index
+                }
+                else -> index++
+            }
+        }
+        return null
+    }
+
+    private fun skipQuotedLiteral(
+        pattern: String,
+        quoteStart: Int,
+    ): Int {
+        var index = quoteStart + 1
+        while (index < pattern.length) {
+            if (pattern[index] == '\'') {
+                if (index + 1 < pattern.length && pattern[index + 1] == '\'') {
+                    index += 2
+                } else {
+                    return index + 1
+                }
+            } else {
+                index++
+            }
+        }
+        return index
     }
 }
 

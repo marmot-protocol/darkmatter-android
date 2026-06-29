@@ -4,8 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -113,10 +116,11 @@ class IdentityFormatterTest {
         // Long.MIN_VALUE; both clamp to a safe instant instead of crashing.
         val zone = ZoneId.systemDefault()
         // Epoch 0 (1970) is well over a year ago, so the ladder renders the
-        // two-digit-year date with no time component.
+        // locale SHORT date (2-digit year for US) with no time component.
         val epochZeroFormatted =
             DateTimeFormatter
-                .ofPattern("d MMM ''yy", Locale.US)
+                .ofLocalizedDate(FormatStyle.SHORT)
+                .withLocale(Locale.US)
                 .format(Instant.ofEpochSecond(0).atZone(zone).toLocalDate())
 
         assertEquals(epochZeroFormatted, IdentityFormatter.relativeTime(ULong.MAX_VALUE, RelativeTimeCopy.Default, Locale.US))
@@ -174,13 +178,12 @@ class IdentityFormatterTest {
 
     @Test
     fun relativeTimeShowsDateWithoutTimeForOlderInstants() {
-        // 8 days ago is past the weekday window: locale date, no year, no time.
+        // 8 days ago is past the weekday window: locale month/day, no year, no
+        // time. US renders month-first ("Jun 14").
         val eightDaysAgo = Instant.now().minusSeconds(8 * 86_400L)
         val zone = ZoneId.systemDefault()
-        val expected =
-            DateTimeFormatter
-                .ofPattern("d MMM", Locale.US)
-                .format(eightDaysAgo.atZone(zone).toLocalDate())
+        val date = eightDaysAgo.atZone(zone).toLocalDate()
+        val expected = "${date.month.getDisplayName(TextStyle.SHORT, Locale.US)} ${date.dayOfMonth}"
 
         assertEquals(expected, IdentityFormatter.relativeTime(eightDaysAgo.epochSecond.toULong(), RelativeTimeCopy.Default, Locale.US))
     }
@@ -221,13 +224,93 @@ class IdentityFormatterTest {
 
     @Test
     fun relativeTimeShowsTwoDigitYearPastAYear() {
+        // Past a year old: the locale-equivalent SHORT date, which for US uses a
+        // 2-digit year (e.g. "6/14/25") and carries no clock component.
         val longAgo = Instant.now().minusSeconds(400 * 86_400L)
         val zone = ZoneId.systemDefault()
         val expected =
             DateTimeFormatter
-                .ofPattern("d MMM ''yy", Locale.US)
+                .ofLocalizedDate(FormatStyle.SHORT)
+                .withLocale(Locale.US)
                 .format(longAgo.atZone(zone).toLocalDate())
 
         assertEquals(expected, IdentityFormatter.relativeTime(longAgo.epochSecond.toULong(), RelativeTimeCopy.Default, Locale.US))
+    }
+
+    // The locale-aware date rungs (#861) are exercised with fixed message/now
+    // dates and an explicit `now` so the assertions are deterministic. Both
+    // instants are anchored at noon in the system zone, so the day-distance the
+    // formatter computes is stable regardless of the host time zone.
+    private fun noonInstant(date: LocalDate): Instant = date.atTime(LocalTime.NOON).atZone(ZoneId.systemDefault()).toInstant()
+
+    private fun relativeTimeOn(
+        messageDate: LocalDate,
+        today: LocalDate,
+        locale: Locale,
+    ): String =
+        IdentityFormatter.relativeTime(
+            noonInstant(messageDate).epochSecond.toULong(),
+            RelativeTimeCopy.Default,
+            locale,
+            noonInstant(today),
+        )
+
+    @Test
+    fun relativeTimeNoYearRungIsLocaleOrderedWithoutClock() {
+        // 8 days back stays in the no-year rung. US is month-first, German is
+        // day-first numeric, and the CJK form keeps its month/day markers (and
+        // drops the year marker) — none carry a clock component.
+        val today = LocalDate.of(2025, 6, 22)
+        val message = LocalDate.of(2025, 6, 14)
+
+        assertEquals("Jun 14", relativeTimeOn(message, today, Locale.US))
+        assertEquals("14.06", relativeTimeOn(message, today, Locale.GERMANY))
+        assertEquals("6月14日", relativeTimeOn(message, today, Locale.CHINA))
+
+        // No clock component (no ':', AM/PM, or 24h time markers) in any locale.
+        assertNoClockComponent(relativeTimeOn(message, today, Locale.US))
+        assertNoClockComponent(relativeTimeOn(message, today, Locale.GERMANY))
+        assertNoClockComponent(relativeTimeOn(message, today, Locale.CHINA))
+    }
+
+    @Test
+    fun relativeTimeYearRungIsLocaleShortDateWithoutClock() {
+        // Past a year: the locale-equivalent SHORT date. US/German collapse to a
+        // 2-digit year; the CJK SHORT date keeps the locale's own (4-digit) year
+        // convention. No locale shows a clock component.
+        val today = LocalDate.of(2026, 6, 22)
+        val message = LocalDate.of(2025, 5, 14)
+
+        assertEquals("5/14/25", relativeTimeOn(message, today, Locale.US))
+        assertEquals("14.05.25", relativeTimeOn(message, today, Locale.GERMANY))
+        assertEquals("2025/5/14", relativeTimeOn(message, today, Locale.CHINA))
+
+        assertNoClockComponent(relativeTimeOn(message, today, Locale.US))
+        assertNoClockComponent(relativeTimeOn(message, today, Locale.GERMANY))
+        assertNoClockComponent(relativeTimeOn(message, today, Locale.CHINA))
+    }
+
+    @Test
+    fun relativeTimeNoYearRungIsMonthFirstForUsAndDayFirstForGermany() {
+        // Element order, not just localized month names, must follow the locale:
+        // the US day number trails the month while the German day number leads.
+        val today = LocalDate.of(2025, 12, 20)
+        val message = LocalDate.of(2025, 11, 3)
+
+        val us = relativeTimeOn(message, today, Locale.US)
+        val de = relativeTimeOn(message, today, Locale.GERMANY)
+
+        // US: month token precedes the day number ("Nov 3").
+        assertTrue("US should be month-first: $us", us.indexOf("Nov") < us.indexOf("3"))
+        // German: day number precedes the month number ("03.11").
+        assertTrue("German should be day-first: $de", de.indexOf("03") < de.indexOf("11"))
+    }
+
+    private fun assertNoClockComponent(rendered: String) {
+        // Beyond 24h the row must never include a clock: no ':' separator, no
+        // AM/PM marker, and no hour/minute pattern letters leaking through.
+        assertTrue("Unexpected clock component in: $rendered", rendered.none { it == ':' })
+        val upper = rendered.uppercase(Locale.ROOT)
+        assertTrue("Unexpected AM/PM in: $rendered", !upper.contains("AM") && !upper.contains("PM"))
     }
 }
