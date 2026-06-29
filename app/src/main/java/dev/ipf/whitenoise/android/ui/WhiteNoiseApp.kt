@@ -3365,10 +3365,12 @@ private fun ChatRow(
     // activity. A title/preview-only hit (bodyMatch null) keeps the chat's
     // last-message time.
     val timestampAt = bodyMatch?.timelineAt ?: item.latestAt ?: 0uL
-    val inviteAccount = GroupProjector.inviteAccount(item.group, item.otherMemberAccount)
     val avatarAccount =
-        inviteAccount
-            ?: item.otherMemberAccount.takeIf { item.group.name.isBlank() && item.memberCount == 2 }
+        GroupProjector.avatarAccount(
+            group = item.group,
+            otherMemberAccount = item.otherMemberAccount,
+            memberCount = item.memberCount,
+        )
     val openableDmAvatarAccount =
         avatarAccount
             ?.takeIf { GroupProjector.isDm(memberCount = item.memberCount, name = item.group.name) }
@@ -9625,9 +9627,12 @@ private fun ConversationScreen(
                         ) {
                             Avatar(
                                 title = controller.title(groupTitleCopy),
-                                seed = controller.group.groupIdHex,
+                                // For a 1:1 DM the seed must match the peer-derived
+                                // avatar so the initials fallback stays stable, just
+                                // like the chat-list row (#837).
+                                seed = controller.avatarAccount ?: controller.group.groupIdHex,
                                 size = 36.dp,
-                                pictureUrl = controller.group.avatarUrl,
+                                pictureUrl = controller.avatarUrl,
                             )
                             Column {
                                 Text(
