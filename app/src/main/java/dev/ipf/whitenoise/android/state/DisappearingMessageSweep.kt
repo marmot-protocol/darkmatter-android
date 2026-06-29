@@ -39,7 +39,7 @@ object DisappearingMessageSweep {
     const val FOREGROUND_EXPIRED_RETRY_DELAY_MS: Long = 1_000L
 
     private const val MILLIS_PER_SECOND = 1_000L
-    private val maxSecondsAsMillis = (Long.MAX_VALUE / MILLIS_PER_SECOND).toULong()
+    private val maxSafeExpirySeconds = (Long.MAX_VALUE / MILLIS_PER_SECOND).toULong()
 
     /**
      * Whether a group with the given retention should be swept. `0` means the
@@ -60,7 +60,7 @@ object DisappearingMessageSweep {
     ): Boolean {
         if (!shouldSweepGroup(disappearingMessageSecs)) return false
         val expirySeconds = timelineAtSeconds.saturatingPlus(disappearingMessageSecs)
-        if (expirySeconds > maxSecondsAsMillis) return false
+        if (expirySeconds > maxSafeExpirySeconds) return false
         val nowSeconds = (nowMillis.coerceAtLeast(0L) / MILLIS_PER_SECOND).toULong()
         return expirySeconds <= nowSeconds
     }
@@ -132,7 +132,7 @@ object DisappearingMessageSweep {
         var bestDelay = FOREGROUND_SWEEP_MAX_DELAY_MS
         for (timelineAt in timelineAtSeconds) {
             val expirySeconds = timelineAt.saturatingPlus(disappearingMessageSecs)
-            if (expirySeconds > maxSecondsAsMillis) continue
+            if (expirySeconds > maxSafeExpirySeconds) continue
             val expiryMillis = expirySeconds.toLong() * MILLIS_PER_SECOND
             val delay = expiryMillis - safeNowMillis
             val candidate =
@@ -140,11 +140,53 @@ object DisappearingMessageSweep {
                     delay > 0L -> delay.coerceAtMost(FOREGROUND_SWEEP_MAX_DELAY_MS)
                     safeNowMillis - expiryMillis < FOREGROUND_EXPIRED_RETRY_DELAY_MS ->
                         FOREGROUND_EXPIRED_RETRY_DELAY_MS
-                    else -> FOREGROUND_SWEEP_MAX_DELAY_MS
+                    else ->
+                        // The local filter has already hidden a long-stale row;
+                        // use the coarse cap unless a later publish proves the
+                        // loaded window still needs an immediate engine prune.
+                        FOREGROUND_SWEEP_MAX_DELAY_MS
                 }
             if (candidate < bestDelay) bestDelay = candidate
         }
         return bestDelay
+    }
+
+    /**
+     * Foreground await-loop wake decision. Timeout wakes always run a sweep;
+     * publish-signal wakes only run one when the latest loaded window now has an
+     * expired row and the near-boundary retry tick has not just run.
+     */
+    fun shouldRunForegroundSweepAfterWake(
+        wakeSignalReceived: Boolean,
+        nowMillis: Long,
+        lastSweepStartedAtMillis: Long,
+        disappearingMessageSecs: ULong,
+        timelineAtSeconds: Iterable<ULong>,
+    ): Boolean {
+        if (!wakeSignalReceived) return true
+        return shouldSweepAfterForegroundReschedule(
+            nowMillis = nowMillis,
+            lastSweepStartedAtMillis = lastSweepStartedAtMillis,
+            disappearingMessageSecs = disappearingMessageSecs,
+            timelineAtSeconds = timelineAtSeconds,
+        )
+    }
+
+    private fun shouldSweepAfterForegroundReschedule(
+        nowMillis: Long,
+        lastSweepStartedAtMillis: Long,
+        disappearingMessageSecs: ULong,
+        timelineAtSeconds: Iterable<ULong>,
+    ): Boolean {
+        if (!shouldSweepGroup(disappearingMessageSecs)) return false
+        if (nowMillis - lastSweepStartedAtMillis < FOREGROUND_EXPIRED_RETRY_DELAY_MS) return false
+        return timelineAtSeconds.any {
+            isLocallyExpired(
+                nowMillis = nowMillis,
+                disappearingMessageSecs = disappearingMessageSecs,
+                timelineAtSeconds = it,
+            )
+        }
     }
 
     private fun expiryCutoffSeconds(

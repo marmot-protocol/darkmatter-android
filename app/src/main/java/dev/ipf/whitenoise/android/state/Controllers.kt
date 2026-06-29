@@ -2320,7 +2320,7 @@ class ConversationController(
     private var accountTeardownRequested = false
     private val activeStreamIds = mutableSetOf<String>()
     private val foregroundSweepScheduleSignals = Channel<Unit>(Channel.CONFLATED)
-    private var lastForegroundSecureDeleteAtMillis = 0L
+    private var lastForegroundSweepStartedAtMillis = 0L
 
     // Transient streaming-debug rows keyed by their synthetic timeline id.
     // Lifecycle-scoped UI state for the live agent-stream watch — NOT a
@@ -2506,7 +2506,7 @@ class ConversationController(
     private suspend fun runForegroundDisappearingMessageSweep(account: String) {
         while (coroutineContext.isActive) {
             if (group.disappearingMessageSecs > 0uL) {
-                lastForegroundSecureDeleteAtMillis = System.currentTimeMillis()
+                lastForegroundSweepStartedAtMillis = System.currentTimeMillis()
                 runCatching {
                     appState.marmotIo { secureDeleteExpired(account, group.groupIdHex) }
                 }.onSuccess { result ->
@@ -2530,13 +2530,12 @@ class ConversationController(
                 // Drop stale self-signals before sleeping; the next timeout is
                 // based on the timeline/group state that is current right now.
             }
-            val wasRescheduled =
+            val wakeSignalReceived =
                 withTimeoutOrNull(foregroundDisappearingSweepDelayMillis()) {
                     foregroundSweepScheduleSignals.receive()
                     true
-                }
-            if (wasRescheduled != true) return
-            if (shouldSweepAfterForegroundReschedule()) return
+                } == true
+            if (shouldRunForegroundSweepAfterWake(wakeSignalReceived)) return
         }
     }
 
@@ -2553,21 +2552,14 @@ class ConversationController(
             timelineItemsById.values.forEach { add(it.record.recordedAt) }
         }
 
-    private fun shouldSweepAfterForegroundReschedule(): Boolean {
-        val window = group.disappearingMessageSecs
-        if (window == 0uL) return false
-        val nowMillis = System.currentTimeMillis()
-        val recentlySwept =
-            nowMillis - lastForegroundSecureDeleteAtMillis < DisappearingMessageSweep.FOREGROUND_EXPIRED_RETRY_DELAY_MS
-        if (recentlySwept) return false
-        return foregroundSweepTimelineAtSeconds().any {
-            DisappearingMessageSweep.isLocallyExpired(
-                nowMillis = nowMillis,
-                disappearingMessageSecs = window,
-                timelineAtSeconds = it,
-            )
-        }
-    }
+    private fun shouldRunForegroundSweepAfterWake(wakeSignalReceived: Boolean): Boolean =
+        DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+            wakeSignalReceived = wakeSignalReceived,
+            nowMillis = System.currentTimeMillis(),
+            lastSweepStartedAtMillis = lastForegroundSweepStartedAtMillis,
+            disappearingMessageSecs = group.disappearingMessageSecs,
+            timelineAtSeconds = foregroundSweepTimelineAtSeconds(),
+        )
 
     private fun signalForegroundSweepScheduleChanged() {
         foregroundSweepScheduleSignals.trySend(Unit)
@@ -5207,6 +5199,7 @@ class ConversationController(
         val window = group.disappearingMessageSecs
         val live =
             if (window == 0uL) {
+                // Timer off: skip the expiry scan/allocation fast path entirely.
                 optimisticMessages.values + projected
             } else {
                 val nowMillis = System.currentTimeMillis()

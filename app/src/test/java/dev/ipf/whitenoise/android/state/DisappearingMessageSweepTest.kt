@@ -146,6 +146,36 @@ class DisappearingMessageSweepTest {
     }
 
     @Test
+    fun foregroundSweepTimeoutTargetsLoadedExpiryBoundary() {
+        // The await loop uses this delay as its timeout; when it elapses the
+        // caller immediately runs the foreground secure-delete/publish sweep.
+        assertEquals(
+            1L,
+            DisappearingMessageSweep.nextForegroundSweepDelayMillis(
+                nowMillis = 999_999L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = listOf(940uL),
+            ),
+        )
+        assertTrue(
+            DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+                wakeSignalReceived = false,
+                nowMillis = 1_000_000L,
+                lastSweepStartedAtMillis = 999_000L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = listOf(940uL),
+            ),
+        )
+        assertTrue(
+            DisappearingMessageSweep.isLocallyExpired(
+                nowMillis = 1_000_000L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = 940uL,
+            ),
+        )
+    }
+
+    @Test
     fun foregroundSweepDelayCapsFarFutureExpiry() {
         assertEquals(
             DisappearingMessageSweep.FOREGROUND_SWEEP_MAX_DELAY_MS,
@@ -171,6 +201,63 @@ class DisappearingMessageSweepTest {
             DisappearingMessageSweep.FOREGROUND_SWEEP_MAX_DELAY_MS,
             DisappearingMessageSweep.nextForegroundSweepDelayMillis(
                 nowMillis = 1_001_000L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = listOf(940uL),
+            ),
+        )
+    }
+
+    @Test
+    fun foregroundRescheduleSignalSweepsNewlyExpiredLoadedRow() {
+        assertTrue(
+            DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+                wakeSignalReceived = true,
+                nowMillis = 1_000_000L,
+                lastSweepStartedAtMillis = 998_999L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = listOf(940uL),
+            ),
+        )
+    }
+
+    @Test
+    fun foregroundRescheduleSignalOnlyReschedulesWhenNoLoadedRowExpired() {
+        assertFalse(
+            DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+                wakeSignalReceived = true,
+                nowMillis = 1_000_000L,
+                lastSweepStartedAtMillis = 998_999L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = listOf(941uL),
+            ),
+        )
+        assertFalse(
+            DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+                wakeSignalReceived = true,
+                nowMillis = 1_000_000L,
+                lastSweepStartedAtMillis = 998_999L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun foregroundRescheduleSignalRespectsNearBoundaryRetryGuard() {
+        assertFalse(
+            DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+                wakeSignalReceived = true,
+                nowMillis = 1_000_000L,
+                lastSweepStartedAtMillis = 999_001L,
+                disappearingMessageSecs = 60uL,
+                timelineAtSeconds = listOf(940uL),
+            ),
+        )
+        assertTrue(
+            DisappearingMessageSweep.shouldRunForegroundSweepAfterWake(
+                wakeSignalReceived = true,
+                nowMillis = 1_000_000L,
+                lastSweepStartedAtMillis = 999_000L,
                 disappearingMessageSecs = 60uL,
                 timelineAtSeconds = listOf(940uL),
             ),
