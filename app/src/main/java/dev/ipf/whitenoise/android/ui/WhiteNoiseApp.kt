@@ -52,6 +52,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -105,6 +106,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -133,6 +135,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
@@ -150,6 +153,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Unarchive
@@ -386,6 +390,7 @@ import dev.ipf.whitenoise.android.core.ReactionTally
 import dev.ipf.whitenoise.android.core.RecentEmojiList
 import dev.ipf.whitenoise.android.core.RecipientReference
 import dev.ipf.whitenoise.android.core.RecipientSearch
+import dev.ipf.whitenoise.android.core.ReplyNavigation
 import dev.ipf.whitenoise.android.core.ReplySwipe
 import dev.ipf.whitenoise.android.core.SnippetHighlight
 import dev.ipf.whitenoise.android.core.TimelineProjector
@@ -8342,14 +8347,21 @@ private fun ConversationScreen(
     var recentReactionEmojis by remember(context) {
         mutableStateOf(emptyList<String>())
     }
+    var quickReactionEmojis by remember(context) {
+        mutableStateOf(RecentEmojiList.DefaultQuickChoices)
+    }
     LaunchedEffect(context) {
-        val loaded = withContext(Dispatchers.IO) { RecentEmojiPreferences.load(context) }
+        val (loaded, quick) =
+            withContext(Dispatchers.IO) {
+                RecentEmojiPreferences.load(context) to RecentEmojiPreferences.loadQuickReactions(context)
+            }
         // A pick made before this load lands has already merged the disk list
         // (recordPicked re-reads prefs), so a non-empty state is strictly newer
         // — don't clobber it with the stale read.
         if (recentReactionEmojis.isEmpty()) {
             recentReactionEmojis = loaded
         }
+        quickReactionEmojis = quick
     }
     // Serialize the recents read-modify-write so rapid taps don't lose updates
     // (concurrent recordPicked() is last-writer-wins on the disk list). See #172.
@@ -9031,6 +9043,30 @@ private fun ConversationScreen(
         }
     }
 
+    // Scroll the lazy list so the item at [targetIndex] sits roughly in the
+    // vertical center of the message-list viewport, leaving context above and
+    // below the target visible (#595, #794).
+    suspend fun centerTimelineItemAt(targetIndex: Int) {
+        val viewportHeight = listState.layoutInfo.viewportSize.height
+        if (viewportHeight <= 0) {
+            // Layout not measured yet (rare on a fresh open): fall back to the
+            // plain top-aligned jump rather than guessing an offset.
+            listState.animateScrollToItem(targetIndex)
+            return
+        }
+        listState.animateScrollToItem(targetIndex, ReplyNavigation.centeredScrollOffset(viewportHeight))
+        val itemHeight =
+            listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == targetIndex }
+                ?.size
+                ?: return
+        // Now true-center the measured bubble: top at (viewport - item) / 2.
+        val centeredOffset = ReplyNavigation.centeredScrollOffset(viewportHeight, itemHeight)
+        if (centeredOffset != ReplyNavigation.centeredScrollOffset(viewportHeight)) {
+            listState.animateScrollToItem(targetIndex, centeredOffset)
+        }
+    }
+
     fun recordReactionEmoji(emoji: String) {
         // The read-modify-write touches SharedPreferences (disk); keep it off
         // the Main thread, matching the off-Main load above. See #147.
@@ -9040,6 +9076,18 @@ private fun ConversationScreen(
                 recentEmojiWriteMutex.withLock {
                     withContext(Dispatchers.IO) { RecentEmojiPreferences.recordPicked(context, emoji) }
                 }
+        }
+    }
+
+    fun saveQuickReactionEmojis(choices: List<String>) {
+        scope.launch {
+            quickReactionEmojis = withContext(Dispatchers.IO) { RecentEmojiPreferences.saveQuickReactions(context, choices) }
+        }
+    }
+
+    fun resetQuickReactionEmojis() {
+        scope.launch {
+            quickReactionEmojis = withContext(Dispatchers.IO) { RecentEmojiPreferences.resetQuickReactions(context) }
         }
     }
 
@@ -9063,7 +9111,7 @@ private fun ConversationScreen(
                     return@launch
                 }
                 val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-                listState.animateScrollToItem(1 + olderMessagesHeaderCount + timelineIndex)
+                centerTimelineItemAt(1 + olderMessagesHeaderCount + timelineIndex)
                 highlightedMessageId = targetMessageId
                 delay(1_500L)
                 if (highlightedMessageId == targetMessageId) {
@@ -9090,7 +9138,7 @@ private fun ConversationScreen(
                     return@launch
                 }
                 val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-                listState.animateScrollToItem(1 + olderMessagesHeaderCount + timelineIndex)
+                centerTimelineItemAt(1 + olderMessagesHeaderCount + timelineIndex)
                 highlightedMessageId = targetMessageId
                 // Mark read up to the visited mention so the count — and the
                 // chat-list @-badge — decrement in step; advance the local read
@@ -9204,48 +9252,6 @@ private fun ConversationScreen(
         if (searchActiveIndex >= 0) {
             val resolvedId = searchMatchIds[searchActiveIndex]
             if (searchPinnedMatchId != resolvedId) searchPinnedMatchId = resolvedId
-        }
-    }
-
-    // Scroll the lazy list so the item at [targetIndex] sits roughly in the
-    // vertical center of the message-list viewport, leaving context above and
-    // below the target visible (#595). Search jumps land on context, not just
-    // the literal match, so a centered anchor beats the top-aligned default
-    // (which hides everything that came before the match until the user
-    // scrolls up).
-    //
-    // `animateScrollToItem(index, scrollOffset)` places the item's top edge at
-    // `scrollOffset` px from the viewport start; a negative value pushes the
-    // item down toward the center. Compose clamps the resulting scroll at the
-    // list's bounds, so this degrades exactly as the issue's edge cases ask:
-    // a match near the top of loaded history can't scroll up past the first
-    // row (falls back to top-aligned) and a match near the bottom can't scroll
-    // down past the last row (falls back to bottom-aligned). Only the
-    // otherwise-case is truly centered.
-    //
-    // Two passes: the first centers on the item's top edge (a safe estimate
-    // when the target isn't laid out yet); once it's measured we know its real
-    // height and nudge by half of it so short bubbles land on their own center
-    // rather than with their top at center. The correction is skipped when it
-    // would be a no-op so a near-edge target doesn't get a second animation.
-    suspend fun centerTimelineItemAt(targetIndex: Int) {
-        val viewportHeight = listState.layoutInfo.viewportSize.height
-        if (viewportHeight <= 0) {
-            // Layout not measured yet (rare on a fresh open): fall back to the
-            // plain top-aligned jump rather than guessing an offset.
-            listState.animateScrollToItem(targetIndex)
-            return
-        }
-        listState.animateScrollToItem(targetIndex, -viewportHeight / 2)
-        val itemHeight =
-            listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == targetIndex }
-                ?.size
-                ?: return
-        // Now true-center the measured bubble: top at (viewport - item) / 2.
-        val centeredOffset = -((viewportHeight - itemHeight).coerceAtLeast(0) / 2)
-        if (centeredOffset != -viewportHeight / 2) {
-            listState.animateScrollToItem(targetIndex, centeredOffset)
         }
     }
 
@@ -10171,7 +10177,7 @@ private fun ConversationScreen(
                                     controller = controller,
                                     appState = appState,
                                     highlighted = item.record.messageIdHex == highlightedMessageId,
-                                    recentReactionEmojis = recentReactionEmojis,
+                                    quickReactionEmojis = quickReactionEmojis,
                                     isActionMenuOpen = openActionMenuId == item.record.messageIdHex,
                                     onActionMenuOpenChange = { open ->
                                         openActionMenuId = if (open) item.record.messageIdHex else null
@@ -10182,6 +10188,8 @@ private fun ConversationScreen(
                                     // every visible bubble recompose on any timeline
                                     // change. See #110.
                                     onReactionEmojiPicked = { recordReactionEmoji(it) },
+                                    onQuickReactionsSave = { saveQuickReactionEmojis(it) },
+                                    onQuickReactionsReset = { resetQuickReactionEmojis() },
                                     onReplyPreviewClick = { navigateToReplyTarget(it) },
                                     readOnly = controller.group.pendingConfirmation,
                                 )
@@ -12879,10 +12887,12 @@ private fun MessageBubble(
     controller: ConversationController,
     appState: WhiteNoiseAppState,
     highlighted: Boolean,
-    recentReactionEmojis: List<String>,
+    quickReactionEmojis: List<String>,
     isActionMenuOpen: Boolean,
     onActionMenuOpenChange: (Boolean) -> Unit,
     onReactionEmojiPicked: (String) -> Unit,
+    onQuickReactionsSave: (List<String>) -> Unit,
+    onQuickReactionsReset: () -> Unit,
     onReplyPreviewClick: (TimelineMessage) -> Unit,
     readOnly: Boolean = false,
 ) {
@@ -13012,7 +13022,7 @@ private fun MessageBubble(
     var forwardSheetOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     var editHistoryOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     var reactionSheetOpen by remember(record.messageIdHex) { mutableStateOf(false) }
-    val quickReactionEmojis = RecentEmojiList.quickChoices(recentReactionEmojis)
+    var customizeReactionsOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     // A deleted message is inert: tear down any open action/reaction surface if
     // the message is deleted out from under it (optimistic or remote delete).
     LaunchedEffect(deleted) {
@@ -14020,6 +14030,24 @@ private fun MessageBubble(
                             emojiPickerOpen = false
                             reactWithEmoji(emoji)
                         },
+                        onCustomizeReactions = {
+                            emojiPickerOpen = false
+                            customizeReactionsOpen = true
+                        },
+                    )
+                }
+                if (customizeReactionsOpen) {
+                    CustomizeReactionsDialog(
+                        quickReactionEmojis = quickReactionEmojis,
+                        onDismiss = { customizeReactionsOpen = false },
+                        onSave = { choices ->
+                            onQuickReactionsSave(choices)
+                            customizeReactionsOpen = false
+                        },
+                        onReset = {
+                            onQuickReactionsReset()
+                            customizeReactionsOpen = false
+                        },
                     )
                 }
                 if (editHistoryOpen && editState != null) {
@@ -14057,22 +14085,25 @@ private fun MessageBubble(
                 val tallies = controller.reactions[record.messageIdHex].orEmpty()
                 // Hide reaction tallies on a deleted message — nothing to show.
                 if (tallies.isNotEmpty() && !deleted) {
-                    // The chip overlaps the bubble's rounded bottom by 14dp. A
-                    // plain `offset` is draw-only: it still reserves the chip's
-                    // full height in the column, leaving a 14dp gap before the
-                    // next message so reacted rows sit looser than un-reacted
-                    // ones (#455). Shrink the consumed height by the same 14dp
-                    // via `layout` so the overlap costs no extra vertical space.
+                    val reactionChipPadding =
+                        if (mine) {
+                            PaddingValues(start = 10.dp, end = 42.dp)
+                        } else {
+                            PaddingValues(horizontal = 10.dp)
+                        }
+                    // Keep the reaction chip below the bubble body. A previous
+                    // upward overlap looked compact but could cover the last text
+                    // line or the outgoing status cluster on short messages.
                     Box(
                         modifier =
                             Modifier
-                                .padding(horizontal = 10.dp)
+                                .padding(reactionChipPadding)
                                 .layout { measurable, constraints ->
                                     val placeable = measurable.measure(constraints)
-                                    val shift = 14.dp.roundToPx()
-                                    val height = (placeable.height - shift).coerceAtLeast(0)
+                                    val shift = 2.dp.roundToPx()
+                                    val height = placeable.height + shift
                                     layout(placeable.width, height) {
-                                        placeable.place(0, -shift)
+                                        placeable.place(0, shift)
                                     }
                                 },
                     ) {
@@ -14297,7 +14328,6 @@ private fun ReactionSummaryChip(
             Modifier
                 // Expose the "you reacted" state to TalkBack, not just via color.
                 .semantics { selected = mine }
-                .minimumInteractiveComponentSize()
                 .clip(RoundedCornerShape(percent = 50))
                 .clickable(role = Role.Button, onClick = onClick, onClickLabel = viewReactorsLabel),
         shape = RoundedCornerShape(percent = 50),
@@ -15235,9 +15265,146 @@ private fun MessageInfoRow(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun CustomizeReactionsDialog(
+    quickReactionEmojis: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit,
+    onReset: () -> Unit,
+) {
+    var draft by remember(quickReactionEmojis) { mutableStateOf(RecentEmojiList.normalizeQuickChoices(quickReactionEmojis)) }
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties =
+            DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+            ),
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.customize_reactions)) },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.back),
+                            )
+                        }
+                    },
+                )
+            },
+        ) { padding ->
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 24.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(32.dp),
+                        border = amoledSurfaceBorderStroke(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            draft.forEachIndexed { index, emoji ->
+                                Box(
+                                    modifier =
+                                        Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                            .clickable { editingIndex = index },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(emoji, style = MaterialTheme.typography.headlineSmall)
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.customize_reactions_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onReset) {
+                        Text(stringResource(R.string.reset_reactions))
+                    }
+                    Button(onClick = { onSave(draft) }) {
+                        Text(stringResource(R.string.save))
+                    }
+                }
+            }
+        }
+        if (editingIndex != null) {
+            EmojiPickerSheet(
+                onDismissRequest = { editingIndex = null },
+                onEmojiPicked = { emoji ->
+                    val index = editingIndex ?: return@EmojiPickerSheet
+                    draft = draft.toMutableList().also { it[index] = emoji }
+                    editingIndex = null
+                },
+                recordRecentPicks = false,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun EmojiPickerSheet(
     onDismissRequest: () -> Unit,
     onEmojiPicked: (String) -> Unit,
+    recordRecentPicks: Boolean = true,
+    onCustomizeReactions: (() -> Unit)? = null,
+) {
+    ModalBottomSheet(
+        modifier = amoledModalSheetModifier(),
+        onDismissRequest = onDismissRequest,
+        // Open expanded so the category rail is visible immediately and stays
+        // fixed below the emoji grid instead of requiring a sheet scroll first.
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        EmojiPickerContent(
+            onEmojiPicked = onEmojiPicked,
+            recordRecentPicks = recordRecentPicks,
+            onCustomizeReactions = onCustomizeReactions,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.9f)
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun EmojiPickerContent(
+    onEmojiPicked: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    recordRecentPicks: Boolean = true,
+    onBackspace: (() -> Unit)? = null,
+    onCustomizeReactions: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -15271,83 +15438,68 @@ private fun EmojiPickerSheet(
         }
 
     fun pick(emoji: String) {
-        scope.launch {
-            recents = withContext(Dispatchers.IO) { RecentEmojiPreferences.recordPicked(context, emoji).filter { it.isNotBlank() } }
+        if (recordRecentPicks) {
+            scope.launch {
+                recents = withContext(Dispatchers.IO) { RecentEmojiPreferences.recordPicked(context, emoji).filter { it.isNotBlank() } }
+            }
         }
         onEmojiPicked(emoji)
     }
 
-    ModalBottomSheet(
-        modifier = amoledModalSheetModifier(),
-        onDismissRequest = onDismissRequest,
-        // Opens at the partial detent and drags up to full; the Compose grid below
-        // scrolls natively within whatever height the sheet is at.
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.9f)
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.emoji_search_clear),
-                            )
-                        }
+        EmojiSearchField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (searchQuery.isBlank()) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(8),
+                state = gridState,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) {
+                if (recents.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        EmojiSectionHeader(stringResource(R.string.emoji_category_recent))
                     }
-                },
-                placeholder = { Text(stringResource(R.string.emoji_search_hint)) },
-                colors =
-                    OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                    ),
-            )
-            if (searchQuery.isBlank()) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(8),
-                    state = gridState,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                ) {
-                    if (recents.isNotEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            EmojiSectionHeader(stringResource(R.string.emoji_category_recent))
-                        }
-                        items(recents, key = { "recent:$it" }) { emoji ->
-                            EmojiSearchResultCell(emoji = emoji, onClick = { pick(emoji) })
-                        }
+                    items(recents, key = { "recent:$it" }) { emoji ->
+                        EmojiSearchResultCell(emoji = emoji, onClick = { pick(emoji) })
                     }
-                    for (group in 0 until EmojiData.GroupCount) {
-                        val groupEmoji = grouped[group].orEmpty()
-                        if (groupEmoji.isEmpty()) continue
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            EmojiSectionHeader(stringResource(emojiGroupTitleRes(group)))
-                        }
-                        items(groupEmoji, key = { it.emoji }) { entry ->
-                            EmojiSearchResultCell(emoji = entry.emoji, onClick = { pick(entry.emoji) })
-                        }
+                }
+                for (group in 0 until EmojiData.GroupCount) {
+                    val groupEmoji = grouped[group].orEmpty()
+                    if (groupEmoji.isEmpty()) continue
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        EmojiSectionHeader(stringResource(emojiGroupTitleRes(group)))
+                    }
+                    items(groupEmoji, key = { it.emoji }) { entry ->
+                        EmojiSearchResultCell(emoji = entry.emoji, onClick = { pick(entry.emoji) })
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (onCustomizeReactions != null) {
+                    IconButton(onClick = onCustomizeReactions, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.customize_reactions),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (recents.isNotEmpty()) {
@@ -15357,12 +15509,91 @@ private fun EmojiPickerSheet(
                         EmojiCategoryTab(icon) { scope.launch { gridState.scrollToItem(sectionHeaderIndex[group]) } }
                     }
                 }
-            } else {
-                EmojiSearchResultsGrid(
-                    results = searchResults,
-                    onEmojiPicked = { pick(it) },
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                if (onBackspace != null) {
+                    IconButton(onClick = onBackspace, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Backspace,
+                            contentDescription = stringResource(R.string.emoji_backspace),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        } else {
+            EmojiSearchResultsGrid(
+                results = searchResults,
+                onEmojiPicked = { pick(it) },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmojiSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    Surface(
+        modifier = modifier.heightIn(min = 44.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(24.dp),
+        border = amoledSurfaceBorderStroke(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            IconButton(
+                onClick = {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = stringResource(R.string.emoji_search_hint),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
                 )
+            }
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle =
+                        LocalTextStyle.current.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 16.sp,
+                        ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                )
+                if (value.isEmpty()) {
+                    Text(
+                        stringResource(R.string.emoji_search_hint),
+                        style = LocalTextStyle.current.copy(fontSize = 16.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                    )
+                }
+            }
+            if (value.isNotEmpty()) {
+                IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = stringResource(R.string.emoji_search_clear),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
@@ -15422,7 +15653,7 @@ private fun EmojiCategoryTab(
     onClick: () -> Unit,
 ) {
     Box(
-        modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick),
+        modifier = Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(icon, style = MaterialTheme.typography.titleMedium)
@@ -15843,6 +16074,25 @@ private fun ComposerBar(
     // and never re-fires on a revisit or after process death. Skipped while
     // editing — the edit effect above already owns focus then.
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    var rememberedInputPaneHeightPx by remember { mutableStateOf(0) }
+    LaunchedEffect(imeBottomPx) {
+        if (imeBottomPx > 0) rememberedInputPaneHeightPx = imeBottomPx
+    }
+    val inlineEmojiPaneHeight =
+        with(density) {
+            val fallback = (LocalConfiguration.current.screenHeightDp * 0.38f).dp.roundToPx()
+            maxOf(rememberedInputPaneHeightPx, fallback).toDp()
+        }
+    var keyboardSwitchPending by remember { mutableStateOf(false) }
+    LaunchedEffect(imeBottomPx, keyboardSwitchPending) {
+        if (keyboardSwitchPending && imeBottomPx > 0) {
+            composerEmojiPickerOpen = false
+            keyboardSwitchPending = false
+        }
+    }
     var autoFocusConsumed by remember { mutableStateOf(false) }
     LaunchedEffect(autoFocusOnEnter, editingMessageId) {
         if (autoFocusOnEnter && !autoFocusConsumed && editingMessageId == null) {
@@ -15891,24 +16141,52 @@ private fun ComposerBar(
             }
         }
     }
-    if (composerEmojiPickerOpen) {
-        EmojiPickerSheet(
-            onDismissRequest = { composerEmojiPickerOpen = false },
-            onEmojiPicked = { emoji ->
-                composerEmojiPickerOpen = false
-                val updated = insertComposerEmoji(textFieldValue, emoji)
-                textFieldValue = updated
-                if (editingMessageId == null) onDraftChange(updated.text)
-                runCatching { composerFocus.requestFocus() }
-                keyboardController?.show()
-            },
-        )
+
+    fun applyComposerFieldValue(value: TextFieldValue) {
+        textFieldValue = value
+        if (editingMessageId == null) onDraftChange(value.text)
+    }
+
+    fun deleteFromComposer() {
+        val selection = textFieldValue.selection
+        val textValue = textFieldValue.text
+        val deleteStart =
+            when {
+                selection.start != selection.end -> minOf(selection.start, selection.end)
+                selection.start <= 0 -> return
+                else -> textValue.offsetByCodePoints(selection.start, -1)
+            }
+        val deleteEnd =
+            if (selection.start != selection.end) {
+                maxOf(selection.start, selection.end)
+            } else {
+                selection.start
+            }
+        val updatedText = textValue.removeRange(deleteStart, deleteEnd)
+        applyComposerFieldValue(TextFieldValue(updatedText, selection = TextRange(deleteStart)))
+    }
+
+    fun openComposerEmojiPane() {
+        attachMenuOpen = false
+        keyboardSwitchPending = false
+        composerEmojiPickerOpen = true
+        rememberedInputPaneHeightPx = maxOf(rememberedInputPaneHeightPx, imeBottomPx)
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    fun showKeyboardFromEmojiPane() {
+        attachMenuOpen = false
+        rememberedInputPaneHeightPx = maxOf(rememberedInputPaneHeightPx, imeBottomPx)
+        keyboardSwitchPending = true
+        runCatching { composerFocus.requestFocus() }
+        keyboardController?.show()
     }
     Column(
         modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .imePadding()
+            .then(if (composerEmojiPickerOpen) Modifier else Modifier.imePadding())
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -15977,6 +16255,7 @@ private fun ComposerBar(
                     textFieldValue = updated
                     if (editingMessageId == null) onDraftChange(updated.text)
                     runCatching { composerFocus.requestFocus() }
+                    composerEmojiPickerOpen = false
                 },
             )
         }
@@ -15992,7 +16271,11 @@ private fun ComposerBar(
                 ComposerPill(
                     textFieldValue = textFieldValue,
                     composerFocus = composerFocus,
-                    onComposerFocusChanged = onComposerFocusChanged,
+                    emojiPickerOpen = composerEmojiPickerOpen,
+                    onComposerFocusChanged = { focused ->
+                        if (focused && !keyboardSwitchPending) composerEmojiPickerOpen = false
+                        onComposerFocusChanged(focused)
+                    },
                     onValueChange = { value ->
                         if (!isRecordingVoice) {
                             // #414: a single Backspace at the right edge of an
@@ -16051,20 +16334,15 @@ private fun ComposerBar(
                                 } else {
                                     edited
                                 }
-                            textFieldValue = applied
-                            // While editing, the field holds the edit candidate,
-                            // not a fresh chat draft. Persisting it would clobber
-                            // whatever the user was composing before they tapped
-                            // Edit — that's the snapshot we restore from
-                            // preEditFieldValue on cancel/submit.
-                            if (editingMessageId == null) onDraftChange(applied.text)
+                            applyComposerFieldValue(applied)
                         }
                     },
-                    onEmojiPickerOpen = {
-                        attachMenuOpen = false
-                        composerEmojiPickerOpen = true
-                        runCatching { composerFocus.requestFocus() }
-                        keyboardController?.show()
+                    onEmojiPickerToggle = {
+                        if (composerEmojiPickerOpen) {
+                            showKeyboardFromEmojiPane()
+                        } else {
+                            openComposerEmojiPane()
+                        }
                     },
                     onAttachMenuToggle = { attachMenuOpen = !attachMenuOpen },
                     attachMenuOpen = attachMenuOpen,
@@ -16155,6 +16433,28 @@ private fun ComposerBar(
                         modifier = Modifier.size(20.dp),
                     )
                 }
+            }
+        }
+        if (composerEmojiPickerOpen) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().height(inlineEmojiPaneHeight),
+                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = amoledSurfaceBorderStroke(),
+                tonalElevation = 2.dp,
+            ) {
+                EmojiPickerContent(
+                    onEmojiPicked = { emoji ->
+                        val updated = insertComposerEmoji(textFieldValue, emoji)
+                        applyComposerFieldValue(updated)
+                    },
+                    recordRecentPicks = false,
+                    onBackspace = ::deleteFromComposer,
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
         }
     }
@@ -16534,8 +16834,9 @@ private fun KeyboardPreservingDropdownMenu(
 private fun ComposerPill(
     textFieldValue: TextFieldValue,
     composerFocus: FocusRequester,
+    emojiPickerOpen: Boolean,
     onValueChange: (TextFieldValue) -> Unit,
-    onEmojiPickerOpen: () -> Unit,
+    onEmojiPickerToggle: () -> Unit,
     onAttachMenuToggle: () -> Unit,
     attachMenuOpen: Boolean,
     onAttachMenuDismiss: () -> Unit,
@@ -16624,12 +16925,19 @@ private fun ComposerPill(
                     .padding(start = 4.dp, end = 4.dp),
         ) {
             IconButton(
-                onClick = onEmojiPickerOpen,
+                onClick = onEmojiPickerToggle,
                 modifier = Modifier.size(36.dp),
             ) {
                 Icon(
-                    Icons.Default.EmojiEmotions,
-                    contentDescription = stringResource(R.string.open_emoji_picker),
+                    if (emojiPickerOpen) Icons.Default.Keyboard else Icons.Default.EmojiEmotions,
+                    contentDescription =
+                        stringResource(
+                            if (emojiPickerOpen) {
+                                R.string.show_keyboard
+                            } else {
+                                R.string.open_emoji_picker
+                            },
+                        ),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp),
                 )
