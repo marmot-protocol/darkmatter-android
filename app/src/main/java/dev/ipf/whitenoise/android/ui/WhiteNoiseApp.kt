@@ -3348,10 +3348,6 @@ private fun ChatRow(
     val openableDmAvatarAccount =
         avatarAccount
             ?.takeIf { GroupProjector.isDm(memberCount = item.memberCount, name = item.group.name) }
-    val autoInviteBadgeVisible =
-        remember(item.group.groupIdHex, appState.activeAccountRef, appState.autoAcceptedInviteRevisionForCompose) {
-            appState.autoAcceptedInviteBadgeVisible(item.group.groupIdHex)
-        }
     val rowModifier =
         if (onLongClick != null) {
             Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -3458,9 +3454,7 @@ private fun ChatRow(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                 )
-                if (autoInviteBadgeVisible) {
-                    Badge { Text(stringResource(R.string.invited)) }
-                } else if (item.group.pendingConfirmation) {
+                if (item.group.pendingConfirmation) {
                     Badge { Text(stringResource(R.string.invited)) }
                 } else if (rowHasUnread) {
                     // Surface the highest-signal unread: an @ badge beside the
@@ -8201,22 +8195,6 @@ private fun ConversationScreen(
     val context = LocalContext.current
     val groupTitleCopy = rememberGroupTitleCopy()
     val messageTextCopy = rememberMessageTextCopy()
-    // Keep the banner hidden immediately after the user dismisses it. The
-    // persisted marker update is asynchronous with Compose's next revision.
-    var inviteBannerDismissedThisSession by remember(chat.id) { mutableStateOf(false) }
-    val autoInviteBanner =
-        remember(
-            chat.id,
-            controller.group.pendingConfirmation,
-            inviteBannerDismissedThisSession,
-            appState.autoAcceptedInviteRevisionForCompose,
-        ) {
-            if (inviteBannerDismissedThisSession || controller.group.pendingConfirmation) {
-                null
-            } else {
-                appState.autoAcceptedInviteBanner(controller.group.groupIdHex)
-            }
-        }
     // Seeded empty and populated off the Main thread: the first access to a
     // SharedPreferences file blocks on disk, and doing that inside composition
     // stalls the conversation screen's first frame. See #147.
@@ -9698,46 +9676,48 @@ private fun ConversationScreen(
                                     searchOpen = true
                                 },
                             )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        stringResource(if (controller.group.archived) R.string.unarchive else R.string.archive),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                    )
-                                },
-                                contentPadding = conversationMenuItemPadding,
-                                enabled = !controller.mutationInFlight,
-                                onClick = {
-                                    menuOpen = false
-                                    appState.launchMutation { controller.setArchived(!controller.group.archived) }
-                                },
-                            )
-                            if (controller.isSelfMember) {
+                            if (!controller.group.pendingConfirmation) {
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            stringResource(R.string.leave),
+                                            stringResource(if (controller.group.archived) R.string.unarchive else R.string.archive),
                                             style = MaterialTheme.typography.bodyLarge,
                                         )
                                     },
                                     contentPadding = conversationMenuItemPadding,
-                                    // Gate on membersLoaded: the sole-admin routing
-                                    // below reads the roster, and an empty (unloaded)
-                                    // roster would misroute to a plain leave.
-                                    enabled = !controller.mutationInFlight && controller.membersLoaded,
+                                    enabled = !controller.mutationInFlight,
                                     onClick = {
                                         menuOpen = false
-                                        // A sole admin with other members can't
-                                        // leave until they transfer admin; route
-                                        // them to the transfer flow instead of
-                                        // the old leaveGroup() toast dead end.
-                                        if (controller.isSoleAdminWithOtherMembers) {
-                                            showTransferAdminFirst = true
-                                        } else {
-                                            confirmLeaveFromTopBar = true
-                                        }
+                                        appState.launchMutation { controller.setArchived(!controller.group.archived) }
                                     },
                                 )
+                                if (controller.isSelfMember) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(R.string.leave),
+                                                style = MaterialTheme.typography.bodyLarge,
+                                            )
+                                        },
+                                        contentPadding = conversationMenuItemPadding,
+                                        // Gate on membersLoaded: the sole-admin routing
+                                        // below reads the roster, and an empty (unloaded)
+                                        // roster would misroute to a plain leave.
+                                        enabled = !controller.mutationInFlight && controller.membersLoaded,
+                                        onClick = {
+                                            menuOpen = false
+                                            // A sole admin with other members can't
+                                            // leave until they transfer admin; route
+                                            // them to the transfer flow instead of
+                                            // the old leaveGroup() toast dead end.
+                                            if (controller.isSoleAdminWithOtherMembers) {
+                                                showTransferAdminFirst = true
+                                            } else {
+                                                confirmLeaveFromTopBar = true
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
                     },
@@ -9942,24 +9922,6 @@ private fun ConversationScreen(
                             contentPadding = PaddingValues(bottom = 8.dp),
                         ) {
                             item(key = "top-spacer") { Spacer(Modifier.height(4.dp)) }
-                            if (autoInviteBanner != null) {
-                                item(key = "auto-invite-banner") {
-                                    AutoAcceptedInviteBanner(
-                                        inviterName = autoInviteBanner.inviterAccountIdHex?.let { appState.chatMemberTitle(it) },
-                                        onLeave = {
-                                            if (controller.isSoleAdminWithOtherMembers) {
-                                                showTransferAdminFirst = true
-                                            } else {
-                                                confirmLeaveFromTopBar = true
-                                            }
-                                        },
-                                        onDismiss = {
-                                            appState.dismissAutoAcceptedInviteBanner(controller.group.groupIdHex)
-                                            inviteBannerDismissedThisSession = true
-                                        },
-                                    )
-                                }
-                            }
                             if (controller.hasMoreBefore || controller.isLoadingOlder) {
                                 item(key = "older-messages-loading") {
                                     Box(
@@ -10276,48 +10238,6 @@ private fun ConfirmDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
-}
-
-@Composable
-private fun AutoAcceptedInviteBanner(
-    inviterName: String?,
-    onLeave: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        border = amoledSurfaceBorderStroke(),
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(20.dp))
-            Text(
-                text =
-                    if (inviterName != null) {
-                        stringResource(R.string.auto_invite_banner_with_inviter, inviterName)
-                    } else {
-                        stringResource(R.string.auto_invite_banner_unknown)
-                    },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            TextButton(onClick = onLeave) {
-                Text(stringResource(R.string.leave_group))
-            }
-            IconButton(onClick = onDismiss) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = stringResource(R.string.auto_invite_banner_dismiss),
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -14628,8 +14548,8 @@ private fun MessageActionMenu(
         //   - one emoji/quick-reaction Row (36.dp)
         //   - a HorizontalDivider (1.dp)
         //   - the action buttons (each 48.dp min) in a spacedBy(2.dp) Column:
-        //       Reply, Copy, Info always; +Edit when canEdit; +Forward when
-        //       canForward; +Delete when canDelete
+        //       Copy and Info always; +Reply when canReply; +Edit when canEdit;
+        //       +Forward when canForward; +Delete when canDelete
         //   - the outer Column's 8.dp padding (top + bottom) and its two
         //     spacedBy(8.dp) gaps between the three sections.
         // Keep this in sync with the menu Column below if its layout changes.

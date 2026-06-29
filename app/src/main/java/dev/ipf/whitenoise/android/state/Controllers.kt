@@ -3986,7 +3986,6 @@ class ConversationController(
                     }
                     appState.marmotIo { leaveGroup(account, group.groupIdHex) }
                 }
-                appState.forgetAutoAcceptedInvite(group.groupIdHex)
                 // Authoritative local self-leave: record it before the
                 // synchronous snapshot drop so any subsequent
                 // refreshMembers()/applyGroupDetails() round-trip that still
@@ -4067,7 +4066,6 @@ class ConversationController(
                 appState.marmotIo { declineGroupInvite(account, group.groupIdHex) }
                 appState.dismissConversationNotifications(account, group.groupIdHex)
                 group = group.copy(pendingConfirmation = false, archived = true)
-                appState.forgetAutoAcceptedInvite(group.groupIdHex)
                 appState.applyLocalGroupUpdate(group)
                 appState.present(R.string.toast_invite_declined)
                 true

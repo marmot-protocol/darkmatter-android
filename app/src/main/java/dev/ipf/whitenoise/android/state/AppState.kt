@@ -28,7 +28,6 @@ import dev.ipf.marmotkit.AuditLogUploadSourceFfi
 import dev.ipf.marmotkit.MarkdownDocumentFfi
 import dev.ipf.marmotkit.Marmot
 import dev.ipf.marmotkit.NotificationSettingsFfi
-import dev.ipf.marmotkit.NotificationTriggerFfi
 import dev.ipf.marmotkit.NotificationUpdateFfi
 import dev.ipf.marmotkit.PushPlatformFfi
 import dev.ipf.marmotkit.RelayTelemetryResourceFfi
@@ -569,8 +568,6 @@ class WhiteNoiseAppState(
     var backgroundConnectionEnabled by mutableStateOf(BackgroundConnectionPreferences.isEnabled(appContext))
         private set
 
-    private var autoAcceptedInviteRevision by mutableStateOf(0)
-
     private var defaultNotificationsEnableAttempted by mutableStateOf(
         preferences.getBoolean(DEFAULT_NOTIFICATIONS_ENABLE_ATTEMPTED_KEY, false),
     )
@@ -1063,62 +1060,12 @@ class WhiteNoiseAppState(
 
     fun existingDirectChat(reference: String): ChatListItem? = chatsController?.existingDirectChat(reference)
 
-    val autoAcceptedInviteRevisionForCompose: Int
-        get() = autoAcceptedInviteRevision
-
-    fun autoAcceptedInviteBadgeVisible(groupIdHex: String): Boolean =
-        AutoAcceptedInviteMarkers.badgeVisible(
-            marker = autoAcceptedInviteMarker(activeAccountRef, groupIdHex),
-            nowMs = System.currentTimeMillis(),
-        )
-
-    internal fun autoAcceptedInviteBanner(groupIdHex: String): AutoAcceptedInviteBannerState? =
-        AutoAcceptedInviteMarkers.bannerState(autoAcceptedInviteMarker(activeAccountRef, groupIdHex))
-
-    fun markAutoAcceptedInviteOpened(groupIdHex: String) {
-        updateAutoAcceptedInviteMarkers {
-            AutoAcceptedInviteMarkers.markOpened(it, activeAccountRef, groupIdHex)
-        }
-    }
-
-    fun dismissAutoAcceptedInviteBanner(groupIdHex: String) {
-        updateAutoAcceptedInviteMarkers {
-            AutoAcceptedInviteMarkers.dismissBanner(it, activeAccountRef, groupIdHex)
-        }
-    }
-
-    fun forgetAutoAcceptedInvite(groupIdHex: String) {
-        updateAutoAcceptedInviteMarkers {
-            AutoAcceptedInviteMarkers.remove(it, activeAccountRef, groupIdHex)
-        }
-    }
-
-    private fun autoAcceptedInviteMarker(
-        accountRef: String?,
-        groupIdHex: String,
-    ): AutoAcceptedInviteMarker? =
-        AutoAcceptedInviteMarkers.markerFor(
-            encoded = autoAcceptedInviteEncoded(),
-            accountRef = accountRef,
-            groupIdHex = groupIdHex,
-        )
-
     private fun isActiveConversation(
         accountRef: String,
         groupIdHex: String,
     ): Boolean =
         activeConversationAccountRef == accountRef &&
             activeConversationGroupIdHex?.equals(groupIdHex, ignoreCase = true) == true
-
-    private fun autoAcceptedInviteEncoded(): Set<String> = preferences.getStringSet(AUTO_ACCEPTED_INVITES_KEY, emptySet()).orEmpty().toSet()
-
-    private fun updateAutoAcceptedInviteMarkers(transform: (Set<String>) -> Set<String>) {
-        val before = autoAcceptedInviteEncoded()
-        val after = transform(before)
-        if (after == before) return
-        preferences.edit().putStringSet(AUTO_ACCEPTED_INVITES_KEY, after).apply()
-        autoAcceptedInviteRevision += 1
-    }
 
     suspend fun <T> marmotIo(block: suspend Marmot.() -> T): T =
         withContext(Dispatchers.IO) {
@@ -2084,7 +2031,6 @@ class WhiteNoiseAppState(
         // now; clear it when the conversation closes.
         activeConversationAccountRef = if (groupIdHex != null) activeAccountRef else null
         if (groupIdHex != null) {
-            markAutoAcceptedInviteOpened(groupIdHex)
             synchronized(conversationStateLock) {
                 promoteConversationState(activeConversationAccountRef, groupIdHex)
             }
@@ -3216,12 +3162,8 @@ class WhiteNoiseAppState(
     // Resolve the conversation title for a notification the same way the chat
     // list does, since the runtime payload's group name is empty for unnamed
     // groups. Returns null for DMs (MessagingStyle shows the sender instead).
-    private suspend fun notificationConversationTitle(
-        update: NotificationUpdateFfi,
-        acceptedGroup: AppGroupRecordFfi? = null,
-    ): String? {
+    private suspend fun notificationConversationTitle(update: NotificationUpdateFfi): String? {
         if (update.isDm) return null
-        acceptedGroup?.name?.let { ProfileSanitizer.displayName(it) }?.let { return it }
         // Sanitize the payload name like the display surfaces do (strip
         // bidi/control chars) before trusting it as a notification title.
         update.groupName?.let { ProfileSanitizer.displayName(it) }?.let { return it }
@@ -3250,10 +3192,7 @@ class WhiteNoiseAppState(
             groupOfPeopleFormat = appContext.getString(R.string.group_title_people_count),
         )
 
-    private suspend fun postNotificationUpdate(
-        update: NotificationUpdateFfi,
-        autoAcceptedInvite: AppGroupRecordFfi? = null,
-    ) {
+    private suspend fun postNotificationUpdate(update: NotificationUpdateFfi) {
         val activeConversation = activeConversationGroupIdHex
         val shouldPost =
             LocalNotificationPolicy.shouldPost(
@@ -3292,12 +3231,11 @@ class WhiteNoiseAppState(
                 }
             localNotificationPresenter.show(
                 update,
-                notificationConversationTitle(update, autoAcceptedInvite),
+                notificationConversationTitle(update),
                 notificationSenderName(update),
                 previewTextOverride,
                 reactedToPreviewOverride,
                 mediaKind,
-                groupInviteAutoAccepted = autoAcceptedInvite != null,
             )
         }
         // Coalesce the unread refresh across a burst instead of paying the
@@ -3305,19 +3243,6 @@ class WhiteNoiseAppState(
         // drains pending accounts off the subscription loop, so the loop stays
         // free to process the next update (#729).
         unreadRefreshScheduler.schedule(update.accountRef)
-    }
-
-    private fun launchGroupInviteNotificationHandler(update: NotificationUpdateFfi) {
-        notificationScope.launch {
-            runCatching {
-                postNotificationUpdate(update)
-            }.onFailure {
-                rethrowIfCancellation(it)
-                appStateDebug(it) {
-                    "notification update failed key=${update.notificationKey.take(16)} trigger=${update.trigger}: ${it.readableMessage()}"
-                }
-            }
-        }
     }
 
     private fun startNotificationListener() {
@@ -3337,14 +3262,7 @@ class WhiteNoiseAppState(
                             while (isActive) {
                                 val update = marmotIo { subscription.next() } ?: break
                                 backoffMillis = NOTIFICATION_RETRY_INITIAL_BACKOFF_MILLIS
-                                if (update.trigger == NotificationTriggerFfi.GROUP_INVITE) {
-                                    // Formatting/posting can touch notification state. Run it off the
-                                    // subscription loop so one slow invite does not hold back
-                                    // subsequent notification updates.
-                                    launchGroupInviteNotificationHandler(update)
-                                } else {
-                                    postNotificationUpdate(update)
-                                }
+                                postNotificationUpdate(update)
                             }
                         } finally {
                             runCatching {
@@ -3521,7 +3439,6 @@ class WhiteNoiseAppState(
         private const val ENTER_KEY_BEHAVIOR_KEY = "enter_key_behavior"
         private const val DEFAULT_NOTIFICATIONS_ENABLE_ATTEMPTED_KEY = "default_notifications_enable_attempted"
         private const val DISAPPEARING_TOOLTIP_SHOWN_KEY = "disappearing_tooltip_shown"
-        private const val AUTO_ACCEPTED_INVITES_KEY = "auto_accepted_invites"
 
         // 24 MiB cap on decrypted attachment bytes resident in memory —
         // roughly ten 1920px JPEGs. Persists across conversation re-entry.
