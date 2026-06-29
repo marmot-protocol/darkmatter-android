@@ -193,21 +193,17 @@ object GroupSystemEvents {
             actor = ffi.actorAccountIdHex,
             subject = ffi.subjectAccountIdHex,
             name = ffi.name,
-            // The structured projection does not expose a previous name yet, so
-            // `oldName` stays null here and the rename row falls back to the
-            // new-name-only form. When Marmot adds a field, surface it here.
-            oldName = null,
-            oldNameKnown = false,
+            oldName = ffi.oldName?.takeIf { it.isNotBlank() },
+            oldNameKnown = ffi.oldName != null,
             oldRetentionSeconds = ffi.oldRetentionSeconds,
             newRetentionSeconds = ffi.newRetentionSeconds,
         )
 
     /**
      * Prefer Marmot's structured projection; fall back to parsing kind-1210
-     * JSON. The structured projection does not yet carry a previous group name,
-     * so when it is used we still backfill `oldName` from the JSON payload's
-     * `data.old_name` (when present) so the rename row can render the diff
-     * without inventing an Android-owned cache.
+     * JSON. The projection now carries the previous name, but if a row predates
+     * that field we still backfill `oldName` from the JSON payload's
+     * `data.old_name` (when present) so the rename row can render the diff.
      */
     fun resolve(
         plaintext: String,
