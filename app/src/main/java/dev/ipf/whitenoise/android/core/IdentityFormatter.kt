@@ -168,12 +168,51 @@ object IdentityFormatter {
         // the following separator for leading-year patterns (`y年M月d日`, `y/MM/dd`),
         // otherwise the preceding separator for trailing-year patterns (`MMM d, y`).
         if (end < pattern.length) {
-            while (end < pattern.length && !isPatternFieldChar(pattern[end])) end++
+            end = nextPatternFieldStart(pattern, end)
         } else {
-            while (start > 0 && !isPatternFieldChar(pattern[start - 1])) start--
+            start = previousPatternFieldEnd(pattern, start)
         }
 
         return pattern.removeRange(start, end).trim().ifBlank { "MMM d" }
+    }
+
+    private fun nextPatternFieldStart(
+        pattern: String,
+        from: Int,
+    ): Int {
+        var index = from
+        while (index < pattern.length) {
+            when (val c = pattern[index]) {
+                '\'' -> index = skipQuotedLiteral(pattern, index)
+                else -> {
+                    if (isPatternFieldChar(c)) return index
+                    index++
+                }
+            }
+        }
+        return index
+    }
+
+    private fun previousPatternFieldEnd(
+        pattern: String,
+        before: Int,
+    ): Int {
+        var index = 0
+        var lastFieldEnd = 0
+        while (index < before) {
+            when (val c = pattern[index]) {
+                '\'' -> index = skipQuotedLiteral(pattern, index)
+                else -> {
+                    if (isPatternFieldChar(c)) {
+                        while (index < before && pattern[index] == c) index++
+                        lastFieldEnd = index
+                    } else {
+                        index++
+                    }
+                }
+            }
+        }
+        return lastFieldEnd
     }
 
     private fun findYearRange(pattern: String): IntRange? {

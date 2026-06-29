@@ -306,6 +306,33 @@ class IdentityFormatterTest {
         assertTrue("German should be day-first: $de", de.indexOf("03") < de.indexOf("11"))
     }
 
+    @Test
+    fun relativeTimeNoYearRungHandlesQuotedLiteralDatePatterns() {
+        // Some CLDR patterns put quoted words next to the year. The no-year
+        // stripper must treat those quoted literals atomically instead of leaving
+        // an invalid pattern that falls back to the copy.now label.
+        val today = LocalDate.of(2025, 6, 22)
+        val message = LocalDate.of(2025, 6, 14)
+
+        val trailingQuotedLiteral = relativeTimeOn(message, today, Locale.forLanguageTag("pt-BR"))
+        val leadingQuotedLiteral = relativeTimeOn(message, today, Locale.forLanguageTag("lv-LV"))
+
+        assertTrue(
+            "pt-BR should render a no-year date, not fallback to now: $trailingQuotedLiteral",
+            trailingQuotedLiteral != RelativeTimeCopy.Default.now,
+        )
+        assertTrue(
+            "lv-LV should render a no-year date, not fallback to now: $leadingQuotedLiteral",
+            leadingQuotedLiteral != RelativeTimeCopy.Default.now,
+        )
+        assertTrue("pt-BR should still include the day: $trailingQuotedLiteral", trailingQuotedLiteral.contains("14"))
+        assertTrue("lv-LV should still include the day: $leadingQuotedLiteral", leadingQuotedLiteral.contains("14"))
+        assertTrue("pt-BR no-year rung should omit the year: $trailingQuotedLiteral", !trailingQuotedLiteral.contains("2025"))
+        assertTrue("lv-LV no-year rung should omit the year: $leadingQuotedLiteral", !leadingQuotedLiteral.contains("2025"))
+        assertNoClockComponent(trailingQuotedLiteral)
+        assertNoClockComponent(leadingQuotedLiteral)
+    }
+
     private fun assertNoClockComponent(rendered: String) {
         // Beyond 24h the row must never include a clock: no ':' separator, no
         // AM/PM marker, and no hour/minute pattern letters leaking through.
