@@ -105,7 +105,8 @@ object IdentityFormatter {
             // grammatical form (e.g. Russian one/few/many) for the count, clamped
             // to a non-negative Int (the sub-hour delta makes the conversion safe).
             delta < 3_600 -> copy.minutes((delta / 60).toInt())
-            // Within the first day the elapsed hour count is the useful signal.
+            // Within the first 24 elapsed hours the elapsed hour count is the useful signal.
+            // Same-date rows on a 25-hour DST fall-back civil day are handled below.
             delta < 86_400 -> copy.hours((delta / 3_600).toInt())
             // Past 24h the clock time is noise on a chat-list row (#848): the day
             // name (within the past week) or a date carries "when did this thread
