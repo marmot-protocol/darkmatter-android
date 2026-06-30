@@ -18730,6 +18730,20 @@ private fun AddIdentitySheet(
     val creatingIdentityDescription = stringResource(R.string.creating_identity)
     val importingDescription = stringResource(R.string.import_existing_identity)
 
+    // One guarded entry point for import so the button and the IME Done action
+    // share the same blank/busy guard.
+    fun startImport() {
+        if (inFlightAction != OnboardingAction.Idle || identity.isBlank()) return
+        inFlightAction = OnboardingAction.Importing
+        appState.launchMutation {
+            try {
+                appState.importIdentity(identity)
+            } finally {
+                inFlightAction = OnboardingAction.Idle
+            }
+        }
+    }
+
     // ModalBottomSheet renders in its own window on Android, separate from
     // the host activity window — `WindowSecureFlag()` (which flags the
     // activity window) doesn't reach it. Set the sheet's own securePolicy
@@ -18791,31 +18805,10 @@ private fun AddIdentitySheet(
                         keyboardType = KeyboardType.Password,
                         imeAction = ImeAction.Done,
                     ),
-                keyboardActions =
-                    KeyboardActions(
-                        onDone = {
-                            inFlightAction = OnboardingAction.Importing
-                            appState.launchMutation {
-                                try {
-                                    appState.importIdentity(identity)
-                                } finally {
-                                    inFlightAction = OnboardingAction.Idle
-                                }
-                            }
-                        },
-                    ),
+                keyboardActions = KeyboardActions(onDone = { startImport() }),
             )
             OutlinedButton(
-                onClick = {
-                    inFlightAction = OnboardingAction.Importing
-                    appState.launchMutation {
-                        try {
-                            appState.importIdentity(identity)
-                        } finally {
-                            inFlightAction = OnboardingAction.Idle
-                        }
-                    }
-                },
+                onClick = { startImport() },
                 enabled = !busy && identity.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
