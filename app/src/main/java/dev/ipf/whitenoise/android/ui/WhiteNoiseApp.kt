@@ -195,6 +195,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RichTooltip
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarData
@@ -13054,6 +13055,7 @@ private fun MessageBubble(
     var editHistoryOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     var reactionSheetOpen by remember(record.messageIdHex) { mutableStateOf(false) }
     var customizeReactionsOpen by remember(record.messageIdHex) { mutableStateOf(false) }
+    var restoreReactionPickerExpanded by remember(record.messageIdHex) { mutableStateOf(false) }
     // A deleted message is inert: tear down any open action/reaction surface if
     // the message is deleted out from under it (optimistic or remote delete).
     LaunchedEffect(deleted) {
@@ -14056,12 +14058,18 @@ private fun MessageBubble(
                 }
                 if (emojiPickerOpen && !readOnly) {
                     EmojiPickerSheet(
-                        onDismissRequest = { emojiPickerOpen = false },
+                        restoreExpanded = restoreReactionPickerExpanded,
+                        onDismissRequest = {
+                            restoreReactionPickerExpanded = false
+                            emojiPickerOpen = false
+                        },
                         onEmojiPicked = { emoji ->
+                            restoreReactionPickerExpanded = false
                             emojiPickerOpen = false
                             reactWithEmoji(emoji)
                         },
-                        onCustomizeReactions = {
+                        onCustomizeReactions = { wasExpanded ->
+                            restoreReactionPickerExpanded = wasExpanded
                             emojiPickerOpen = false
                             customizeReactionsOpen = true
                         },
@@ -15411,19 +15419,29 @@ private fun EmojiPickerSheet(
     onDismissRequest: () -> Unit,
     onEmojiPicked: (String) -> Unit,
     recordRecentPicks: Boolean = true,
-    onCustomizeReactions: (() -> Unit)? = null,
+    restoreExpanded: Boolean = false,
+    onCustomizeReactions: ((Boolean) -> Unit)? = null,
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    LaunchedEffect(restoreExpanded, sheetState) {
+        if (restoreExpanded) {
+            runCatching { sheetState.expand() }
+        }
+    }
     ModalBottomSheet(
         modifier = amoledModalSheetModifier(),
         onDismissRequest = onDismissRequest,
         // Let the reaction picker open at the partial detent; the fixed bottom
         // rail remains visible there, and the user can still drag up for more.
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+        sheetState = sheetState,
     ) {
         EmojiPickerContent(
             onEmojiPicked = onEmojiPicked,
             recordRecentPicks = recordRecentPicks,
-            onCustomizeReactions = onCustomizeReactions,
+            onCustomizeReactions =
+                onCustomizeReactions?.let { customize ->
+                    { customize(sheetState.currentValue == SheetValue.Expanded) }
+                },
             searchFieldAlwaysVisible = true,
             searchStartsOpen = false,
             modifier =
@@ -15572,6 +15590,7 @@ private fun EmojiPickerContent(
         }
         EmojiCategoryRail(
             onCustomizeReactions = onCustomizeReactions,
+            showSearch = !searchFieldAlwaysVisible,
             searchSelected = searchOpen,
             onSearch = { searchOpen = true },
             showRecents = recents.isNotEmpty(),
@@ -15726,6 +15745,7 @@ private fun EmojiSearchResultCell(
 @Composable
 private fun EmojiCategoryRail(
     onCustomizeReactions: (() -> Unit)?,
+    showSearch: Boolean,
     searchSelected: Boolean,
     onSearch: () -> Unit,
     showRecents: Boolean,
@@ -15754,16 +15774,18 @@ private fun EmojiCategoryRail(
                 )
             }
         }
-        EmojiRailIconButton(
-            onClick = onSearch,
-            selected = searchSelected,
-            modifier = Modifier.weight(1f).height(38.dp),
-        ) {
-            Icon(
-                Icons.Default.Search,
-                contentDescription = stringResource(R.string.emoji_search_hint),
-                modifier = Modifier.size(20.dp),
-            )
+        if (showSearch) {
+            EmojiRailIconButton(
+                onClick = onSearch,
+                selected = searchSelected,
+                modifier = Modifier.weight(1f).height(38.dp),
+            ) {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = stringResource(R.string.emoji_search_hint),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         if (showRecents) {
             EmojiCategoryTab(
