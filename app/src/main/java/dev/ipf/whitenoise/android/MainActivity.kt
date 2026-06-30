@@ -31,13 +31,12 @@ class MainActivity : ComponentActivity() {
     private var inboundNotificationTarget by mutableStateOf<NotificationTarget?>(null)
     private lateinit var appState: WhiteNoiseAppState
 
-    override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(newBase)
-        setTheme(preComposeThemeFor(readPersistedThemeMode(), newBase.resources.configuration.isNightModeActive))
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         val initialSystemDarkTheme = resources.configuration.isNightModeActive
+        // Apply the pre-Compose theme here, not in attachBaseContext: the window
+        // doesn't exist that early, so Activity.setTheme() NPEs on getWindow().
+        // onCreate (before super) still runs before the first frame.
+        setTheme(preComposeThemeFor(readPersistedThemeMode(), initialSystemDarkTheme))
         super.onCreate(savedInstanceState)
         appState = (application as WhiteNoiseApplication).appState
         consumeIntent(intent)
