@@ -2507,6 +2507,12 @@ class ConversationController(
         while (coroutineContext.isActive) {
             if (group.disappearingMessageSecs > 0uL) {
                 lastForegroundSweepStartedAtMillis = System.currentTimeMillis()
+                // Refresh references before pruning so evictExpiredMediaCaches can
+                // map a pruned attachment's ciphertext back to its in-memory (L1)
+                // plaintext/thumbnail entries. The open-snapshot path may not have
+                // loaded them yet when this first sweep runs, and listMedia must be
+                // read before secureDeleteExpired removes the rows.
+                refreshMediaReferences()
                 runCatching {
                     appState.marmotIo { secureDeleteExpired(account, group.groupIdHex) }
                 }.onSuccess { result ->
