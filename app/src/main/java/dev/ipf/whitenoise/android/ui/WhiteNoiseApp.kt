@@ -1052,11 +1052,42 @@ private fun SignInContent(
     val canSignIn = identity.isNotBlank() && !busy
     val signInDescription = stringResource(R.string.sign_in)
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+    Scaffold(
+        contentWindowInsets = WindowInsets(0.dp),
+        bottomBar = {
+            StickyFormActionBar {
+                Button(
+                    onClick = onSignIn,
+                    enabled = canSignIn,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 18.dp),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier =
+                                Modifier
+                                    .size(20.dp)
+                                    .semantics { contentDescription = signInDescription },
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(Icons.Default.Person, contentDescription = null)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(stringResource(R.string.sign_in), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+    ) { padding ->
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack, enabled = !busy) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
@@ -1092,26 +1123,6 @@ private fun SignInContent(
                         },
                     ),
             )
-        }
-        Button(
-            onClick = onSignIn,
-            enabled = canSignIn,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 18.dp),
-        ) {
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier =
-                        Modifier
-                            .size(20.dp)
-                            .semantics { contentDescription = signInDescription },
-                    strokeWidth = 2.dp,
-                )
-            } else {
-                Icon(Icons.Default.Person, contentDescription = null)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(stringResource(R.string.sign_in), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
     }
 }
