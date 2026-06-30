@@ -10924,8 +10924,12 @@ private fun GroupDetailsScreen(
                         membersFormat = stringResource(R.string.members_count),
                     ),
                 description = controller.group.description,
-                groupIdHex = controller.group.groupIdHex,
-                pictureUrl = controller.group.avatarUrl,
+                // Show the DM peer's avatar + initials seed here — the same
+                // peer metadata the top bar and chat-list row resolve (#837).
+                // A group keeps its own avatar (controller.avatarUrl falls back
+                // to the group avatar; avatarAccount is null for groups).
+                seed = controller.avatarAccount ?: controller.group.groupIdHex,
+                pictureUrl = controller.avatarUrl,
                 archived = controller.group.archived,
             )
 
@@ -11936,7 +11940,7 @@ private fun GroupDetailsHeader(
     title: String,
     subtitle: String,
     description: String,
-    groupIdHex: String,
+    seed: String,
     pictureUrl: String?,
     archived: Boolean,
 ) {
@@ -11946,7 +11950,7 @@ private fun GroupDetailsHeader(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Avatar(title = title, seed = groupIdHex, size = 88.dp, pictureUrl = pictureUrl)
+            Avatar(title = title, seed = seed, size = 88.dp, pictureUrl = pictureUrl)
             Text(
                 title,
                 style = MaterialTheme.typography.headlineSmall,
