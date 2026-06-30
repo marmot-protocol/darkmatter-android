@@ -5257,9 +5257,6 @@ class ConversationController(
         val event = GroupSystemEvents.resolve(record.plaintext, projected?.groupSystem)
         val previousName =
             if (event != null && event.oldNameKnown) {
-                GroupSystemEvents.renameNewName(event)?.let { newName ->
-                    appState.setGroupNameSnapshot(conversationAccountRef, record.groupIdHex, newName)
-                }
                 null
             } else if (event != null) {
                 appState.previousGroupRenameName(

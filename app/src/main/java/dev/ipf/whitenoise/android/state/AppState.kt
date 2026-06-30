@@ -1048,14 +1048,6 @@ class WhiteNoiseAppState(
         groupRenameNameSnapshots.remember(accountRef, groupIdHex, name)
     }
 
-    internal fun setGroupNameSnapshot(
-        accountRef: String?,
-        groupIdHex: String?,
-        name: String?,
-    ) {
-        groupRenameNameSnapshots.setCurrent(accountRef, groupIdHex, name)
-    }
-
     internal fun recordGroupNameSnapshot(
         accountRef: String?,
         groupIdHex: String?,
@@ -3300,7 +3292,6 @@ class WhiteNoiseAppState(
         val localPreviousName =
             GroupSystemEvents.renameNewName(baseEvent)?.let { newName ->
                 if (baseEvent.oldNameKnown) {
-                    setGroupNameSnapshot(update.accountRef, update.groupIdHex, newName)
                     null
                 } else {
                     recordGroupNameSnapshot(update.accountRef, update.groupIdHex, newName)

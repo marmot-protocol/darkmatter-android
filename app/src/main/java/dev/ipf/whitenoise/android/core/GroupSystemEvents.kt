@@ -214,7 +214,7 @@ object GroupSystemEvents {
             structured?.let { ffi ->
                 val structuredEvent = fromFfi(ffi)
                 val parsed = parse(plaintext)
-                if (structuredEvent.oldName == null && parsed?.oldNameKnown == true) {
+                if (!structuredEvent.oldNameKnown && parsed?.oldNameKnown == true) {
                     structuredEvent.copy(oldName = parsed.oldName, oldNameKnown = true)
                 } else {
                     structuredEvent
