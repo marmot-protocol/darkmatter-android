@@ -14126,16 +14126,16 @@ private fun MessageBubble(
                 if (tallies.isNotEmpty() && !deleted) {
                     val reactionChipPadding =
                         if (mine) {
-                            PaddingValues(start = 10.dp, end = 42.dp)
+                            PaddingValues(end = 10.dp)
                         } else {
-                            PaddingValues(horizontal = 10.dp)
+                            PaddingValues(start = 10.dp)
                         }
                     // Keep the chip tucked onto the bubble's lower edge without
                     // covering the final text line or outgoing status cluster.
                     Box(
                         modifier =
                             Modifier
-                                .fillMaxWidth()
+                                .align(if (mine) Alignment.End else Alignment.Start)
                                 .padding(reactionChipPadding)
                                 .layout { measurable, constraints ->
                                     val placeable = measurable.measure(constraints)
@@ -14145,7 +14145,6 @@ private fun MessageBubble(
                                         placeable.place(0, -overlap)
                                     }
                                 },
-                        contentAlignment = if (mine) Alignment.TopEnd else Alignment.TopStart,
                     ) {
                         ReactionSummaryChip(
                             tallies = tallies,
@@ -15492,6 +15491,7 @@ private fun ComposerEmojiPickerPane(
 }
 
 internal val ComposerEmojiPickerFallbackHeight = 320.dp
+internal val ComposerEmojiPickerSearchExtraHeight = 56.dp
 
 internal fun composerEmojiPaneTargetHeight(
     currentImeHeight: Dp,
@@ -16385,12 +16385,18 @@ private fun ComposerBar(
                 freezeUpdates = composerEmojiPickerOpen,
             )
     }
-    val emojiPaneHeight =
+    val emojiPaneBaseHeight =
         composerEmojiPaneHeight(
             lockedPaneHeight = lockedComposerEmojiPaneHeight,
             currentImeHeight = currentImePaneHeight,
             rememberedImeHeight = rememberedImePaneHeight,
         )
+    val emojiPaneHeight =
+        if (composerEmojiSearchActive) {
+            emojiPaneBaseHeight + ComposerEmojiPickerSearchExtraHeight
+        } else {
+            emojiPaneBaseHeight
+        }
     val emojiPaneAlpha by animateFloatAsState(
         targetValue = if (composerEmojiPickerOpen) 1f else 0f,
         animationSpec = tween(durationMillis = 120),
