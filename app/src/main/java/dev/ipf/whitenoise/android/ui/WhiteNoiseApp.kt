@@ -195,7 +195,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RichTooltip
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarData
@@ -15422,17 +15421,12 @@ private fun EmojiPickerSheet(
     restoreExpanded: Boolean = false,
     onCustomizeReactions: ((Boolean) -> Unit)? = null,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    LaunchedEffect(restoreExpanded, sheetState) {
-        if (restoreExpanded) {
-            runCatching { sheetState.expand() }
-        }
-    }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         modifier = amoledModalSheetModifier(),
         onDismissRequest = onDismissRequest,
-        // Let the reaction picker open at the partial detent; the fixed bottom
-        // rail remains visible there, and the user can still drag up for more.
+        // Open full-height so returning from Customize reactions lands back on
+        // the same expanded picker instead of dropping to the partial detent.
         sheetState = sheetState,
     ) {
         EmojiPickerContent(
@@ -15440,14 +15434,14 @@ private fun EmojiPickerSheet(
             recordRecentPicks = recordRecentPicks,
             onCustomizeReactions =
                 onCustomizeReactions?.let { customize ->
-                    { customize(sheetState.currentValue == SheetValue.Expanded) }
+                    { customize(true) }
                 },
             searchFieldAlwaysVisible = true,
             searchStartsOpen = false,
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.9f)
+                    .fillMaxHeight()
                     .navigationBarsPadding()
                     .imePadding()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
