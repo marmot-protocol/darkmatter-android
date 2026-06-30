@@ -8349,6 +8349,7 @@ private fun ConversationScreen(
     var quickReactionEmojis by remember(context) {
         mutableStateOf(RecentEmojiList.DefaultQuickChoices)
     }
+    var quickReactionEmojisTouched by remember(context) { mutableStateOf(false) }
     LaunchedEffect(context) {
         val (loaded, quick) =
             withContext(Dispatchers.IO) {
@@ -8360,7 +8361,9 @@ private fun ConversationScreen(
         if (recentReactionEmojis.isEmpty()) {
             recentReactionEmojis = loaded
         }
-        quickReactionEmojis = quick
+        if (!quickReactionEmojisTouched) {
+            quickReactionEmojis = quick
+        }
     }
     // Serialize the recents read-modify-write so rapid taps don't lose updates
     // (concurrent recordPicked() is last-writer-wins on the disk list). See #172.
@@ -9042,10 +9045,25 @@ private fun ConversationScreen(
         }
     }
 
-    // Scroll the lazy list so the item at [targetIndex] sits roughly in the
+    // Scroll the lazy list so the item at [targetMessageId] sits roughly in the
     // vertical center of the message-list viewport, leaving context above and
     // below the target visible (#595, #794).
-    suspend fun centerTimelineItemAt(targetIndex: Int) {
+    suspend fun centerTimelineItemAt(
+        targetMessageId: String,
+        fallbackTargetIndex: Int,
+    ) {
+        fun currentTargetIndex(): Int? {
+            val timelineIndex =
+                controller.timeline
+                    .filterNot { MessageProjector.isEdit(it.record) }
+                    .indexOfFirst { it.record.messageIdHex == targetMessageId }
+                    .takeIf { it >= 0 }
+                    ?: return null
+            val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
+            return 1 + olderMessagesHeaderCount + timelineIndex
+        }
+
+        val targetIndex = currentTargetIndex() ?: fallbackTargetIndex
         val viewportHeight = listState.layoutInfo.viewportSize.height
         if (viewportHeight <= 0) {
             // Layout not measured yet (rare on a fresh open): fall back to the
@@ -9056,13 +9074,13 @@ private fun ConversationScreen(
         listState.animateScrollToItem(targetIndex, ReplyNavigation.centeredScrollOffset(viewportHeight))
         val itemHeight =
             listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == targetIndex }
+                .firstOrNull { it.index == (currentTargetIndex() ?: targetIndex) }
                 ?.size
                 ?: return
         // Now true-center the measured bubble: top at (viewport - item) / 2.
         val centeredOffset = ReplyNavigation.centeredScrollOffset(viewportHeight, itemHeight)
         if (centeredOffset != ReplyNavigation.centeredScrollOffset(viewportHeight)) {
-            listState.animateScrollToItem(targetIndex, centeredOffset)
+            listState.animateScrollToItem(currentTargetIndex() ?: targetIndex, centeredOffset)
         }
     }
 
@@ -9079,12 +9097,14 @@ private fun ConversationScreen(
     }
 
     fun saveQuickReactionEmojis(choices: List<String>) {
+        quickReactionEmojisTouched = true
         scope.launch {
             quickReactionEmojis = withContext(Dispatchers.IO) { RecentEmojiPreferences.saveQuickReactions(context, choices) }
         }
     }
 
     fun resetQuickReactionEmojis() {
+        quickReactionEmojisTouched = true
         scope.launch {
             quickReactionEmojis = withContext(Dispatchers.IO) { RecentEmojiPreferences.resetQuickReactions(context) }
         }
@@ -9110,7 +9130,7 @@ private fun ConversationScreen(
                     return@launch
                 }
                 val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-                centerTimelineItemAt(1 + olderMessagesHeaderCount + timelineIndex)
+                centerTimelineItemAt(targetMessageId, 1 + olderMessagesHeaderCount + timelineIndex)
                 highlightedMessageId = targetMessageId
                 delay(1_500L)
                 if (highlightedMessageId == targetMessageId) {
@@ -9137,7 +9157,7 @@ private fun ConversationScreen(
                     return@launch
                 }
                 val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
-                centerTimelineItemAt(1 + olderMessagesHeaderCount + timelineIndex)
+                centerTimelineItemAt(targetMessageId, 1 + olderMessagesHeaderCount + timelineIndex)
                 highlightedMessageId = targetMessageId
                 // Mark read up to the visited mention so the count — and the
                 // chat-list @-badge — decrement in step; advance the local read
@@ -9267,7 +9287,7 @@ private fun ConversationScreen(
                     renderedTimeline.indexOfFirst { it.record.messageIdHex == messageIdHex }
                 if (timelineIndex < 0) return@launch
                 // Center the match so prior + subsequent context is visible (#595).
-                centerTimelineItemAt(1 + olderHeaderCount + timelineIndex)
+                centerTimelineItemAt(messageIdHex, 1 + olderHeaderCount + timelineIndex)
                 highlightedMessageId = messageIdHex
                 delay(1_500L)
                 if (highlightedMessageId == messageIdHex) {
@@ -9603,7 +9623,7 @@ private fun ConversationScreen(
         }
         val olderMessagesHeaderCount = if (controller.hasMoreBefore || controller.isLoadingOlder) 1 else 0
         // Center the match so prior + subsequent context is visible (#595).
-        centerTimelineItemAt(1 + olderMessagesHeaderCount + timelineIndex)
+        centerTimelineItemAt(target, 1 + olderMessagesHeaderCount + timelineIndex)
         if (highlightFocusMessage) {
             highlightedMessageId = target
             delay(1_500L)
@@ -15529,70 +15549,6 @@ private fun EmojiPickerContent(
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (onCustomizeReactions != null) {
-                    EmojiRailIconButton(
-                        onClick = onCustomizeReactions,
-                        selected = false,
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.customize_reactions),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp),
-                        )
-                    }
-                }
-                EmojiRailIconButton(
-                    onClick = { searchOpen = true },
-                    selected = searchOpen,
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = stringResource(R.string.emoji_search_hint),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp),
-                    )
-                }
-                if (recents.isNotEmpty()) {
-                    EmojiCategoryTab(
-                        icon = "🕘",
-                        selected = activeCategory == -1,
-                    ) {
-                        activeCategory = -1
-                        scope.launch { gridState.scrollToItem(0) }
-                    }
-                }
-                EmojiData.groupTabIcons.forEachIndexed { group, icon ->
-                    EmojiCategoryTab(
-                        icon = icon,
-                        selected = activeCategory == group,
-                    ) {
-                        activeCategory = group
-                        scope.launch { gridState.scrollToItem(sectionHeaderIndex[group]) }
-                    }
-                }
-                if (onBackspace != null) {
-                    EmojiRailIconButton(
-                        onClick = onBackspace,
-                        selected = false,
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Backspace,
-                            contentDescription = stringResource(R.string.emoji_backspace),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp),
-                        )
-                    }
-                }
-            }
         } else {
             EmojiSearchResultsGrid(
                 results = searchResults,
@@ -15600,6 +15556,28 @@ private fun EmojiPickerContent(
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
         }
+        EmojiCategoryRail(
+            onCustomizeReactions = onCustomizeReactions,
+            searchSelected = searchOpen,
+            onSearch = { searchOpen = true },
+            showRecents = recents.isNotEmpty(),
+            recentsSelected = activeCategory == -1,
+            onRecents = {
+                searchOpen = false
+                keyboardController?.hide()
+                activeCategory = -1
+                scope.launch { gridState.scrollToItem(0) }
+            },
+            selectedGroup = activeCategory,
+            onGroup = { group ->
+                searchOpen = false
+                keyboardController?.hide()
+                activeCategory = group
+                scope.launch { gridState.scrollToItem(sectionHeaderIndex[group]) }
+            },
+            onBackspace = onBackspace,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+        )
     }
 }
 
@@ -15719,6 +15697,80 @@ private fun EmojiSearchResultCell(
 }
 
 @Composable
+private fun EmojiCategoryRail(
+    onCustomizeReactions: (() -> Unit)?,
+    searchSelected: Boolean,
+    onSearch: () -> Unit,
+    showRecents: Boolean,
+    recentsSelected: Boolean,
+    onRecents: () -> Unit,
+    selectedGroup: Int,
+    onGroup: (Int) -> Unit,
+    onBackspace: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onCustomizeReactions != null) {
+            EmojiRailIconButton(
+                onClick = onCustomizeReactions,
+                selected = false,
+                modifier = Modifier.weight(1f).height(40.dp),
+            ) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = stringResource(R.string.customize_reactions),
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+        }
+        EmojiRailIconButton(
+            onClick = onSearch,
+            selected = searchSelected,
+            modifier = Modifier.weight(1f).height(40.dp),
+        ) {
+            Icon(
+                Icons.Default.Search,
+                contentDescription = stringResource(R.string.emoji_search_hint),
+                modifier = Modifier.size(21.dp),
+            )
+        }
+        if (showRecents) {
+            EmojiCategoryTab(
+                icon = "🕘",
+                selected = recentsSelected,
+                modifier = Modifier.weight(1f).height(40.dp),
+                onClick = onRecents,
+            )
+        }
+        EmojiData.groupTabIcons.forEachIndexed { group, icon ->
+            EmojiCategoryTab(
+                icon = icon,
+                selected = selectedGroup == group,
+                modifier = Modifier.weight(1f).height(40.dp),
+                onClick = { onGroup(group) },
+            )
+        }
+        if (onBackspace != null) {
+            EmojiRailIconButton(
+                onClick = onBackspace,
+                selected = false,
+                modifier = Modifier.weight(1f).height(40.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Backspace,
+                    contentDescription = stringResource(R.string.emoji_backspace),
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun EmojiRailIconButton(
     onClick: () -> Unit,
     selected: Boolean,
@@ -15726,8 +15778,8 @@ private fun EmojiRailIconButton(
     content: @Composable () -> Unit,
 ) {
     Surface(
-        modifier = modifier.clip(CircleShape).clickable(onClick = onClick),
-        shape = CircleShape,
+        modifier = modifier.padding(horizontal = 1.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
         color =
             if (selected) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -15751,14 +15803,15 @@ private fun EmojiRailIconButton(
 private fun EmojiCategoryTab(
     icon: String,
     selected: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     EmojiRailIconButton(
         onClick = onClick,
         selected = selected,
-        modifier = Modifier.size(28.dp),
+        modifier = modifier,
     ) {
-        Text(icon, style = MaterialTheme.typography.titleSmall)
+        Text(icon, style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -16182,17 +16235,23 @@ private fun ComposerBar(
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     var rememberedInputPaneHeightPx by remember { mutableStateOf(0) }
-    LaunchedEffect(imeBottomPx) {
-        if (imeBottomPx > 0) rememberedInputPaneHeightPx = imeBottomPx
+    LaunchedEffect(imeBottomPx, composerEmojiPickerOpen) {
+        if (!composerEmojiPickerOpen && imeBottomPx > 0) {
+            rememberedInputPaneHeightPx = imeBottomPx
+        }
     }
     val inlineEmojiPaneHeight =
-        if (composerEmojiSearchActive) {
-            148.dp
-        } else {
-            with(density) {
-                val fallback = (LocalConfiguration.current.screenHeightDp * 0.38f).dp.roundToPx()
-                maxOf(rememberedInputPaneHeightPx, fallback).toDp()
-            }
+        with(density) {
+            val fallback = (LocalConfiguration.current.screenHeightDp * 0.38f).dp.roundToPx()
+            val fullHeight = maxOf(rememberedInputPaneHeightPx, fallback)
+            val searchHeight = 156.dp.roundToPx()
+            val targetHeight =
+                if (composerEmojiSearchActive && imeBottomPx > 0) {
+                    searchHeight
+                } else {
+                    fullHeight
+                }
+            targetHeight.toDp()
         }
     var keyboardSwitchPending by remember { mutableStateOf(false) }
     LaunchedEffect(composerEmojiPickerOpen) {
