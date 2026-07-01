@@ -270,6 +270,87 @@ class ChatListProjectionReducerTest {
         assertTrue(item.group.pendingConfirmation)
     }
 
+    @Test
+    fun activitySignalOverridesStaleLastMessagePreviewAndSortTime() {
+        // A membership/admin commit can arrive as a chat-list MEMBERSHIP_CHANGED
+        // row while Marmot's last-message projection still points at the prior
+        // content message. The reducer must surface the explicit activity signal
+        // instead of leaving the row preview/sort position stale.
+        val item =
+            chatListItemFromProjection(
+                row(
+                    groupId = "g1",
+                    rawTitle = "Ops",
+                    preview = preview(plaintext = "old content", kind = 9uL, timelineAt = 10uL),
+                    updatedAt = 40uL,
+                ),
+                activitySignal =
+                    ChatListActivitySignal(
+                        plaintext = """{"system_type":"admin_added","data":{"actor":"alice","subject":"bob"}}""",
+                        structured = null,
+                        timelineAt = 40uL,
+                        messageIdHex = "sys-1",
+                    ),
+            )
+
+        assertEquals(40uL, item.latestAt)
+        assertEquals("Someone was made an admin", item.projectedPreviewText())
+        assertTrue(item.hasUnread)
+        assertEquals(1uL, item.effectiveUnreadCount(activeAccountIdHex = "me"))
+    }
+
+    @Test
+    fun activitySignalDoesNotResurrectOldUnreadAfterItIsClearedFromRemovedGroup() {
+        val me = "me-acc"
+        val item =
+            chatListItemFromProjection(
+                row(groupId = "g1", rawTitle = "Ops", unreadCount = 7uL, hasUnread = true),
+                group = group(name = "Ops"),
+                activeAccountIdHex = me,
+                members = listOf(member(me, local = true)),
+                removed = true,
+            )
+
+        assertEquals(0uL, item.effectiveUnreadCount(me))
+    }
+
+    @Test
+    fun activitySignalOnRemovedGroupUsesOnlySignalUnreadCount() {
+        val me = "me-acc"
+        val item =
+            chatListItemFromProjection(
+                row(groupId = "g1", rawTitle = "Ops", unreadCount = 7uL, hasUnread = true),
+                group = group(name = "Ops"),
+                activeAccountIdHex = me,
+                members = listOf(member(me, local = true)),
+                removed = true,
+                activitySignal = ChatListActivitySignal(plaintext = null, structured = null, timelineAt = 40uL, messageIdHex = null),
+            )
+
+        assertEquals(1uL, item.effectiveUnreadCount(me))
+        assertTrue(item.effectiveHasUnread(me))
+    }
+
+    @Test
+    fun reconcileActivitySignalsDropsRowsCaughtUpBySnapshot() {
+        val signals =
+            mapOf(
+                "caught-up" to ChatListActivitySignal(plaintext = null, structured = null, timelineAt = 40uL, messageIdHex = "sys-1"),
+                "still-stale" to ChatListActivitySignal(plaintext = null, structured = null, timelineAt = 40uL, messageIdHex = "sys-2"),
+                "missing-row" to ChatListActivitySignal(plaintext = null, structured = null, timelineAt = 40uL, messageIdHex = "sys-3"),
+            )
+        val rows =
+            mapOf(
+                "caught-up" to row(groupId = "caught-up", rawTitle = "Ops", preview = preview(timelineAt = 40uL)),
+                "still-stale" to row(groupId = "still-stale", rawTitle = "Ops", preview = preview(timelineAt = 39uL)),
+            )
+
+        assertEquals(
+            mapOf("still-stale" to signals.getValue("still-stale")),
+            reconcileActivitySignalsWithChatRows(rows, signals),
+        )
+    }
+
     // ---- chatRowPreviewMarkdownSource predicate -----------------------------
 
     @Test
