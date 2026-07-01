@@ -186,6 +186,7 @@ data class ChatListItem(
      */
     fun effectiveUnreadCount(activeAccountIdHex: String?): ULong =
         when {
+            activitySignal != null && removedFromGroup(activeAccountIdHex) -> 1uL
             activitySignal != null -> unreadCount.takeIf { it > 0uL } ?: 1uL
             removedFromGroup(activeAccountIdHex) -> 0uL
             else -> unreadCount
@@ -1128,6 +1129,16 @@ data class ChatListActivitySignal(
             ?: copy.groupSystem.fallback
 }
 
+internal fun reconcileActivitySignalsWithChatRows(
+    rowsByGroup: Map<String, ChatListRowFfi>,
+    signalsByGroup: Map<String, ChatListActivitySignal>,
+): Map<String, ChatListActivitySignal> =
+    signalsByGroup.filter { (key, signal) ->
+        val row = rowsByGroup[key] ?: return@filter false
+        val projectedLastAt = row.lastMessage?.timelineAt ?: return@filter true
+        projectedLastAt < signal.timelineAt
+    }
+
 class ChatsController(
     private val appState: WhiteNoiseAppState,
 ) {
@@ -1656,6 +1667,7 @@ class ChatsController(
                     )
                 }
         }.onFailure { throwable ->
+            if (throwable is CancellationException) throw throwable
             chatsDebug(throwable) {
                 "membership activity lookup failed account=${account.take(8)} group=${row.groupIdHex.take(8)}: " +
                     (throwable.message ?: throwable.javaClass.simpleName)
@@ -1666,6 +1678,7 @@ class ChatsController(
     private fun replaceChatRows(rows: List<ChatListRowFfi>) {
         chatRowsByGroup.clear()
         rows.forEach { row -> chatRowsByGroup[chatRowKey(row.groupIdHex)] = row }
+        activitySignalsByGroup = reconcileActivitySignalsWithChatRows(chatRowsByGroup, activitySignalsByGroup)
     }
 
     private fun removeChatRow(groupIdHex: String) {
