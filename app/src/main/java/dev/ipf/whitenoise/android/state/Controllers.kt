@@ -715,7 +715,6 @@ internal fun failedOptimisticMessageIdForInvalidatedProjection(
             if (optimistic.record.groupIdHex != projected.groupIdHex) return@firstOrNull false
             if (optimistic.record.sender != projected.sender) return@firstOrNull false
             if (optimistic.record.kind != projected.kind) return@firstOrNull false
-            if (!timestampsAreNear(optimistic.record.recordedAt, projected.recordedAt)) return@firstOrNull false
             optimistic.record.plaintext == projected.plaintext &&
                 optimistic.record.tags.filterNot { it.values.firstOrNull() == "p" } ==
                 projected.tags.filterNot { it.values.firstOrNull() == "p" }

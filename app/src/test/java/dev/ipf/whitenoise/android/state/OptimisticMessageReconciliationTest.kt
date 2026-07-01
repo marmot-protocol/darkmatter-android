@@ -111,13 +111,19 @@ class OptimisticMessageReconciliationTest {
 
     @Test
     fun invalidatedProjectionMatchesRetainedFailedOptimisticSend() {
-        val failed = timelineMessage("temp", MessageStatus.Failed, plaintext = "never reached")
+        val failed =
+            timelineMessage(
+                "temp",
+                MessageStatus.Failed,
+                plaintext = "never reached",
+                recordedAt = 1uL,
+            )
 
         assertEquals(
             "temp",
             failedOptimisticMessageIdForInvalidatedProjection(
                 listOf(failed),
-                message("invalidated", plaintext = "never reached"),
+                message("invalidated", plaintext = "never reached", recordedAt = 99uL),
             ),
         )
     }
