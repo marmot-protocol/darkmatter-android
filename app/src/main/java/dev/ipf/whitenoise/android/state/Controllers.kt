@@ -743,7 +743,6 @@ private fun messagesHaveSameRenderableSendShape(
     if (left.groupIdHex != right.groupIdHex) return false
     if (left.sender != right.sender) return false
     if (left.kind != right.kind) return false
-    if (!timestampsAreNear(left.recordedAt, right.recordedAt)) return false
     return left.plaintext == right.plaintext &&
         left.tags.filterNot { it.values.firstOrNull() == "p" } ==
         right.tags.filterNot { it.values.firstOrNull() == "p" }
@@ -4116,6 +4115,8 @@ class ConversationController(
                         localTimelineTimestampOverrides[committedProjection.messageIdHex],
                     )
                 messageById[committedProjection.messageIdHex] = projectedRecord
+                invalidatedProjectionIdsMatchingMessage(timelineRecords, projectedRecord)
+                    .forEach(::removeProjectedRecord)
                 if (discardedDuringRetry.remove(key)) {
                     publishTimelineFromIndexes()
                     return

@@ -128,6 +128,7 @@ class OptimisticMessageReconciliationTest {
             timelineRecord(
                 messageIdHex = "invalidated",
                 plaintext = "retry cleaned me up",
+                recordedAt = 99uL,
                 invalidationStatus = "LosingBranch",
             )
         val unrelated =
