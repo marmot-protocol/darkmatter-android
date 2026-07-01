@@ -265,6 +265,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -7761,11 +7762,25 @@ private fun DaySeparator(label: String) {
  */
 @Composable
 private fun GroupSystemRow(
-    record: AppMessageRecordFfi,
+    item: TimelineMessage,
     appState: WhiteNoiseAppState,
     groupSystem: GroupSystemEventFfi? = null,
+    isActionMenuOpen: Boolean = false,
+    onActionMenuOpenChange: (Boolean) -> Unit = {},
+    onReply: () -> Unit = {},
+    readOnly: Boolean = false,
 ) {
+    val record = item.record
     val copy = rememberGroupSystemCopy()
+    val clipboard = LocalClipboardManager.current
+    val haptics = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    var longPressWindowY by remember { mutableStateOf<Float?>(null) }
+    var swipeDrag by remember(record.messageIdHex) { mutableStateOf(0f) }
+    var infoSheetOpen by remember(record.messageIdHex) { mutableStateOf(false) }
+    val animatedSwipeOffset by animateFloatAsState(targetValue = swipeDrag, label = "systemReplySwipeOffset")
+    val replySwipeThresholdPx = with(density) { 64.dp.toPx() }
+    val maxSwipeOffsetPx = with(density) { 72.dp.toPx() }
     val event =
         remember(record.plaintext, groupSystem) {
             GroupSystemEvents.resolve(record.plaintext, groupSystem)
@@ -7791,25 +7806,107 @@ private fun GroupSystemRow(
         } else {
             copy.fallback
         }
+
+    fun beginReply() {
+        if (readOnly) return
+        onActionMenuOpenChange(false)
+        onReply()
+    }
+
+    fun copySummary() {
+        clipboard.setText(AnnotatedString(summary))
+        appState.present(R.string.copied)
+        onActionMenuOpenChange(false)
+    }
     Column(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp),
+                .padding(vertical = 6.dp)
+                .pointerInput(record.messageIdHex, replySwipeThresholdPx, maxSwipeOffsetPx, readOnly) {
+                    if (readOnly) return@pointerInput
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            val next = ReplySwipe.visualOffset(swipeDrag + dragAmount, maxSwipeOffsetPx)
+                            if (next != swipeDrag || dragAmount > 0f) change.consume()
+                            swipeDrag = next
+                        },
+                        onDragEnd = {
+                            if (ReplySwipe.shouldTriggerReply(swipeDrag, totalY = 0f, threshold = replySwipeThresholdPx)) {
+                                beginReply()
+                            }
+                            swipeDrag = 0f
+                        },
+                        onDragCancel = { swipeDrag = 0f },
+                    )
+                },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = summary,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+        Box(
             modifier =
                 Modifier
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
-                    ).padding(horizontal = 10.dp, vertical = 4.dp),
-        )
+                    .offset { IntOffset(animatedSwipeOffset.roundToInt(), 0) }
+                    .onGloballyPositioned { coordinates ->
+                        longPressWindowY = coordinates.boundsInWindow().top
+                    },
+        ) {
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier =
+                    Modifier
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(12.dp),
+                        ).combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                if (!readOnly) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onActionMenuOpenChange(true)
+                                }
+                            },
+                        ).padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+            MessageActionMenu(
+                expanded = isActionMenuOpen,
+                anchorWindowYPx = longPressWindowY,
+                alignEnd = false,
+                canReply = !readOnly,
+                canReact = false,
+                canDelete = false,
+                canEdit = false,
+                canForward = false,
+                quickReactionEmojis = emptyList(),
+                onDismissRequest = { onActionMenuOpenChange(false) },
+                onReact = {},
+                onOpenEmojiPicker = {},
+                onReply = ::beginReply,
+                onEdit = {},
+                onForward = {},
+                onCopyText = ::copySummary,
+                onInfo = {
+                    onActionMenuOpenChange(false)
+                    infoSheetOpen = true
+                },
+                onDelete = {},
+            )
+        }
+        if (infoSheetOpen) {
+            MessageInfoSheet(
+                item = item,
+                mine = MessageProjector.isMine(record, appState.activeAccount?.accountIdHex),
+                senderDisplayName = appState.displayName(record.sender),
+                senderNpub = appState.npub(record.sender),
+                onDismissRequest = { infoSheetOpen = false },
+                onCopy = { value ->
+                    clipboard.setText(AnnotatedString(value))
+                    appState.present(R.string.copied)
+                },
+            )
+        }
         // Developer-mode only: keep the one-line summary as the default and tuck
         // the MLS commit dump behind a per-row tap (#857). Saveable row-keyed UI
         // state lets an expanded row survive lazy-list disposal without leaking to others.
@@ -10216,9 +10313,15 @@ private fun ConversationScreen(
                                 when (timelineRowKind(item.record, appState.streamingDebugEnabled)) {
                                     TimelineRowKind.GroupSystem -> {
                                         GroupSystemRow(
-                                            record = item.record,
+                                            item = item,
                                             appState = appState,
                                             groupSystem = item.projected?.groupSystem,
+                                            isActionMenuOpen = openActionMenuId == item.record.messageIdHex,
+                                            onActionMenuOpenChange = { open ->
+                                                openActionMenuId = if (open) item.record.messageIdHex else null
+                                            },
+                                            onReply = { controller.replyingTo = item.record },
+                                            readOnly = controller.group.pendingConfirmation,
                                         )
                                         return@itemsIndexed
                                     }

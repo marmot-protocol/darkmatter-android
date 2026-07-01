@@ -150,6 +150,29 @@ class MessageProjectorTest {
     }
 
     @Test
+    fun displayBodyUsesGroupSystemSummaryForReplyPreviews() {
+        val memberAdded =
+            message(
+                id = "system-member-added",
+                plaintext = """{"v":1,"system_type":"member_added","data":{"subject":"bob"}}""",
+                kind = 1210uL,
+            )
+        val rename =
+            message(
+                id = "system-rename",
+                plaintext =
+                    """{"v":1,"system_type":"group_renamed","data":{"name":"Marmot Protocol","old_name":"Marmot Lab"}}""",
+                kind = 1210uL,
+            )
+
+        assertEquals("Someone was added", MessageProjector.displayBody(memberAdded))
+        assertEquals(
+            "The group was renamed from “Marmot Lab” to “Marmot Protocol”",
+            MessageProjector.displayBody(rename),
+        )
+    }
+
+    @Test
     fun previewTextRecognizesStreamStartAndFinalMessages() {
         val start =
             message(
