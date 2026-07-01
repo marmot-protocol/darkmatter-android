@@ -133,9 +133,11 @@ class LocalNotificationPresenter(
                 .setSmallIcon(R.drawable.ic_stat_whitenoise)
                 .setContentIntent(conversationPendingIntent(update, notificationContent.notificationTag))
                 .setCategory(decision.category)
+                .setPriority(decision.importance.toCompatPriority())
                 .setWhen(update.timestampMs)
                 .setShowWhen(true)
                 .setAutoCancel(true)
+                .setOnlyAlertOnce(false)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setPublicVersion(redactedPublicVersion(decision.channelId, decision.category))
                 .setSilent(false)
@@ -199,6 +201,13 @@ class LocalNotificationPresenter(
         }
         return true
     }
+
+    private fun ChannelImportance.toCompatPriority(): Int =
+        when (this) {
+            ChannelImportance.HIGH -> NotificationCompat.PRIORITY_HIGH
+            ChannelImportance.DEFAULT -> NotificationCompat.PRIORITY_DEFAULT
+            ChannelImportance.LOW -> NotificationCompat.PRIORITY_LOW
+        }
 
     // Shown in place of the real card whenever the lockscreen redacts private
     // notifications. The OS can auto-generate one, but that behaviour varies by

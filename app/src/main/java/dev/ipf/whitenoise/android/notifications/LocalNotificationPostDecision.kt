@@ -9,6 +9,7 @@ internal const val CARRIED_NOTIFICATION_MESSAGE_HISTORY_CAP = MAX_NOTIFICATION_M
 
 internal data class NotificationPostDecision(
     val channelId: String,
+    val importance: ChannelImportance,
     val category: String,
     val style: NotificationStyleChoice,
     val actions: List<NotificationActionKind>,
@@ -45,6 +46,7 @@ internal fun decideNotificationPost(
 
     return NotificationPostDecision(
         channelId = spec.id,
+        importance = spec.importance,
         category = categoryFor(update.trigger),
         style = style,
         actions =

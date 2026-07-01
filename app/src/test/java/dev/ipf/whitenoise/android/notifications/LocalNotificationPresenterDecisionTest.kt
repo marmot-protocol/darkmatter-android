@@ -93,17 +93,20 @@ class LocalNotificationPresenterDecisionTest {
         val updatesWithExpectedChannels =
             listOf(
                 update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = true) to
-                    NotificationChannelSpec.DIRECT_MESSAGES.id,
+                    NotificationChannelSpec.DIRECT_MESSAGES,
                 update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false) to
-                    NotificationChannelSpec.GROUP_MESSAGES.id,
+                    NotificationChannelSpec.GROUP_MESSAGES,
                 update(trigger = NotificationTriggerFfi.NEW_MESSAGE, isDm = false, reactionEmoji = "❤️") to
-                    NotificationChannelSpec.REACTIONS.id,
+                    NotificationChannelSpec.REACTIONS,
                 update(trigger = NotificationTriggerFfi.GROUP_INVITE) to
-                    NotificationChannelSpec.INVITES.id,
+                    NotificationChannelSpec.INVITES,
             )
 
-        updatesWithExpectedChannels.forEach { (update, expectedChannelId) ->
-            assertEquals(expectedChannelId, decision(update)?.channelId)
+        updatesWithExpectedChannels.forEach { (update, expectedSpec) ->
+            val decision = decision(update)
+
+            assertEquals(expectedSpec.id, decision?.channelId)
+            assertEquals(expectedSpec.importance, decision?.importance)
         }
     }
 
