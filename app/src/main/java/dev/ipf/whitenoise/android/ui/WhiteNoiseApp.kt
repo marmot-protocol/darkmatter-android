@@ -10096,10 +10096,13 @@ private fun ConversationScreen(
                                             // leave until they transfer admin; route
                                             // them to the transfer flow instead of
                                             // the old leaveGroup() toast dead end.
-                                            if (controller.isSoleAdminWithOtherMembers) {
-                                                showTransferAdminFirst = true
-                                            } else {
-                                                confirmLeaveFromTopBar = true
+                                            appState.launchMutation {
+                                                when (controller.leaveAction()) {
+                                                    LeaveAction.SoleAdminMustTransfer -> showTransferAdminFirst = true
+                                                    LeaveAction.SoleMemberDeletesGroup,
+                                                    LeaveAction.Standard,
+                                                    -> confirmLeaveFromTopBar = true
+                                                }
                                             }
                                         },
                                     )
@@ -11114,12 +11117,14 @@ private fun GroupDetailsScreen(
     // is resolved here (not in the dialog) so the variants read the same title.
     fun requestLeave(displayName: String) {
         controller.clearLastMutationError()
-        pendingConfirm =
-            when (GroupProjector.leaveAction(controller.group, appState.activeAccount?.accountIdHex, controller.members.size)) {
-                LeaveAction.SoleMemberDeletesGroup -> DetailsConfirm.LeaveSoleMember(displayName)
-                LeaveAction.SoleAdminMustTransfer -> DetailsConfirm.LeaveSoleAdmin(displayName)
-                LeaveAction.Standard -> DetailsConfirm.Leave(displayName)
-            }
+        appState.launchMutation {
+            pendingConfirm =
+                when (controller.leaveAction()) {
+                    LeaveAction.SoleMemberDeletesGroup -> DetailsConfirm.LeaveSoleMember(displayName)
+                    LeaveAction.SoleAdminMustTransfer -> DetailsConfirm.LeaveSoleAdmin(displayName)
+                    LeaveAction.Standard -> DetailsConfirm.Leave(displayName)
+                }
+        }
     }
 
     fun exportTranscript() {
