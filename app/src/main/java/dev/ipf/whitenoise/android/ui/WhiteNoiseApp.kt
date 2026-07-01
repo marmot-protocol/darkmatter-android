@@ -2764,7 +2764,10 @@ private fun RecipientSearchResults(
     // accessors used inside deriveRecipientCandidates (displayName/npub) read
     // through the profile cache, so a name that resolves a beat after the
     // roster lands repaints the list via the profile-revision recomposition.
-    val candidates = deriveRecipientCandidates(appState, activeAccountIdHex)
+    val candidates =
+        remember(appState.chatListItems, activeAccountIdHex, appState.profileRevisionForCompose) {
+            deriveRecipientCandidates(appState, activeAccountIdHex)
+        }
     val matches =
         RecipientSearch.browse(
             query = query,
