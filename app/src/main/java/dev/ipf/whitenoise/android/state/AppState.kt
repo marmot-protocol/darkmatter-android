@@ -1144,6 +1144,70 @@ class WhiteNoiseAppState(
         }
     }
 
+    fun profileAddableGroups(accountIdHex: String): List<ChatListItem> =
+        chatsController?.profileAddableGroups(accountIdHex, activeAccount?.accountIdHex).orEmpty()
+
+    /**
+     * Add one viewed profile to one or more selected groups. The profile sheet
+     * does the eligibility filtering (admin-only, not already a member); this
+     * method keeps the commit-producing calls serialized per group and surfaces
+     * a single result toast after the fan-out completes.
+     */
+    suspend fun inviteProfileToGroups(
+        targetRef: String,
+        targetGroupIds: List<String>,
+    ): Boolean {
+        val ref = targetRef.trim().takeIf { it.isNotEmpty() } ?: return false
+        val targets =
+            targetGroupIds
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinctBy { it.lowercase() }
+        if (targets.isEmpty()) return false
+        val account = activeAccountRef ?: return false
+        var failures = 0
+        var firstFailure: AppText? = null
+        for (groupIdHex in targets) {
+            runCatching {
+                withGroupCommitLock(account, groupIdHex) {
+                    val result =
+                        marmotIo {
+                            inviteMembersDetailed(account, groupIdHex, listOf(ref))
+                        }
+                    chatsController?.applyProfileGroupDetails(account, result.details)
+                }
+            }.onFailure { error ->
+                rethrowIfCancellation(error)
+                failures += 1
+                if (firstFailure == null) {
+                    val message = error.readableMessage()
+                    firstFailure =
+                        if (isDuplicateSignatureKeyError(message)) {
+                            AppText.Resource(
+                                R.string.toast_couldnt_add_member_duplicate_detail,
+                                listOf(displayName(ref)),
+                            )
+                        } else {
+                            AppText.Plain(message)
+                        }
+                }
+            }
+        }
+        val delivered = targets.size - failures
+        when {
+            failures == 0 && targets.size == 1 -> present(R.string.toast_invite_sent)
+            failures == 0 -> present(R.string.toast_invites_sent_to_groups)
+            delivered == 0 ->
+                present(R.string.toast_couldnt_add_members, firstFailure ?: AppText.Plain(""))
+            else ->
+                present(
+                    R.string.toast_invites_sent_to_groups_partial,
+                    firstFailure ?: AppText.Plain(""),
+                )
+        }
+        return delivered > 0
+    }
+
     fun sharedGroupsWith(accountIdHex: String): List<ChatListItem> = chatsController?.sharedGroupsWith(accountIdHex, activeAccount?.accountIdHex).orEmpty()
 
     /**

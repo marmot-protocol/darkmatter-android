@@ -406,6 +406,26 @@ internal fun sharedChatListItemsWith(
         }.distinctBy { it.group.groupIdHex.lowercase() }
 }
 
+internal fun profileAddableGroupItems(
+    items: Iterable<ChatListItem>,
+    targetAccountIdHex: String,
+    activeAccountIdHex: String?,
+): List<ChatListItem> {
+    val active = activeAccountIdHex?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+    val target = targetAccountIdHex.trim().takeIf { it.isNotEmpty() } ?: return emptyList()
+    if (active.equals(target, ignoreCase = true)) return emptyList()
+    return items
+        .filter { item ->
+            val snapshot = item.memberSnapshot ?: return@filter false
+            !item.group.pendingConfirmation &&
+                !item.removedFromGroup(active) &&
+                !GroupProjector.isDm(item.memberCount, item.group.name) &&
+                GroupProjector.isAdminRef(item.group, active) &&
+                snapshot.containsAccount(active) &&
+                !snapshot.containsAccount(target)
+        }.distinctBy { it.group.groupIdHex.lowercase() }
+}
+
 enum class MessageStatus {
     Received,
     Pending,
@@ -1388,6 +1408,20 @@ class ChatsController(
         foldGroup(record)
     }
 
+    fun applyProfileGroupDetails(
+        account: String,
+        details: GroupDetailsFfi,
+    ) {
+        if (accountRef == null) return
+        val applied = applyAuthoritativeGroupDetails(details)
+        val groupIdHex = applied.group.groupIdHex
+        if (groupRecordsById[groupIdHex] == null && !chatRowsByGroup.containsKey(chatRowKey(groupIdHex))) return
+        memberCacheByGroup = memberCacheByGroup + (groupIdHex to applied.members)
+        appState.cacheGroupMemberSnapshot(account, groupIdHex, applied.members)
+        appState.requestProfiles(applied.members.map { it.memberIdHex })
+        applyLocalGroupUpdate(applied.group)
+    }
+
     // Project every current chat row into a ChatListItem. Reads chatRows (kept
     // current by the bind loop even when recompute is deferred behind an open
     // conversation, #6), so on-demand callers — shared groups, DM lookup,
@@ -1438,6 +1472,16 @@ class ChatsController(
             }.map { projectChatRow(it, activeAccountIdHex) }
             .toList()
     }
+
+    fun profileAddableGroups(
+        targetAccountIdHex: String,
+        activeAccountIdHex: String?,
+    ): List<ChatListItem> =
+        profileAddableGroupItems(
+            currentProjectedItems(activeAccountIdHex),
+            targetAccountIdHex,
+            activeAccountIdHex,
+        )
 
     /**
      * The confirmed 1:1 DM with [reference] (npub or hex), or null. A 1:1 is a
