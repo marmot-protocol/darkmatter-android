@@ -96,6 +96,33 @@ class OptimisticMessageReconciliationTest {
     }
 
     @Test
+    fun delayedProjectionReconcilesFailedOptimisticSend() {
+        val failed = timelineMessage("temp", MessageStatus.Failed, plaintext = "eventually sent")
+
+        assertEquals(
+            "temp",
+            optimisticMessageIdForProjection(
+                listOf(failed),
+                message("confirmed", plaintext = "eventually sent"),
+                allowDelayedProjection = true,
+            ),
+        )
+    }
+
+    @Test
+    fun invalidatedProjectionMatchesRetainedFailedOptimisticSend() {
+        val failed = timelineMessage("temp", MessageStatus.Failed, plaintext = "never reached")
+
+        assertEquals(
+            "temp",
+            failedOptimisticMessageIdForInvalidatedProjection(
+                listOf(failed),
+                message("invalidated", plaintext = "never reached"),
+            ),
+        )
+    }
+
+    @Test
     fun historicalMatchingMessageIsNotReconciled() {
         val pending = timelineMessage("temp", MessageStatus.Pending)
 

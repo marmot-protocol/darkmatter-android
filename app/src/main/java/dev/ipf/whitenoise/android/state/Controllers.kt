@@ -667,7 +667,10 @@ internal fun optimisticMessageIdForProjection(
     }
     return optimisticMessages
         .firstOrNull { optimistic ->
-            val sendable = optimistic.status == MessageStatus.Pending || optimistic.status == MessageStatus.Sent
+            val sendable =
+                optimistic.status == MessageStatus.Pending ||
+                    optimistic.status == MessageStatus.Sent ||
+                    (allowDelayedProjection && optimistic.status == MessageStatus.Failed)
             if (!sendable) return@firstOrNull false
             if (optimistic.record.direction != projected.direction) return@firstOrNull false
             if (optimistic.record.groupIdHex != projected.groupIdHex) return@firstOrNull false
@@ -700,6 +703,24 @@ internal fun optimisticMessageIdForProjection(
         }?.record
         ?.messageIdHex
 }
+
+internal fun failedOptimisticMessageIdForInvalidatedProjection(
+    optimisticMessages: Collection<TimelineMessage>,
+    projected: AppMessageRecordFfi,
+): String? =
+    optimisticMessages
+        .firstOrNull { optimistic ->
+            if (optimistic.status != MessageStatus.Failed) return@firstOrNull false
+            if (optimistic.record.direction != projected.direction) return@firstOrNull false
+            if (optimistic.record.groupIdHex != projected.groupIdHex) return@firstOrNull false
+            if (optimistic.record.sender != projected.sender) return@firstOrNull false
+            if (optimistic.record.kind != projected.kind) return@firstOrNull false
+            if (!timestampsAreNear(optimistic.record.recordedAt, projected.recordedAt)) return@firstOrNull false
+            optimistic.record.plaintext == projected.plaintext &&
+                optimistic.record.tags.filterNot { it.values.firstOrNull() == "p" } ==
+                projected.tags.filterNot { it.values.firstOrNull() == "p" }
+        }?.record
+        ?.messageIdHex
 
 /**
  * Find a projected timeline row that matches [optimistic] and is committed locally
@@ -5131,9 +5152,15 @@ class ConversationController(
                 return draftAction
             }
         }
+        val actionRecord = draftAction
+        if (
+            record.invalidationStatus != null &&
+            failedOptimisticMessageIdForInvalidatedProjection(optimisticMessages.values, actionRecord) != null
+        ) {
+            return actionRecord
+        }
         timelineRecords[record.messageIdHex] = record
         projectedMessageIds.add(record.messageIdHex)
-        val actionRecord = draftAction
         preserveOptimisticDisplayPosition(record.messageIdHex, record.messageIdHex)
         optimisticMessageIdForProjection(
             optimisticMessages.values,
