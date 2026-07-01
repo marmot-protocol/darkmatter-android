@@ -4227,6 +4227,11 @@ private val COMPOSER_SNACKBAR_INSET = 72.dp
 // snackbar reads as sitting *above* the FAB, per Material guidance.
 private val FAB_SNACKBAR_INSET = 80.dp
 
+// Android 12+ shows clipboard-access toasts in the bottom transient-overlay
+// band, roughly 64-80dp above the navigation inset. Keep primary form actions
+// above that band so a paste-triggered OS toast can't cover the next button.
+private val SYSTEM_TOAST_ACTION_CLEARANCE = 80.dp
+
 // Chat-list jump-to-top FAB thresholds (issue #413). The button shows once the
 // first visible row index reaches SHOW, and only hides again once it falls back
 // to HIDE — the 3–4 dead band gives hysteresis so a quick scroll wiggle near
@@ -10573,15 +10578,38 @@ private fun EmptyGroupConversation(onAddMembers: () -> Unit) {
 /**
  * Bottom action rail for form screens whose primary action must remain tappable
  * while a text field owns the IME. The scrollable content lives above this in the
- * Scaffold body; this bar follows navigation/IME insets like the composer.
+ * Scaffold body; this bar follows navigation/IME insets like the composer and
+ * reserves the Android transient-toast band below the primary action.
  */
 @Composable
 internal fun StickyFormActionBar(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val snackbarBottomInset = LocalSnackbarBottomInset.current
+    val density = LocalDensity.current
+    var actionBarHeight by remember { mutableStateOf(0.dp) }
+    DisposableEffect(actionBarHeight, snackbarBottomInset) {
+        if (actionBarHeight <= 0.dp) {
+            onDispose { }
+        } else {
+            val previousInset = snackbarBottomInset.value
+            if (actionBarHeight > previousInset) {
+                snackbarBottomInset.value = actionBarHeight
+            }
+            onDispose {
+                if (snackbarBottomInset.value == actionBarHeight) {
+                    snackbarBottomInset.value = previousInset
+                }
+            }
+        }
+    }
+
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .onSizeChanged { size -> actionBarHeight = with(density) { size.height.toDp() } },
         border = amoledSurfaceBorderStroke(),
         tonalElevation = 3.dp,
     ) {
@@ -10591,7 +10619,12 @@ internal fun StickyFormActionBar(
                     .fillMaxWidth()
                     .navigationBarsPadding()
                     .imePadding()
-                    .padding(horizontal = Dimens.spaceLg, vertical = Dimens.spaceMd),
+                    .padding(
+                        start = Dimens.spaceLg,
+                        top = Dimens.spaceMd,
+                        end = Dimens.spaceLg,
+                        bottom = Dimens.spaceMd + SYSTEM_TOAST_ACTION_CLEARANCE,
+                    ),
             horizontalArrangement = Arrangement.spacedBy(Dimens.spaceMd),
             verticalAlignment = Alignment.CenterVertically,
             content = content,
@@ -11452,6 +11485,16 @@ private fun GroupDetailsScreen(
     }
 
     if (showAddMember) {
+        // Pre-check membership against the group's own roster (#899): if the
+        // resolved pubkey is already a member, MLS would reject the add commit
+        // with a raw DuplicateSignatureKey enum path. Say so inline on the
+        // resolved card and disable Add, rather than firing a doomed invite and
+        // surfacing the backend string.
+        val alreadyMember =
+            groupContainsResolvedMember(
+                memberHexes = controller.members.map { it.memberIdHex },
+                resolvedHex = pendingMemberPreview.resolvedHex,
+            )
         ModalBottomSheet(
             modifier = amoledModalSheetModifier(),
             onDismissRequest = {
@@ -11462,142 +11505,141 @@ private fun GroupDetailsScreen(
                 pendingMemberAsAdmin = false
             },
         ) {
-            Column(
-                Modifier.fillMaxWidth().padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(stringResource(R.string.add_member), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(
-                    value = pendingMember,
-                    onValueChange = {
-                        pendingMember = it
-                        pendingMemberError = null
-                    },
-                    label = { Text(stringResource(R.string.npub_or_public_key)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    isError = pendingMemberError != null,
-                    supportingText =
-                        pendingMemberError?.let { message ->
-                            { Text(message) }
+            Column(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 24.dp, top = 24.dp, end = 24.dp)
+                        .padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(stringResource(R.string.add_member), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(
+                        value = pendingMember,
+                        onValueChange = {
+                            pendingMember = it
+                            pendingMemberError = null
                         },
-                    trailingIcon = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            PublicIdentifierFieldTrailingAction(
-                                value = pendingMember,
-                                enabled = activeMutation == null && !controller.mutationInFlight,
-                                onValueChange = {
-                                    pendingMember = it
+                        label = { Text(stringResource(R.string.npub_or_public_key)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = pendingMemberError != null,
+                        supportingText =
+                            pendingMemberError?.let { message ->
+                                { Text(message) }
+                            },
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                PublicIdentifierFieldTrailingAction(
+                                    value = pendingMember,
+                                    enabled = activeMutation == null && !controller.mutationInFlight,
+                                    onValueChange = {
+                                        pendingMember = it
+                                        pendingMemberError = null
+                                    },
+                                )
+                                IconButton(onClick = { showMemberScanner = true }) {
+                                    Icon(Icons.Default.QrCodeScanner, contentDescription = stringResource(R.string.scan_member_qr_code))
+                                }
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                    )
+                    // Resolved profile preview so the admin can confirm they're
+                    // inviting the right person before history is shared with them
+                    // (#631).
+                    RecipientPreviewCard(
+                        input = pendingMember,
+                        appState = appState,
+                        onResolutionChanged = { pendingMemberPreview = it },
+                    )
+                    if (alreadyMember) {
+                        val alreadyName =
+                            pendingMemberPreview.resolvedHex?.let { appState.displayName(it) }.orEmpty()
+                        Text(
+                            stringResource(R.string.add_member_already_in_group, alreadyName),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    // Plain-text name search over local chat-list contacts.
+                    // The Create Group flow keeps every row addable (tapping fills
+                    // the npub into the field), but still shows the "Already in
+                    // chats" badge — it does NOT offer "Open existing chat".
+                    RecipientSearchResults(
+                        query = pendingMember,
+                        appState = appState,
+                        onSelect = { candidate ->
+                            pendingMember = candidate.npub
+                            pendingMemberError = null
+                        },
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.add_as_admin), style = MaterialTheme.typography.bodyLarge)
+                        Switch(
+                            checked = pendingMemberAsAdmin,
+                            onCheckedChange = { pendingMemberAsAdmin = it },
+                            enabled = activeMutation == null && !controller.mutationInFlight,
+                        )
+                    }
+                }
+                StickyFormActionBar {
+                    Button(
+                        onClick = {
+                            // Prefer the key the preview card resolved (#631): it
+                            // carries a resolved NIP-05, which RecipientReference
+                            // .normalize can't parse. Fall back to normalize for
+                            // the npub/hex direct-entry path.
+                            val ref =
+                                pendingMemberPreview.resolvedHex
+                                    ?: RecipientReference.normalize(pendingMember)
+                            if (ref == null) {
+                                pendingMemberError = oneValidMemberReferenceError
+                                return@Button
+                            }
+                            pendingMemberError = null
+                            runGroupMutation(
+                                action = GroupMutationAction.InviteMember,
+                                mutation = { controller.inviteMembers(listOf(ref), addAsAdmin = pendingMemberAsAdmin) },
+                                target = ref,
+                                onSuccess = {
+                                    pendingMember = ""
+                                    pendingMemberAsAdmin = false
                                     pendingMemberError = null
+                                    pendingInvites = (pendingInvites + ref).distinct()
+                                    showAddMember = false
                                 },
                             )
-                            IconButton(onClick = { showMemberScanner = true }) {
-                                Icon(Icons.Default.QrCodeScanner, contentDescription = stringResource(R.string.scan_member_qr_code))
-                            }
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-                )
-                // Resolved profile preview so the admin can confirm they're
-                // inviting the right person before history is shared with them
-                // (#631).
-                RecipientPreviewCard(
-                    input = pendingMember,
-                    appState = appState,
-                    onResolutionChanged = { pendingMemberPreview = it },
-                )
-                // Pre-check membership against the group's own roster (#899):
-                // if the resolved pubkey is already a member, MLS would reject
-                // the add commit with a raw DuplicateSignatureKey enum path. Say
-                // so inline on the resolved card and disable Add, rather than
-                // firing a doomed invite and surfacing the backend string.
-                val alreadyMember =
-                    groupContainsResolvedMember(
-                        memberHexes = controller.members.map { it.memberIdHex },
-                        resolvedHex = pendingMemberPreview.resolvedHex,
-                    )
-                if (alreadyMember) {
-                    val alreadyName =
-                        pendingMemberPreview.resolvedHex?.let { appState.displayName(it) }.orEmpty()
-                    Text(
-                        stringResource(R.string.add_member_already_in_group, alreadyName),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
+                        },
+                        // Gate on the preview resolution too (#631): keep the invite
+                        // from firing on an unresolved/invalid identifier, while
+                        // still allowing the loaded AND no-profile states through.
+                        // Also block when the resolved pubkey is already in the
+                        // group (#899) — adding them would fail with a raw
+                        // DuplicateSignatureKey error.
+                        enabled =
+                            pendingMember.isNotBlank() &&
+                                activeMutation == null &&
+                                !controller.mutationInFlight &&
+                                !alreadyMember &&
+                                recipientPreviewAllowsSubmit(pendingMemberPreview.state),
                         modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                // Plain-text name search over local chat-list contacts.
-                // The Create Group flow keeps every row addable (tapping fills
-                // the npub into the field), but still shows the "Already in
-                // chats" badge — it does NOT offer "Open existing chat".
-                RecipientSearchResults(
-                    query = pendingMember,
-                    appState = appState,
-                    onSelect = { candidate ->
-                        pendingMember = candidate.npub
-                        pendingMemberError = null
-                    },
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(R.string.add_as_admin), style = MaterialTheme.typography.bodyLarge)
-                    Switch(
-                        checked = pendingMemberAsAdmin,
-                        onCheckedChange = { pendingMemberAsAdmin = it },
-                        enabled = activeMutation == null && !controller.mutationInFlight,
-                    )
-                }
-                Button(
-                    onClick = {
-                        // Prefer the key the preview card resolved (#631): it
-                        // carries a resolved NIP-05, which RecipientReference
-                        // .normalize can't parse. Fall back to normalize for
-                        // the npub/hex direct-entry path.
-                        val ref =
-                            pendingMemberPreview.resolvedHex
-                                ?: RecipientReference.normalize(pendingMember)
-                        if (ref == null) {
-                            pendingMemberError = oneValidMemberReferenceError
-                            return@Button
+                    ) {
+                        if (activeMutation?.action == GroupMutationAction.InviteMember) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Add, contentDescription = null)
                         }
-                        pendingMemberError = null
-                        runGroupMutation(
-                            action = GroupMutationAction.InviteMember,
-                            mutation = { controller.inviteMembers(listOf(ref), addAsAdmin = pendingMemberAsAdmin) },
-                            target = ref,
-                            onSuccess = {
-                                pendingMember = ""
-                                pendingMemberAsAdmin = false
-                                pendingMemberError = null
-                                pendingInvites = (pendingInvites + ref).distinct()
-                                showAddMember = false
-                            },
-                        )
-                    },
-                    // Gate on the preview resolution too (#631): keep the invite
-                    // from firing on an unresolved/invalid identifier, while
-                    // still allowing the loaded AND no-profile states through.
-                    // Also block when the resolved pubkey is already in the
-                    // group (#899) — adding them would fail with a raw
-                    // DuplicateSignatureKey error.
-                    enabled =
-                        pendingMember.isNotBlank() &&
-                            activeMutation == null &&
-                            !controller.mutationInFlight &&
-                            !alreadyMember &&
-                            recipientPreviewAllowsSubmit(pendingMemberPreview.state),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (activeMutation?.action == GroupMutationAction.InviteMember) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(if (activeMutation?.action == GroupMutationAction.InviteMember) R.string.adding_member else R.string.add_member))
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(if (activeMutation?.action == GroupMutationAction.InviteMember) R.string.adding_member else R.string.add_member))
                 }
             }
         }
