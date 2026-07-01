@@ -1774,6 +1774,8 @@ private fun ChatsScreen(
     var newChatTitle by remember { mutableStateOf(R.string.new_chat) }
     var newChatDirect by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
+    // Active-account QR sheet opened from the chat-list one-tap handoff (#819).
+    var qrAccountId by remember { mutableStateOf<String?>(null) }
     var quickActionsExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<ChatListItem?>(null) }
     // Search expand/collapse + live query. The search input is anchored in
@@ -2037,21 +2039,38 @@ private fun ChatsScreen(
         },
         floatingActionButton = {
             if (!searchOpen) {
-                QuickActionFabMenu(
-                    expanded = quickActionsExpanded,
-                    onExpandedChange = { quickActionsExpanded = it },
-                    onScanQr = { showScanner = true },
-                    onNewChat = {
-                        newChatTitle = R.string.new_chat
-                        newChatDirect = true
-                        showNewChat = true
-                    },
-                    onCreateGroup = {
-                        newChatTitle = R.string.new_group
-                        newChatDirect = false
-                        showNewChat = true
-                    },
-                )
+                val qrHex = appState.activeAccount?.accountIdHex
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    if (qrHex != null) {
+                        SmallFloatingActionButton(
+                            onClick = { qrAccountId = qrHex },
+                            modifier = Modifier.padding(end = 8.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.QrCode,
+                                contentDescription = stringResource(R.string.my_qr_code),
+                            )
+                        }
+                    }
+                    QuickActionFabMenu(
+                        expanded = quickActionsExpanded,
+                        onExpandedChange = { quickActionsExpanded = it },
+                        onScanQr = { showScanner = true },
+                        onNewChat = {
+                            newChatTitle = R.string.new_chat
+                            newChatDirect = true
+                            showNewChat = true
+                        },
+                        onCreateGroup = {
+                            newChatTitle = R.string.new_group
+                            newChatDirect = false
+                            showNewChat = true
+                        },
+                    )
+                }
             }
         },
     ) { padding ->
@@ -2259,6 +2278,14 @@ private fun ChatsScreen(
                     appState.presentProfile(scanned.npub)
                 }
             },
+        )
+    }
+    // Reuse the Settings QR sheet; dismissing leaves chat-list state untouched.
+    qrAccountId?.let { accountId ->
+        ProfileQrSheet(
+            appState = appState,
+            accountIdHex = accountId,
+            onDismiss = { qrAccountId = null },
         )
     }
     pendingDelete?.let { item ->
