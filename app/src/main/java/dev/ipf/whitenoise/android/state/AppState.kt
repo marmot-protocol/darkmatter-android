@@ -657,6 +657,15 @@ class WhiteNoiseAppState(
     var forceIncognitoKeyboard by mutableStateOf(preferences.getBoolean(FORCE_INCOGNITO_KEYBOARD_KEY, true))
         private set
 
+    /**
+     * User override for chat-surface FLAG_SECURE (#800). Default OFF keeps chat
+     * screenshots and screen recordings blocked; turning it ON clears the flag
+     * only for message surfaces. Identity / secret-key surfaces stay secure
+     * unconditionally at their call sites.
+     */
+    var allowChatScreenshotsInChats by mutableStateOf(preferences.getBoolean(ALLOW_CHAT_SCREENSHOTS_KEY, false))
+        private set
+
     var themeMode by mutableStateOf(AppThemeMode.fromPreference(preferences.getString(THEME_MODE_KEY, null)))
         private set
 
@@ -2026,6 +2035,11 @@ class WhiteNoiseAppState(
     fun updateForceIncognitoKeyboard(enabled: Boolean) {
         forceIncognitoKeyboard = enabled
         preferences.edit().putBoolean(FORCE_INCOGNITO_KEYBOARD_KEY, enabled).apply()
+    }
+
+    fun updateAllowChatScreenshotsInChats(enabled: Boolean) {
+        allowChatScreenshotsInChats = enabled
+        preferences.edit().putBoolean(ALLOW_CHAT_SCREENSHOTS_KEY, enabled).apply()
     }
 
     suspend fun refreshSecurityPrivacySettings() {
@@ -3777,6 +3791,7 @@ class WhiteNoiseAppState(
         private const val DEVELOPER_MODE_KEY = "developer_mode"
         private const val STREAMING_DEBUG_MODE_KEY = "streaming_debug_mode"
         private const val FORCE_INCOGNITO_KEYBOARD_KEY = "force_incognito_keyboard"
+        private const val ALLOW_CHAT_SCREENSHOTS_KEY = "allow_chat_screenshots"
         private const val THEME_MODE_KEY = "theme_mode"
         private const val MEDIA_AUTO_DOWNLOAD_KEY = "media_auto_download"
 
