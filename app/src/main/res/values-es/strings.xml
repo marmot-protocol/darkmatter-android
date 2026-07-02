@@ -516,8 +516,8 @@
     <string name="support_the_project_subtitle">White Noise es gratis y de código abierto. Las donaciones ayudan a mantenerlo así.</string>
     <string name="donate_lightning_address">Dirección Lightning</string>
     <string name="donate_bitcoin_silent_payment">Pago silencioso de Bitcoin</string>
-    <string name="donate_show_qr">Mostrar QR</string>
-    <string name="donate_qr_dialog_title">Escanea para donar</string>
+    <string name="donate_method_lightning">Lightning</string>
+    <string name="donate_method_bitcoin">Bitcoin</string>
     <string name="donate_qr_code_content_description">Código QR para la dirección de donación %1$s: %2$s</string>
     <string name="theme">Tema</string>
     <string name="theme_system">Sistema</string>

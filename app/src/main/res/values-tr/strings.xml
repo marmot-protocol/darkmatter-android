@@ -516,8 +516,8 @@
     <string name="support_the_project_subtitle">White Noise ücretsiz ve açık kaynaklıdır. Bağışlar böyle kalmasına yardımcı olur.</string>
     <string name="donate_lightning_address">Lightning adresi</string>
     <string name="donate_bitcoin_silent_payment">Bitcoin sessiz ödeme</string>
-    <string name="donate_show_qr">QR göster</string>
-    <string name="donate_qr_dialog_title">Bağış yapmak için tara</string>
+    <string name="donate_method_lightning">Lightning</string>
+    <string name="donate_method_bitcoin">Bitcoin</string>
     <string name="donate_qr_code_content_description">Bağış adresi %1$s için QR kodu: %2$s</string>
     <string name="theme">Tema</string>
     <string name="theme_system">Sistem</string>

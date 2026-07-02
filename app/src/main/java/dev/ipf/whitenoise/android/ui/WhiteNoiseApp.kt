@@ -26,6 +26,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -199,7 +200,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RichTooltip
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarData
@@ -498,6 +502,7 @@ private enum class SettingsDetail {
     KeyPackages,
     Notifications,
     SecurityPrivacy,
+    Donate,
 }
 
 private data class DiagnosticLogEntry(
@@ -17882,6 +17887,7 @@ private fun SettingsScreen(
                 onBack = { onDetailChange(null) },
                 onOpenDiagnostics = onOpenDiagnostics,
             )
+        SettingsDetail.Donate -> DonateScreen(appState, onBack = { onDetailChange(null) })
         null ->
             SettingsHomeScreen(
                 appState = appState,
@@ -17914,7 +17920,6 @@ private fun SettingsHomeScreen(
     var qrAccountId by remember { mutableStateOf<String?>(null) }
     var showAccountSelector by remember { mutableStateOf(false) }
     var showAddIdentity by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
 
     LaunchedEffect(appState.accounts.size) {
         if (showAddIdentity) showAddIdentity = false
@@ -17970,36 +17975,23 @@ private fun SettingsHomeScreen(
                 }
             }
             item {
-                // "Support the project" (#285). Static, public donation
-                // addresses shipped as localized resources — no protocol data,
-                // no Android-owned cache. A subtle accent icon keeps it distinct
-                // from destructive settings.
-                SectionCardWithAction(
-                    title = stringResource(R.string.support_the_project),
-                    action = {
-                        Icon(
-                            Icons.Default.Favorite,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    },
+                // Navigation row to the donation page, matching the other
+                // Settings sections' row -> detail-screen shape.
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth().amoledSurfaceBorder(RoundedCornerShape(12.dp)),
+                    colors = CardDefaults.elevatedCardColors(containerColor = sectionPanelColor()),
                 ) {
-                    Text(
-                        stringResource(R.string.support_the_project_subtitle),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    DonationAddressRow(
-                        label = stringResource(R.string.donate_lightning_address),
-                        value = stringResource(R.string.donate_lightning_value),
-                        clipboard = clipboard,
-                        appState = appState,
-                    )
-                    DonationAddressRow(
-                        label = stringResource(R.string.donate_bitcoin_silent_payment),
-                        value = stringResource(R.string.donate_bitcoin_silent_payment_value),
-                        clipboard = clipboard,
-                        appState = appState,
+                    ListItem(
+                        modifier = Modifier.clickable { onOpenDetail(SettingsDetail.Donate) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        headlineContent = { Text(stringResource(R.string.support_the_project)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(R.string.support_the_project_subtitle),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                     )
                 }
             }
@@ -21074,92 +21066,107 @@ private fun CopyableValueRow(
     }
 }
 
-// Donation address row: tap-to-copy (reusing CopyableValueRow, #41) plus a
-// "Show QR" affordance that opens a full-screen QR for offline scanning (#285).
-@Composable
-private fun DonationAddressRow(
-    label: String,
-    value: String,
-    clipboard: androidx.compose.ui.platform.ClipboardManager,
-    appState: WhiteNoiseAppState,
-) {
-    var showQr by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        CopyableValueRow(
-            label = label,
-            value = value,
-            clipboard = clipboard,
-            appState = appState,
-            displayValue = IdentityFormatter.short(value, prefix = 18, suffix = 12),
-        )
-        TextButton(
-            onClick = { showQr = true },
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
-        ) {
-            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.donate_show_qr))
-        }
-    }
-    if (showQr) {
-        DonationQrDialog(
-            label = label,
-            value = value,
-            onDismiss = { showQr = false },
-        )
-    }
-}
+private data class DonationMethod(
+    val label: String,
+    val addressLabel: String,
+    val value: String,
+)
 
+// Settings -> Support the project (#285). Static, public donation addresses
+// shipped as localized resources — no protocol data, no Android-owned cache.
+// Wallet-style focused page: one method visible at a time via the segmented
+// selector (mutually-exclusive choice), its QR inline above a tap-to-copy row.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DonationQrDialog(
-    label: String,
-    value: String,
-    onDismiss: () -> Unit,
+private fun DonateScreen(
+    appState: WhiteNoiseAppState,
+    onBack: () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
+    val clipboard = LocalClipboardManager.current
+    var selected by rememberSaveable { mutableStateOf(0) }
+    val methods =
+        listOf(
+            DonationMethod(
+                label = stringResource(R.string.donate_method_lightning),
+                addressLabel = stringResource(R.string.donate_lightning_address),
+                value = stringResource(R.string.donate_lightning_value),
+            ),
+            DonationMethod(
+                label = stringResource(R.string.donate_method_bitcoin),
+                addressLabel = stringResource(R.string.donate_bitcoin_silent_payment),
+                value = stringResource(R.string.donate_bitcoin_silent_payment_value),
+            ),
+        )
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.support_the_project)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.92f))
-                .clickable(onClick = onDismiss)
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(Dimens.spaceLg),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Dimens.spaceLg),
         ) {
-            Column(
-                Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(
-                    stringResource(R.string.donate_qr_dialog_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                )
-                QrCodeImage(
-                    content = value,
-                    contentDescription = stringResource(R.string.donate_qr_code_content_description, label, value),
-                )
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
-                )
-                Text(
-                    value,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center,
-                    color = Color.White.copy(alpha = 0.8f),
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                Icon(
+                    Icons.Default.Favorite,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(Dimens.spaceLg).size(28.dp),
                 )
             }
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding(),
+            Text(
+                stringResource(R.string.support_the_project_subtitle),
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                methods.forEachIndexed { index, method ->
+                    SegmentedButton(
+                        selected = selected == index,
+                        onClick = { selected = index },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = methods.size),
+                    ) {
+                        Text(method.label)
+                    }
+                }
+            }
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth().amoledSurfaceBorder(RoundedCornerShape(12.dp)),
+                colors = CardDefaults.elevatedCardColors(containerColor = sectionPanelColor()),
             ) {
-                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.dismiss), tint = Color.White)
+                AnimatedContent(targetState = methods[selected], label = "donationMethod") { method ->
+                    Column(
+                        Modifier.fillMaxWidth().padding(Dimens.spaceLg),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Dimens.spaceMd),
+                    ) {
+                        QrCodeImage(
+                            content = method.value,
+                            contentDescription =
+                                stringResource(R.string.donate_qr_code_content_description, method.addressLabel, method.value),
+                        )
+                        CopyableValueRow(
+                            label = method.addressLabel,
+                            value = method.value,
+                            clipboard = clipboard,
+                            appState = appState,
+                            displayValue = IdentityFormatter.short(method.value, prefix = 18, suffix = 12),
+                        )
+                    }
+                }
             }
         }
     }
