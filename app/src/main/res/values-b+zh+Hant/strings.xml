@@ -195,6 +195,12 @@
     <string name="copy_text">複製文字</string>
     <string name="open_emoji_picker">開啟表情符號選擇器</string>
     <string name="show_keyboard">顯示鍵盤</string>
+    <string name="composer_expand">展開訊息輸入欄</string>
+    <string name="composer_expand_full_screen">開啟全螢幕編輯器</string>
+    <string name="composer_collapse">收合訊息輸入欄</string>
+    <string name="composer_exit_full_screen">離開全螢幕編輯器</string>
+    <string name="composer_compact">返回緊湊輸入框</string>
+    <string name="composer_resize_handle">調整訊息輸入框大小</string>
     <string name="emoji_backspace">刪除表情符號</string>
     <string name="customize_reactions">自訂回應</string>
     <string name="customize_reactions_hint">點按即可替換表情符號</string>

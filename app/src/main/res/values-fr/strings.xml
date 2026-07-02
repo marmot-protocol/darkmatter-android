@@ -197,6 +197,12 @@
     <string name="copy_text">Copier le texte</string>
     <string name="open_emoji_picker">Ouvrir le sélecteur d’émojis</string>
     <string name="show_keyboard">Afficher le clavier</string>
+    <string name="composer_expand">Agrandir le champ de message</string>
+    <string name="composer_expand_full_screen">Ouvrir l\'éditeur plein écran</string>
+    <string name="composer_collapse">Réduire le champ de message</string>
+    <string name="composer_exit_full_screen">Quitter l\'éditeur plein écran</string>
+    <string name="composer_compact">Revenir au compositeur compact</string>
+    <string name="composer_resize_handle">Redimensionner le champ de message</string>
     <string name="emoji_backspace">Supprimer l’émoji</string>
     <string name="customize_reactions">Personnaliser les réactions</string>
     <string name="customize_reactions_hint">Touchez pour remplacer un émoji</string>

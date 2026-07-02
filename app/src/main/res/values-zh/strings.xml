@@ -195,6 +195,12 @@
     <string name="copy_text">复制文本</string>
     <string name="open_emoji_picker">打开表情选择器</string>
     <string name="show_keyboard">显示键盘</string>
+    <string name="composer_expand">展开消息输入框</string>
+    <string name="composer_expand_full_screen">打开全屏编辑器</string>
+    <string name="composer_collapse">收起消息输入框</string>
+    <string name="composer_exit_full_screen">退出全屏编辑器</string>
+    <string name="composer_compact">返回紧凑输入框</string>
+    <string name="composer_resize_handle">调整消息输入框大小</string>
     <string name="emoji_backspace">删除表情</string>
     <string name="customize_reactions">自定义回应</string>
     <string name="customize_reactions_hint">点按以替换表情</string>
