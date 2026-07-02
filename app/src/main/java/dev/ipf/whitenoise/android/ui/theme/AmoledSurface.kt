@@ -31,11 +31,9 @@ internal fun Modifier.amoledSurfaceBorder(
     shape: Shape,
     width: Dp = 1.dp,
 ): Modifier =
-    if (isAmoledSurfaceTheme()) {
-        border(BorderStroke(width, MaterialTheme.colorScheme.outlineVariant), shape)
-    } else {
-        this
-    }
+    amoledSurfaceBorderStroke(width)?.let { stroke ->
+        border(stroke, shape)
+    } ?: this
 
 /**
  * Sheet surface for AMOLED (issue #801). A `ModalBottomSheet` renders in its
@@ -52,11 +50,12 @@ internal fun Modifier.amoledSurfaceBorder(
  * corners round cleanly instead of exposing the underlying surface.
  */
 @Composable
-internal fun Modifier.amoledModalSheetSurface(shape: Shape): Modifier =
-    if (isAmoledSurfaceTheme()) {
+internal fun Modifier.amoledModalSheetSurface(
+    shape: Shape,
+    width: Dp = 1.dp,
+): Modifier =
+    amoledSurfaceBorderStroke(width)?.let { stroke ->
         clip(shape)
             .background(Color.Black)
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
-    } else {
-        this
-    }
+            .border(stroke, shape)
+    } ?: this
