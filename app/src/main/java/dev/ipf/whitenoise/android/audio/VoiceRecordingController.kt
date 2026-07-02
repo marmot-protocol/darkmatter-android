@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -68,6 +69,8 @@ class VoiceRecordingController(
 
     private var recorder: VoiceRecorder? = null
     private var tickJob: Job? = null
+    private var startJob: Job? = null
+    private var stopWhenStartReady = false
 
     // Releases the native recorder independently of [scope]: the conversation's
     // composition scope is cancelled exactly when the screen closes, which is
@@ -86,6 +89,14 @@ class VoiceRecordingController(
     private var restartJob: Job? = null
 
     fun start(): Boolean {
+        if (startJob?.isActive == true) {
+            if (stopWhenStartReady) {
+                stopWhenStartReady = false
+                isRecording = true
+                resetRecordingUiState()
+            }
+            return true
+        }
         if (isRecording) return true
         if (!onPermissionRequest()) return false
 
@@ -131,32 +142,69 @@ class VoiceRecordingController(
                 "voice-${System.currentTimeMillis()}.${VoiceRecorder.FILE_EXTENSION}",
             )
         val r = VoiceRecorder(context, file, bitrateProvider())
-        return try {
-            r.start()
-            recorder = r
-            isRecording = true
-            resetRecordingUiState()
-            tickJob =
-                scope.launch(Dispatchers.Main) {
-                    val started = System.nanoTime()
-                    while (isActive) {
-                        val elapsed = (System.nanoTime() - started) / 1_000_000L
-                        _elapsedMs.longValue = elapsed
-                        if (elapsed >= MAX_RECORDING_MS) {
-                            stop()
-                            break
-                        }
-                        delay(50L)
+        stopWhenStartReady = false
+        isRecording = true
+        resetRecordingUiState()
+
+        lateinit var job: Job
+        job =
+            scope.launch(Dispatchers.Main, start = CoroutineStart.LAZY) {
+                try {
+                    // MediaRecorder.prepare()/start() can block while the audio HAL
+                    // warms up. Keep the UI state update above on Main, but prime
+                    // the recorder off-main like stop() already does for finalize.
+                    withContext(Dispatchers.IO) { r.start() }
+                    if (startJob !== job) {
+                        recorderScope.launch { r.cancel() }
+                        return@launch
                     }
+                    recorder = r
+                    if (stopWhenStartReady) {
+                        stopWhenStartReady = false
+                        stop()
+                        return@launch
+                    }
+                    if (!isRecording) {
+                        recorder = null
+                        recorderScope.launch { r.cancel() }
+                        return@launch
+                    }
+                    tickJob =
+                        scope.launch(Dispatchers.Main) {
+                            val started = System.nanoTime()
+                            while (isActive) {
+                                val elapsed = (System.nanoTime() - started) / 1_000_000L
+                                _elapsedMs.longValue = elapsed
+                                if (elapsed >= MAX_RECORDING_MS) {
+                                    stop()
+                                    break
+                                }
+                                delay(50L)
+                            }
+                        }
+                } catch (c: CancellationException) {
+                    // If the owner cancels while prepare()/start() is blocked,
+                    // withContext will resume here only after the blocking call
+                    // returns. Release on the lifecycle-independent recorderScope
+                    // so the native recorder and output fd cannot leak.
+                    recorderScope.launch { r.cancel() }
+                    throw c
+                } catch (t: Throwable) {
+                    if (startJob === job) {
+                        abandonRecordingFocus()
+                        recorder = null
+                        isRecording = false
+                        resetRecordingUiState()
+                        stopWhenStartReady = false
+                        onError(t)
+                    }
+                } finally {
+                    if (startJob === job) startJob = null
                 }
-            true
-        } catch (t: Throwable) {
-            abandonRecordingFocus()
-            recorder = null
-            isRecording = false
-            onError(t)
-            false
-        }
+            }
+        startJob = job
+        job.start()
+        return true
     }
 
     private fun resetRecordingUiState() {
@@ -178,6 +226,7 @@ class VoiceRecordingController(
         restart.cancel()
         restartJob = null
         restarting = false
+        stopWhenStartReady = false
         isRecording = false
         resetRecordingUiState()
         abandonRecordingFocus()
@@ -186,16 +235,20 @@ class VoiceRecordingController(
 
     fun stop() {
         if (abortPendingRestart()) return
+        if (startJob?.isActive == true && recorder == null) {
+            stopWhenStartReady = true
+            tickJob?.cancel()
+            tickJob = null
+            isRecording = false
+            resetRecordingUiState()
+            return
+        }
         val r = recorder ?: return
         recorder = null
         tickJob?.cancel()
         tickJob = null
         isRecording = false
-        locked = false
-        dragOffsetPx = 0f
-        verticalOffsetPx = 0f
-        willCancel = false
-        willLock = false
+        resetRecordingUiState()
         // Finalize off the main thread: MediaRecorder.stop() flushes/finalizes
         // the MP4 container and can block for tens-to-hundreds of ms (worse on
         // slow storage), causing jank/ANR exactly as the record bar animates
@@ -242,16 +295,18 @@ class VoiceRecordingController(
 
     fun cancel() {
         if (abortPendingRestart()) return
+        val starting = startJob?.takeIf { it.isActive && recorder == null }
+        if (starting != null) {
+            startJob = null
+            stopWhenStartReady = false
+            starting.cancel()
+        }
         val r = recorder
         recorder = null
         tickJob?.cancel()
         tickJob = null
         isRecording = false
-        locked = false
-        dragOffsetPx = 0f
-        verticalOffsetPx = 0f
-        willCancel = false
-        willLock = false
+        resetRecordingUiState()
         // Abandon focus unconditionally: during a restart the previous recorder
         // is already null while the reused focus is still held, so a teardown
         // here (e.g. composition disposal mid-restart) must release the focus
