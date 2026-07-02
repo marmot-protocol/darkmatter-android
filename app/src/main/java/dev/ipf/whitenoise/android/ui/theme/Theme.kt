@@ -3,14 +3,18 @@ package dev.ipf.whitenoise.android.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import dev.ipf.whitenoise.android.state.FontScale
 
 // Locked brand scheme — a monochrome-cyan palette over neutral surfaces. Every
 // role is defined explicitly so nothing falls back to the M3 baseline (which is
@@ -90,10 +94,45 @@ private val LightColorScheme =
         scrim = Color(0xFF000000),
     )
 
+/**
+ * The in-app font-size scale (#403) in effect for the current composition.
+ * Read it where a composable needs the raw factor (e.g. the font-size setting
+ * preview); most text picks it up automatically because [WhiteNoiseTheme]
+ * bakes it into [MaterialTheme.typography].
+ */
+val LocalFontScale = staticCompositionLocalOf { FontScale.DEFAULT }
+
+// Multiply every style's fontSize by [scale]. The sizes stay in `sp`, so
+// Compose still applies the OS font-size setting on top — final on-screen size
+// is system_scale × app_scale (see [FontScale]). A no-op at 1.0.
+private fun Typography.scaledBy(scale: Float): Typography {
+    if (scale == 1.0f) return this
+
+    fun TextStyle.scaled(): TextStyle = copy(fontSize = fontSize * scale)
+    return copy(
+        displayLarge = displayLarge.scaled(),
+        displayMedium = displayMedium.scaled(),
+        displaySmall = displaySmall.scaled(),
+        headlineLarge = headlineLarge.scaled(),
+        headlineMedium = headlineMedium.scaled(),
+        headlineSmall = headlineSmall.scaled(),
+        titleLarge = titleLarge.scaled(),
+        titleMedium = titleMedium.scaled(),
+        titleSmall = titleSmall.scaled(),
+        bodyLarge = bodyLarge.scaled(),
+        bodyMedium = bodyMedium.scaled(),
+        bodySmall = bodySmall.scaled(),
+        labelLarge = labelLarge.scaled(),
+        labelMedium = labelMedium.scaled(),
+        labelSmall = labelSmall.scaled(),
+    )
+}
+
 @Composable
 fun WhiteNoiseTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     amoled: Boolean = false,
+    fontScale: FontScale = FontScale.DEFAULT,
     // The app ships a locked brand palette, so dynamic (wallpaper-derived)
     // color is off by default. The path is kept for anyone who opts in.
     dynamicColor: Boolean = false,
@@ -162,10 +201,13 @@ fun WhiteNoiseTheme(
             surfaceTint = if (amoledActive) Color.Transparent else Highlight,
         )
 
-    CompositionLocalProvider(LocalAmoledSurfaceTheme provides amoledActive) {
+    CompositionLocalProvider(
+        LocalAmoledSurfaceTheme provides amoledActive,
+        LocalFontScale provides fontScale,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = Typography,
+            typography = Typography.scaledBy(fontScale.scale),
             content = content,
         )
     }

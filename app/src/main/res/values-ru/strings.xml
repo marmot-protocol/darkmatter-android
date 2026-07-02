@@ -523,6 +523,14 @@
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Темная</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Размер шрифта</string>
+    <string name="font_size_settings_subtitle">Масштабирование текста во всём приложении</string>
+    <string name="font_size_description">Масштабирует текст во всём приложении. Настройка сочетается с системным размером шрифта: итоговый размер — это настройка устройства, умноженная на эту.</string>
+    <string name="font_size_small">Маленький</string>
+    <string name="font_size_default">По умолчанию</string>
+    <string name="font_size_large">Большой</string>
+    <string name="font_size_extra_large">Очень большой</string>
+    <string name="font_size_preview_message">Съешь же ещё этих мягких французских булок да выпей чаю.</string>
     <string name="language">Язык</string>
     <string name="language_system">Язык системы</string>
     <string name="language_english">English</string>

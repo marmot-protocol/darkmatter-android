@@ -517,6 +517,14 @@
     <string name="theme_light">Chiaro</string>
     <string name="theme_dark">Scuro</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Dimensione del testo</string>
+    <string name="font_size_settings_subtitle">Ridimensiona il testo in tutta l’app</string>
+    <string name="font_size_description">Ridimensiona il testo in tutta l’app. Si combina con la dimensione del carattere del sistema: la dimensione finale è l’impostazione del dispositivo moltiplicata per questa.</string>
+    <string name="font_size_small">Piccolo</string>
+    <string name="font_size_default">Predefinito</string>
+    <string name="font_size_large">Grande</string>
+    <string name="font_size_extra_large">Molto grande</string>
+    <string name="font_size_preview_message">Ma la volpe, col suo balzo, ha raggiunto il quieto Fido.</string>
     <string name="language">Lingua</string>
     <string name="language_system">Lingua di sistema</string>
     <string name="language_english">English</string>

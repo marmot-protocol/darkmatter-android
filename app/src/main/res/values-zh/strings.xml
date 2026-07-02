@@ -515,6 +515,14 @@
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">字体大小</string>
+    <string name="font_size_settings_subtitle">在整个应用中缩放文本</string>
+    <string name="font_size_description">在整个应用中缩放文本。此设置会与系统字体大小叠加——最终大小为设备设置乘以此设置。</string>
+    <string name="font_size_small">小</string>
+    <string name="font_size_default">默认</string>
+    <string name="font_size_large">大</string>
+    <string name="font_size_extra_large">超大</string>
+    <string name="font_size_preview_message">敏捷的棕色狐狸跳过了那只懒狗。</string>
     <string name="language">语言</string>
     <string name="language_system">系统语言</string>
     <string name="language_english">English</string>
