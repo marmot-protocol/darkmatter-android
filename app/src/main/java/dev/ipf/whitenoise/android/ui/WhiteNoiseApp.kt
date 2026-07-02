@@ -19743,6 +19743,10 @@ private fun WindowSecureFlag(enabled: Boolean = true) {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
         onDispose {
+            // No symmetric restore for enabled=false: this is the shared
+            // activity window, so each secure surface must assert the flag for
+            // itself instead of resurrecting stale state when a permissive
+            // chat surface leaves composition.
             if (enabled) {
                 window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
             }

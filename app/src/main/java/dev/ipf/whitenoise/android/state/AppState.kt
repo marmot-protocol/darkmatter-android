@@ -2,6 +2,7 @@ package dev.ipf.whitenoise.android.state
 
 import android.app.LocaleManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.LocaleList
 import android.util.Log
@@ -149,6 +150,19 @@ internal data class ProfileGroupInviteOutcome(
 ) {
     val delivered: Int = attempted - failures
     val completedSuccessfully: Boolean = attempted > 0 && failures == 0
+}
+
+internal object ChatScreenshotPreferences {
+    private const val KEY_ALLOW_CHAT_SCREENSHOTS = "allow_chat_screenshots"
+
+    fun readAllowChatScreenshots(preferences: SharedPreferences): Boolean = preferences.getBoolean(KEY_ALLOW_CHAT_SCREENSHOTS, false)
+
+    fun writeAllowChatScreenshots(
+        preferences: SharedPreferences,
+        enabled: Boolean,
+    ) {
+        preferences.edit().putBoolean(KEY_ALLOW_CHAT_SCREENSHOTS, enabled).apply()
+    }
 }
 
 internal data class ProfileGroupInviteToast(
@@ -663,7 +677,7 @@ class WhiteNoiseAppState(
      * only for message surfaces. Identity / secret-key surfaces stay secure
      * unconditionally at their call sites.
      */
-    var allowChatScreenshotsInChats by mutableStateOf(preferences.getBoolean(ALLOW_CHAT_SCREENSHOTS_KEY, false))
+    var allowChatScreenshotsInChats by mutableStateOf(ChatScreenshotPreferences.readAllowChatScreenshots(preferences))
         private set
 
     var themeMode by mutableStateOf(AppThemeMode.fromPreference(preferences.getString(THEME_MODE_KEY, null)))
@@ -2039,7 +2053,7 @@ class WhiteNoiseAppState(
 
     fun updateAllowChatScreenshotsInChats(enabled: Boolean) {
         allowChatScreenshotsInChats = enabled
-        preferences.edit().putBoolean(ALLOW_CHAT_SCREENSHOTS_KEY, enabled).apply()
+        ChatScreenshotPreferences.writeAllowChatScreenshots(preferences, enabled)
     }
 
     suspend fun refreshSecurityPrivacySettings() {
@@ -3791,7 +3805,6 @@ class WhiteNoiseAppState(
         private const val DEVELOPER_MODE_KEY = "developer_mode"
         private const val STREAMING_DEBUG_MODE_KEY = "streaming_debug_mode"
         private const val FORCE_INCOGNITO_KEYBOARD_KEY = "force_incognito_keyboard"
-        private const val ALLOW_CHAT_SCREENSHOTS_KEY = "allow_chat_screenshots"
         private const val THEME_MODE_KEY = "theme_mode"
         private const val MEDIA_AUTO_DOWNLOAD_KEY = "media_auto_download"
 
