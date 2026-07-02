@@ -1533,10 +1533,10 @@ private fun MainShell(
                 onOpenGroup = openGroupFromProfile,
                 onDismiss = { appState.clearPresentedProfile() },
                 securePolicy =
-                    if (section == MainSection.Chats && !appState.allowChatScreenshotsInChats) {
-                        SecureFlagPolicy.SecureOn
-                    } else {
-                        SecureFlagPolicy.Inherit
+                    when {
+                        section != MainSection.Chats -> SecureFlagPolicy.Inherit
+                        appState.allowChatScreenshotsInChats -> SecureFlagPolicy.SecureOff
+                        else -> SecureFlagPolicy.SecureOn
                     },
             )
         }
