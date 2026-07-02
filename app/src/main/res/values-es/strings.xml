@@ -517,6 +517,14 @@
     <string name="theme_light">Claro</string>
     <string name="theme_dark">Oscuro</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Tamaño de fuente</string>
+    <string name="font_size_settings_subtitle">Escalar el texto en toda la app</string>
+    <string name="font_size_description">Escala el texto en toda la app. Esto se combina con el tamaño de fuente de tu sistema: el tamaño final es el ajuste de tu dispositivo multiplicado por este.</string>
+    <string name="font_size_small">Pequeño</string>
+    <string name="font_size_default">Predeterminado</string>
+    <string name="font_size_large">Grande</string>
+    <string name="font_size_extra_large">Extra grande</string>
+    <string name="font_size_preview_message">El veloz murciélago hindú comía feliz cardillo y kiwi.</string>
     <string name="language">Idioma</string>
     <string name="language_system">Idioma del sistema</string>
     <string name="language_english">English</string>

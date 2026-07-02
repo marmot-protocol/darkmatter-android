@@ -517,6 +517,14 @@
     <string name="theme_light">Clair</string>
     <string name="theme_dark">Sombre</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Taille du texte</string>
+    <string name="font_size_settings_subtitle">Redimensionner le texte dans toute l’app</string>
+    <string name="font_size_description">Redimensionne le texte dans toute l’app. Ce réglage se combine avec la taille de police de votre système : la taille finale correspond au réglage de votre appareil multiplié par celui-ci.</string>
+    <string name="font_size_small">Petit</string>
+    <string name="font_size_default">Par défaut</string>
+    <string name="font_size_large">Grand</string>
+    <string name="font_size_extra_large">Très grand</string>
+    <string name="font_size_preview_message">Portez ce vieux whisky au juge blond qui fume.</string>
     <string name="language">Langue</string>
     <string name="language_system">Langue du système</string>
     <string name="language_english">English</string>

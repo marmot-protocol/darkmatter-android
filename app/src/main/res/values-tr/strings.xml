@@ -517,6 +517,14 @@
     <string name="theme_light">Açık</string>
     <string name="theme_dark">Koyu</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Yazı tipi boyutu</string>
+    <string name="font_size_settings_subtitle">Uygulama genelinde metni ölçeklendir</string>
+    <string name="font_size_description">Uygulama genelinde metni ölçeklendirir. Bu, sistem yazı tipi boyutunuzla birleşir: nihai boyut, cihaz ayarınızın bununla çarpımıdır.</string>
+    <string name="font_size_small">Küçük</string>
+    <string name="font_size_default">Varsayılan</string>
+    <string name="font_size_large">Büyük</string>
+    <string name="font_size_extra_large">Çok büyük</string>
+    <string name="font_size_preview_message">Pijamalı hasta yağız şoföre çabucak güvendi.</string>
     <string name="language">Dil</string>
     <string name="language_system">Sistem dili</string>
     <string name="language_english">English</string>

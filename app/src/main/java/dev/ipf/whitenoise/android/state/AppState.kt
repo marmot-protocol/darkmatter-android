@@ -661,6 +661,13 @@ class WhiteNoiseAppState(
         private set
 
     /**
+     * In-app font-size scale (#403). An Android UI preference (not protocol
+     * data) that scales app typography on top of the OS font-size setting.
+     */
+    var fontScale by mutableStateOf(FontScale.fromPreference(preferences.getString(FONT_SCALE_KEY, null)))
+        private set
+
+    /**
      * Per-account media auto-download matrix (issue #407). Reloaded whenever
      * the active account changes (see [reloadMediaAutoDownloadMatrix]); the
      * bubble call sites key their gate `remember` on this so flipping a toggle
@@ -2118,6 +2125,16 @@ class WhiteNoiseAppState(
     fun updateThemeMode(mode: AppThemeMode) {
         themeMode = mode
         preferences.edit().putString(THEME_MODE_KEY, mode.preferenceValue).apply()
+    }
+
+    /**
+     * Update the in-app font-size scale (#403). Persists immediately so the
+     * selection survives process death; the theme reads [fontScale] on the
+     * next recomposition and rescales typography app-wide.
+     */
+    fun updateFontScale(scale: FontScale) {
+        fontScale = scale
+        preferences.edit().putString(FONT_SCALE_KEY, scale.preferenceValue).apply()
     }
 
     /**
@@ -3778,6 +3795,7 @@ class WhiteNoiseAppState(
         private const val STREAMING_DEBUG_MODE_KEY = "streaming_debug_mode"
         private const val FORCE_INCOGNITO_KEYBOARD_KEY = "force_incognito_keyboard"
         private const val THEME_MODE_KEY = "theme_mode"
+        private const val FONT_SCALE_KEY = "font_scale"
         private const val MEDIA_AUTO_DOWNLOAD_KEY = "media_auto_download"
 
         // Per-account matrix prefs (issue #407), keyed by accountIdHex (or a

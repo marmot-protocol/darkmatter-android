@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
             WhiteNoiseTheme(
                 darkTheme = darkTheme,
                 amoled = state.themeMode.isAmoled,
+                fontScale = state.fontScale,
             ) {
                 WhiteNoiseApp(
                     appState = state,

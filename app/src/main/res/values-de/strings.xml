@@ -517,6 +517,14 @@
     <string name="theme_light">Hell</string>
     <string name="theme_dark">Dunkel</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Schriftgröße</string>
+    <string name="font_size_settings_subtitle">Text in der gesamten App skalieren</string>
+    <string name="font_size_description">Skaliert den Text in der gesamten App. Dies wird mit der Schriftgröße deines Systems kombiniert – die endgültige Größe ist deine Geräteeinstellung multipliziert mit dieser.</string>
+    <string name="font_size_small">Klein</string>
+    <string name="font_size_default">Standard</string>
+    <string name="font_size_large">Groß</string>
+    <string name="font_size_extra_large">Sehr groß</string>
+    <string name="font_size_preview_message">Franz jagt im komplett verwahrlosten Taxi quer durch Bayern.</string>
     <string name="language">Sprache</string>
     <string name="language_system">Systemsprache</string>
     <string name="language_english">English</string>

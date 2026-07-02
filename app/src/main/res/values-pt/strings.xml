@@ -517,6 +517,14 @@
     <string name="theme_light">Claro</string>
     <string name="theme_dark">Escuro</string>
     <string name="theme_amoled">AMOLED</string>
+    <string name="font_size">Tamanho da fonte</string>
+    <string name="font_size_settings_subtitle">Dimensionar o texto em todo o app</string>
+    <string name="font_size_description">Dimensiona o texto em todo o app. Isto combina com o tamanho da fonte do seu sistema: o tamanho final é a configuração do seu dispositivo multiplicada por este.</string>
+    <string name="font_size_small">Pequeno</string>
+    <string name="font_size_default">Padrão</string>
+    <string name="font_size_large">Grande</string>
+    <string name="font_size_extra_large">Muito grande</string>
+    <string name="font_size_preview_message">Um pequeno jabuti xereta viu dez cegonhas felizes.</string>
     <string name="language">Idioma</string>
     <string name="language_system">Idioma do sistema</string>
     <string name="language_english">English</string>
