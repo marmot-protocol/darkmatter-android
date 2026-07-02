@@ -197,6 +197,10 @@
     <string name="copy_text">Text kopieren</string>
     <string name="open_emoji_picker">Emoji-Auswahl öffnen</string>
     <string name="show_keyboard">Tastatur anzeigen</string>
+    <string name="composer_expand">Eingabefeld vergrößern</string>
+    <string name="composer_expand_full_screen">Vollbild-Editor öffnen</string>
+    <string name="composer_collapse">Eingabefeld verkleinern</string>
+    <string name="composer_exit_full_screen">Vollbild-Editor verlassen</string>
     <string name="emoji_backspace">Emoji löschen</string>
     <string name="customize_reactions">Reaktionen anpassen</string>
     <string name="customize_reactions_hint">Tippe, um ein Emoji zu ersetzen</string>

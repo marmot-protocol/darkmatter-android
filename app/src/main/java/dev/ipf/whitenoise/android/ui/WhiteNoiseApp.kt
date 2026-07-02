@@ -79,6 +79,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
@@ -123,6 +124,7 @@ import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
@@ -145,6 +147,7 @@ import androidx.compose.material.icons.filled.MarkChatRead
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -16668,8 +16671,37 @@ internal fun insertComposerEmoji(
     return value.copy(text = updatedText, selection = TextRange(caret), composition = null)
 }
 
+/**
+ * Composer expansion states (#324). [Compact] is the classic auto-growing
+ * pill capped at a few lines; [Expanded] keeps auto-growing line-by-line
+ * until the composer hits the top of the safe area above the IME (no fixed
+ * line cap); [FullScreen] is a full-height draft editor with a back
+ * affordance. The draft text and an open keyboard survive every switch.
+ */
+internal enum class ComposerExpansion { Compact, Expanded, FullScreen }
+
+/** One tap of the expand arrow: Compact → Expanded → FullScreen → Compact. */
+internal fun advancedComposerExpansion(current: ComposerExpansion): ComposerExpansion =
+    when (current) {
+        ComposerExpansion.Compact -> ComposerExpansion.Expanded
+        ComposerExpansion.Expanded -> ComposerExpansion.FullScreen
+        ComposerExpansion.FullScreen -> ComposerExpansion.Compact
+    }
+
+/**
+ * One step of the collapse affordance (system back or the full-screen back
+ * arrow). Full screen returns to Expanded — the state it was entered from —
+ * never straight to Compact; Expanded settles back to the compact pill.
+ */
+internal fun collapsedComposerExpansion(current: ComposerExpansion): ComposerExpansion =
+    when (current) {
+        ComposerExpansion.FullScreen -> ComposerExpansion.Expanded
+        ComposerExpansion.Expanded -> ComposerExpansion.Compact
+        ComposerExpansion.Compact -> ComposerExpansion.Compact
+    }
+
 @Composable
-private fun ComposerBar(
+internal fun ComposerBar(
     replyingTo: AppMessageRecordFfi?,
     messageTextCopy: MessageTextCopy,
     onCancelReply: () -> Unit,
@@ -16710,6 +16742,10 @@ private fun ComposerBar(
     onBottomInputChanged: () -> Unit = {},
 ) {
     var attachMenuOpen by remember { mutableStateOf(false) }
+    // #324: three-state composer expansion. Keyed on draftKey (like the field
+    // state) so switching chats resets to the compact pill; the draft text
+    // itself survives via onDraftChange/initialDraft.
+    var composerExpansion by remember(draftKey) { mutableStateOf(ComposerExpansion.Compact) }
     var composerEmojiPickerOpen by remember { mutableStateOf(false) }
     var composerEmojiSearchActive by remember { mutableStateOf(false) }
     var composerKeyboardRestorePending by remember { mutableStateOf(false) }
@@ -16846,6 +16882,22 @@ private fun ComposerBar(
         composerKeyboardRestorePending = false
         composerEmojiPickerOpen = false
     }
+
+    fun applyComposerExpansion(next: ComposerExpansion) {
+        if (next == composerExpansion) return
+        composerExpansion = next
+        // Reanchor the transcript for the new bottom-input height. Focus and
+        // the IME are deliberately untouched so an open keyboard stays open
+        // across every expand/collapse (same hygiene as #207/#284/#323).
+        onBottomInputChanged()
+    }
+
+    // #324: system back collapses the composer one step (FullScreen →
+    // Expanded → Compact). Gated on the emoji pane being closed so a visible
+    // pane still dismisses first via its own handler above.
+    BackHandler(enabled = composerExpansion != ComposerExpansion.Compact && !composerEmojiPickerOpen) {
+        applyComposerExpansion(collapsedComposerExpansion(composerExpansion))
+    }
     var autoFocusConsumed by remember { mutableStateOf(false) }
     LaunchedEffect(autoFocusOnEnter, editingMessageId) {
         if (autoFocusOnEnter && !autoFocusConsumed && editingMessageId == null) {
@@ -16938,232 +16990,326 @@ private fun ComposerBar(
         attachMenuOpen = false
         restoreKeyboardFromEmojiPane()
     }
-    Column(
-        modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .then(if (showEmojiPane) Modifier else Modifier.imePadding()),
-    ) {
+    val isFullScreenComposer = composerExpansion == ComposerExpansion.FullScreen
+    // #324: the Scaffold measures its bottom bar with the whole screen height
+    // available, so BoxWithConstraints reads the true expansion ceiling: the
+    // top of the safe area (everything minus the status bar). The nav-bar/IME
+    // paddings inside then keep the growing field pinned to the keyboard's
+    // top edge in every state.
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val statusBarTop = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+        val boundedHeight =
+            if (maxHeight == Dp.Infinity) {
+                LocalConfiguration.current.screenHeightDp.dp
+            } else {
+                maxHeight
+            }
+        val expansionCeiling = (boundedHeight - statusBarTop).coerceAtLeast(0.dp)
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .then(
+                    when (composerExpansion) {
+                        ComposerExpansion.Compact -> Modifier
+                        ComposerExpansion.Expanded -> Modifier.heightIn(max = expansionCeiling)
+                        ComposerExpansion.FullScreen -> Modifier.height(expansionCeiling)
+                    },
+                )
+                // Past its resting height the bar overdraws the transcript and
+                // (in full screen) the top app bar, so it needs an opaque
+                // backdrop matching the Scaffold background it normally lets
+                // show through.
+                .then(
+                    if (composerExpansion == ComposerExpansion.Compact) {
+                        Modifier
+                    } else {
+                        Modifier.background(MaterialTheme.colorScheme.background)
+                    },
+                ).navigationBarsPadding()
+                .then(if (showEmojiPane) Modifier else Modifier.imePadding()),
         ) {
-            if (editingMessageId != null) {
+            if (isFullScreenComposer) {
+                // Full-screen back affordance: collapses one step (back to
+                // Expanded, never straight to Compact) without touching focus,
+                // so the keyboard stays up.
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(10.dp),
+                        .padding(horizontal = 12.dp)
+                        .padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(R.string.editing_message),
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    IconButton(onClick = onCancelEdit, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cancel_edit), modifier = Modifier.size(18.dp))
-                    }
-                }
-            } else if (replyingTo != null) {
-                val refs = remember(replyingTo.tags) { MediaReferenceParser.parseAllImetaTags(replyingTo.tags) }
-                val mediaKind = remember(refs) { replyMediaKindFromMime(refs.firstOrNull()?.mediaType) }
-                ReplyPreviewCard(
-                    senderTitle =
-                        if (replyingTo.direction == "sent") {
-                            stringResource(R.string.reply_you)
-                        } else {
-                            appState?.displayName(replyingTo.sender) ?: replyingTo.sender.take(8)
-                        },
-                    isOwn = replyingTo.direction == "sent",
-                    body = MessageProjector.displayBody(replyingTo, messageTextCopy),
-                    mediaKind = mediaKind,
-                    onClick = null,
-                    onDismiss = onCancelReply,
-                    mentionDisplayName = appState?.let { state -> { state.mentionDisplayName(it) } },
-                )
-            }
-            // #414: live @-mention picker. Compute the open query from the current
-            // caret; suppressed entirely in DMs and while editing/recording or with
-            // no roster. Anchored directly above the composer input row, capped at
-            // ~50% of the viewport height.
-            val mentionQuery =
-                if (mentionPickerEnabled && editingMessageId == null) {
-                    MentionComposer
-                        .activeMentionQuery(textFieldValue.text, textFieldValue.selection.start)
-                        .takeIf { textFieldValue.selection.collapsed }
-                } else {
-                    null
-                }
-            val mentionMatches =
-                remember(mentionQuery?.query, mentionCandidates) {
-                    if (mentionQuery == null) emptyList() else MentionComposer.filter(mentionQuery.query, mentionCandidates)
-                }
-            if (mentionQuery != null && mentionMatches.isNotEmpty()) {
-                val openQuery = mentionQuery
-                MentionPicker(
-                    candidates = mentionMatches,
-                    onPick = { candidate ->
-                        val insertion = MentionComposer.insertMention(textFieldValue.text, openQuery, candidate)
-                        val updated = TextFieldValue(text = insertion.text, selection = TextRange(insertion.selection))
-                        textFieldValue = updated
-                        if (editingMessageId == null) onDraftChange(updated.text)
-                        runCatching { composerFocus.requestFocus() }
-                        composerEmojiPickerOpen = false
-                    },
-                )
-            }
-            val activeRecordingController = voiceRecordingController?.takeIf { it.isRecording }
-            val isRecordingVoice = activeRecordingController != null
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Keep the text field composed while recording. Removing the focused
-                // BasicTextField makes Android dismiss the IME, which then removes
-                // imePadding and drops this whole bottom bar under the user's finger.
-                // The recording strip is only a visual overlay; focus stays with the
-                // hidden composer so an already-open keyboard remains open.
-                Box(modifier = Modifier.weight(1f)) {
-                    ComposerPill(
-                        textFieldValue = textFieldValue,
-                        composerFocus = composerFocus,
-                        emojiPickerOpen = composerEmojiPickerOpen,
-                        onComposerFocusChanged = { focused ->
-                            if (focused && composerEmojiPickerOpen) restoreKeyboardFromEmojiPane()
-                            onComposerFocusChanged(focused)
-                        },
-                        onValueChange = { value ->
-                            if (!isRecordingVoice) {
-                                // #414: a single Backspace at the right edge of an
-                                // `@npub1…` chip (or just past its trailing space,
-                                // the post-insert caret position) deletes the whole
-                                // chip in one keypress, so a mention reads as one
-                                // token. Falls through to the verbatim IME edit
-                                // otherwise.
-                                //
-                                // #607: an IME swipe-to-delete (hold-backspace and
-                                // swipe) fires per-char or multi-char deletes that
-                                // can land *inside* a chip, chopping it into a
-                                // truncated `@npub1…` run. A partial chip corrupts
-                                // the npub reference and crashes the composer's
-                                // chip renderer / offset mapping. repairChipDeletion
-                                // detects any deletion that partially overlaps a
-                                // chip and widens it to remove the whole chip, so a
-                                // partial-chip state can never reach the renderer.
-                                val whole =
-                                    MentionComposer.wholeChipBackspace(
-                                        oldText = textFieldValue.text,
-                                        oldCaret = textFieldValue.selection.start,
-                                        newText = value.text,
-                                        newCaret = value.selection.start,
-                                    )
-                                        ?: MentionComposer.repairChipDeletion(
-                                            oldText = textFieldValue.text,
-                                            newText = value.text,
-                                        )
-                                val edited =
-                                    if (whole != null) {
-                                        TextFieldValue(text = whole.text, selection = TextRange(whole.selection))
-                                    } else {
-                                        value
-                                    }
-                                // #414: keep the caret/selection out of the interior
-                                // of any `@npub1…` chip so a tap, drag, or arrow key
-                                // can't land inside the token (which would let a
-                                // stray edit corrupt it or reopen the picker
-                                // mid-token). Only in groups, where chips exist.
-                                val applied =
-                                    if (mentionPickerEnabled) {
-                                        val clamped =
-                                            MentionComposer.clampSelectionOutOfChips(
-                                                edited.text,
-                                                edited.selection.start,
-                                                edited.selection.end,
-                                            )
-                                        if (clamped.start != edited.selection.start ||
-                                            clamped.end != edited.selection.end
-                                        ) {
-                                            edited.copy(selection = TextRange(clamped.start, clamped.end))
-                                        } else {
-                                            edited
-                                        }
-                                    } else {
-                                        edited
-                                    }
-                                applyComposerFieldValue(applied)
-                            }
-                        },
-                        onEmojiPickerToggle = {
-                            if (composerEmojiPickerOpen) {
-                                showKeyboardFromEmojiPane()
-                            } else {
-                                openComposerEmojiPane()
-                            }
-                        },
-                        onAttachMenuToggle = { attachMenuOpen = !attachMenuOpen },
-                        attachMenuOpen = attachMenuOpen,
-                        onAttachMenuDismiss = { attachMenuOpen = false },
-                        onCaptureFromCamera = onCaptureFromCamera,
-                        onPickFromGallery = onPickFromGallery,
-                        onPickDocument = onPickDocument,
-                        // #414: tint inserted `@npub1…` chips so they read as a
-                        // single styled token while composing. Only when the picker
-                        // is enabled (groups) — DMs never insert chips.
-                        highlightMentionChips = mentionPickerEnabled,
-                        mentionCandidates = mentionCandidates,
-                        enterKeyBehavior = enterKeyBehavior,
-                        onImeSend = submitMessage,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .alpha(if (isRecordingVoice) 0f else 1f)
-                                .then(if (isRecordingVoice) Modifier.clearAndSetSemantics {} else Modifier),
-                    )
-                    if (activeRecordingController != null) {
-                        RecordingStripLeading(
-                            controller = activeRecordingController,
-                            modifier =
-                                Modifier
-                                    .matchParentSize()
-                                    .pointerInput(activeRecordingController) {
-                                        awaitPointerEventScope {
-                                            while (true) {
-                                                val event = awaitPointerEvent()
-                                                event.changes.forEach { it.consume() }
-                                            }
-                                        }
-                                    },
+                    IconButton(
+                        onClick = { applyComposerExpansion(collapsedComposerExpansion(composerExpansion)) },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.composer_exit_full_screen),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                 }
-                // Trailing MicHoldButton call site below must stay shared by both
-                // recording and non-recording states; separate call sites break the
-                // pointer-gesture identity for the active hold gesture.
-                val showMicButton =
-                    (text.isBlank() || isRecordingVoice) &&
-                        editingMessageId == null &&
-                        voiceRecordingController != null
-                if (showMicButton && voiceRecordingController?.locked == true) {
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (isFullScreenComposer) Modifier.weight(1f) else Modifier)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (editingMessageId != null) {
                     Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        IconButton(
-                            onClick = { voiceRecordingController.cancel() },
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.voice_message_cancel),
-                                tint = MaterialTheme.colorScheme.error,
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.editing_message),
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        IconButton(onClick = onCancelEdit, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cancel_edit), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                } else if (replyingTo != null) {
+                    val refs = remember(replyingTo.tags) { MediaReferenceParser.parseAllImetaTags(replyingTo.tags) }
+                    val mediaKind = remember(refs) { replyMediaKindFromMime(refs.firstOrNull()?.mediaType) }
+                    ReplyPreviewCard(
+                        senderTitle =
+                            if (replyingTo.direction == "sent") {
+                                stringResource(R.string.reply_you)
+                            } else {
+                                appState?.displayName(replyingTo.sender) ?: replyingTo.sender.take(8)
+                            },
+                        isOwn = replyingTo.direction == "sent",
+                        body = MessageProjector.displayBody(replyingTo, messageTextCopy),
+                        mediaKind = mediaKind,
+                        onClick = null,
+                        onDismiss = onCancelReply,
+                        mentionDisplayName = appState?.let { state -> { state.mentionDisplayName(it) } },
+                    )
+                }
+                // #414: live @-mention picker. Compute the open query from the current
+                // caret; suppressed entirely in DMs and while editing/recording or with
+                // no roster. Anchored directly above the composer input row, capped at
+                // ~50% of the viewport height.
+                val mentionQuery =
+                    if (mentionPickerEnabled && editingMessageId == null) {
+                        MentionComposer
+                            .activeMentionQuery(textFieldValue.text, textFieldValue.selection.start)
+                            .takeIf { textFieldValue.selection.collapsed }
+                    } else {
+                        null
+                    }
+                val mentionMatches =
+                    remember(mentionQuery?.query, mentionCandidates) {
+                        if (mentionQuery == null) emptyList() else MentionComposer.filter(mentionQuery.query, mentionCandidates)
+                    }
+                if (mentionQuery != null && mentionMatches.isNotEmpty()) {
+                    val openQuery = mentionQuery
+                    MentionPicker(
+                        candidates = mentionMatches,
+                        onPick = { candidate ->
+                            val insertion = MentionComposer.insertMention(textFieldValue.text, openQuery, candidate)
+                            val updated = TextFieldValue(text = insertion.text, selection = TextRange(insertion.selection))
+                            textFieldValue = updated
+                            if (editingMessageId == null) onDraftChange(updated.text)
+                            runCatching { composerFocus.requestFocus() }
+                            composerEmojiPickerOpen = false
+                        },
+                    )
+                }
+                val activeRecordingController = voiceRecordingController?.takeIf { it.isRecording }
+                val isRecordingVoice = activeRecordingController != null
+                Row(
+                    // Bottom-anchor the trailing send/mic controls so they sit on
+                    // the IME top edge and never drift upward as the field grows
+                    // (#324); at the resting single-line height this is identical
+                    // to the old centered alignment.
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = if (isFullScreenComposer) Modifier.weight(1f) else Modifier,
+                ) {
+                    // Keep the text field composed while recording. Removing the focused
+                    // BasicTextField makes Android dismiss the IME, which then removes
+                    // imePadding and drops this whole bottom bar under the user's finger.
+                    // The recording strip is only a visual overlay; focus stays with the
+                    // hidden composer so an already-open keyboard remains open.
+                    Box(
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .then(if (isFullScreenComposer) Modifier.fillMaxHeight() else Modifier),
+                    ) {
+                        ComposerPill(
+                            textFieldValue = textFieldValue,
+                            composerFocus = composerFocus,
+                            emojiPickerOpen = composerEmojiPickerOpen,
+                            onComposerFocusChanged = { focused ->
+                                if (focused && composerEmojiPickerOpen) restoreKeyboardFromEmojiPane()
+                                onComposerFocusChanged(focused)
+                            },
+                            onValueChange = { value ->
+                                if (!isRecordingVoice) {
+                                    // #414: a single Backspace at the right edge of an
+                                    // `@npub1…` chip (or just past its trailing space,
+                                    // the post-insert caret position) deletes the whole
+                                    // chip in one keypress, so a mention reads as one
+                                    // token. Falls through to the verbatim IME edit
+                                    // otherwise.
+                                    //
+                                    // #607: an IME swipe-to-delete (hold-backspace and
+                                    // swipe) fires per-char or multi-char deletes that
+                                    // can land *inside* a chip, chopping it into a
+                                    // truncated `@npub1…` run. A partial chip corrupts
+                                    // the npub reference and crashes the composer's
+                                    // chip renderer / offset mapping. repairChipDeletion
+                                    // detects any deletion that partially overlaps a
+                                    // chip and widens it to remove the whole chip, so a
+                                    // partial-chip state can never reach the renderer.
+                                    val whole =
+                                        MentionComposer.wholeChipBackspace(
+                                            oldText = textFieldValue.text,
+                                            oldCaret = textFieldValue.selection.start,
+                                            newText = value.text,
+                                            newCaret = value.selection.start,
+                                        )
+                                            ?: MentionComposer.repairChipDeletion(
+                                                oldText = textFieldValue.text,
+                                                newText = value.text,
+                                            )
+                                    val edited =
+                                        if (whole != null) {
+                                            TextFieldValue(text = whole.text, selection = TextRange(whole.selection))
+                                        } else {
+                                            value
+                                        }
+                                    // #414: keep the caret/selection out of the interior
+                                    // of any `@npub1…` chip so a tap, drag, or arrow key
+                                    // can't land inside the token (which would let a
+                                    // stray edit corrupt it or reopen the picker
+                                    // mid-token). Only in groups, where chips exist.
+                                    val applied =
+                                        if (mentionPickerEnabled) {
+                                            val clamped =
+                                                MentionComposer.clampSelectionOutOfChips(
+                                                    edited.text,
+                                                    edited.selection.start,
+                                                    edited.selection.end,
+                                                )
+                                            if (clamped.start != edited.selection.start ||
+                                                clamped.end != edited.selection.end
+                                            ) {
+                                                edited.copy(selection = TextRange(clamped.start, clamped.end))
+                                            } else {
+                                                edited
+                                            }
+                                        } else {
+                                            edited
+                                        }
+                                    applyComposerFieldValue(applied)
+                                }
+                            },
+                            onEmojiPickerToggle = {
+                                if (composerEmojiPickerOpen) {
+                                    showKeyboardFromEmojiPane()
+                                } else {
+                                    openComposerEmojiPane()
+                                }
+                            },
+                            onAttachMenuToggle = { attachMenuOpen = !attachMenuOpen },
+                            attachMenuOpen = attachMenuOpen,
+                            onAttachMenuDismiss = { attachMenuOpen = false },
+                            onCaptureFromCamera = onCaptureFromCamera,
+                            onPickFromGallery = onPickFromGallery,
+                            onPickDocument = onPickDocument,
+                            // #414: tint inserted `@npub1…` chips so they read as a
+                            // single styled token while composing. Only when the picker
+                            // is enabled (groups) — DMs never insert chips.
+                            highlightMentionChips = mentionPickerEnabled,
+                            mentionCandidates = mentionCandidates,
+                            enterKeyBehavior = enterKeyBehavior,
+                            onImeSend = submitMessage,
+                            expansion = composerExpansion,
+                            onExpansionToggle = {
+                                applyComposerExpansion(advancedComposerExpansion(composerExpansion))
+                            },
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .then(if (isFullScreenComposer) Modifier.fillMaxHeight() else Modifier)
+                                    .alpha(if (isRecordingVoice) 0f else 1f)
+                                    .then(if (isRecordingVoice) Modifier.clearAndSetSemantics {} else Modifier),
+                        )
+                        if (activeRecordingController != null) {
+                            RecordingStripLeading(
+                                controller = activeRecordingController,
+                                modifier =
+                                    Modifier
+                                        .matchParentSize()
+                                        .pointerInput(activeRecordingController) {
+                                            awaitPointerEventScope {
+                                                while (true) {
+                                                    val event = awaitPointerEvent()
+                                                    event.changes.forEach { it.consume() }
+                                                }
+                                            }
+                                        },
                             )
                         }
+                    }
+                    // Trailing MicHoldButton call site below must stay shared by both
+                    // recording and non-recording states; separate call sites break the
+                    // pointer-gesture identity for the active hold gesture.
+                    val showMicButton =
+                        (text.isBlank() || isRecordingVoice) &&
+                            editingMessageId == null &&
+                            voiceRecordingController != null
+                    if (showMicButton && voiceRecordingController?.locked == true) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            IconButton(
+                                onClick = { voiceRecordingController.cancel() },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = stringResource(R.string.voice_message_cancel),
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            FloatingActionButton(
+                                onClick = { voiceRecordingController.stop() },
+                                modifier = Modifier.size(44.dp),
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = stringResource(R.string.send),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    } else if (showMicButton) {
+                        Box(contentAlignment = Alignment.BottomCenter) {
+                            LockHintAbove(controller = voiceRecordingController!!)
+                            MicHoldButton(controller = voiceRecordingController)
+                        }
+                    } else {
                         FloatingActionButton(
-                            onClick = { voiceRecordingController.stop() },
+                            onClick = { submitMessage() },
                             modifier = Modifier.size(44.dp),
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -17175,41 +17321,23 @@ private fun ComposerBar(
                             )
                         }
                     }
-                } else if (showMicButton) {
-                    Box(contentAlignment = Alignment.BottomCenter) {
-                        LockHintAbove(controller = voiceRecordingController!!)
-                        MicHoldButton(controller = voiceRecordingController)
-                    }
-                } else {
-                    FloatingActionButton(
-                        onClick = { submitMessage() },
-                        modifier = Modifier.size(44.dp),
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = stringResource(R.string.send),
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
                 }
             }
-        }
-        if (showEmojiPane) {
-            ComposerEmojiPickerPane(
-                height = emojiPaneHeight,
-                alpha = emojiPaneAlpha,
-                onEmojiPicked = { emoji ->
-                    val updated = insertComposerEmoji(textFieldValue, emoji)
-                    applyComposerFieldValue(updated)
-                },
-                onBackspace = ::deleteFromComposer,
-                onSearchActiveChange = {
-                    composerEmojiSearchActive = it
-                    onBottomInputChanged()
-                },
-            )
+            if (showEmojiPane) {
+                ComposerEmojiPickerPane(
+                    height = emojiPaneHeight,
+                    alpha = emojiPaneAlpha,
+                    onEmojiPicked = { emoji ->
+                        val updated = insertComposerEmoji(textFieldValue, emoji)
+                        applyComposerFieldValue(updated)
+                    },
+                    onBackspace = ::deleteFromComposer,
+                    onSearchActiveChange = {
+                        composerEmojiSearchActive = it
+                        onBottomInputChanged()
+                    },
+                )
+            }
         }
     }
 }
@@ -17602,10 +17730,15 @@ private fun ComposerPill(
     mentionCandidates: List<MentionComposer.Candidate> = emptyList(),
     enterKeyBehavior: EnterKeyBehavior = EnterKeyBehavior.SendMessage,
     onImeSend: () -> Unit = {},
+    // #324: current expansion state plus the expand-arrow tap that advances
+    // it (Compact → Expanded → FullScreen → Compact).
+    expansion: ComposerExpansion = ComposerExpansion.Compact,
+    onExpansionToggle: () -> Unit = {},
     // #589: report the BasicTextField's focus edge up so the conversation
     // screen can record whether the keyboard was up when the app was paused.
     onComposerFocusChanged: (Boolean) -> Unit = {},
 ) {
+    val isFullScreen = expansion == ComposerExpansion.FullScreen
     // #414/#442: paint stored `@npub1…` chip runs as friendly visible labels
     // (`@alice` when the profile is resolved, short `@npub1…` otherwise)
     // while keeping the backing TextFieldValue canonical for send/markdown.
@@ -17672,10 +17805,19 @@ private fun ComposerPill(
         modifier = modifier,
     ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            // In the expanded states the pill grows well past one line, so the
+            // leading/trailing controls pin to the bottom edge next to Send;
+            // at the compact resting height Bottom and Center coincide.
+            verticalAlignment =
+                if (expansion == ComposerExpansion.Compact) {
+                    Alignment.CenterVertically
+                } else {
+                    Alignment.Bottom
+                },
             modifier =
                 Modifier
                     .heightIn(min = 44.dp)
+                    .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
                     .padding(start = 4.dp, end = 4.dp),
         ) {
             IconButton(
@@ -17700,6 +17842,7 @@ private fun ComposerPill(
                 modifier =
                     Modifier
                         .weight(1f)
+                        .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
                         .padding(vertical = 10.dp),
             ) {
                 BasicTextField(
@@ -17708,6 +17851,7 @@ private fun ComposerPill(
                     modifier =
                         Modifier
                             .fillMaxWidth()
+                            .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
                             .focusRequester(composerFocus)
                             // #589: track focus so the conversation screen's
                             // resume observer knows whether the keyboard was up
@@ -17756,7 +17900,11 @@ private fun ComposerPill(
                                 },
                         ),
                     keyboardActions = KeyboardActions(onSend = { onImeSend() }),
-                    maxLines = 5,
+                    // #324: the compact pill keeps its classic small cap; the
+                    // expanded states auto-grow line-by-line with no line cap —
+                    // the height ceiling in ComposerBar bounds them instead,
+                    // after which the field scrolls internally.
+                    maxLines = if (expansion == ComposerExpansion.Compact) 5 else Int.MAX_VALUE,
                 )
                 if (textFieldValue.text.isEmpty()) {
                     Text(
@@ -17818,6 +17966,32 @@ private fun ComposerPill(
                         modifier = Modifier.size(22.dp),
                     )
                 }
+            }
+            // #324: expansion cycle arrow. Pinned to the pill's top-right and
+            // deliberately smaller than the other controls so it never
+            // competes with Send. Toggling only swaps layout modifiers — the
+            // BasicTextField stays composed, so an open IME stays open.
+            IconButton(
+                onClick = onExpansionToggle,
+                modifier =
+                    Modifier
+                        .align(Alignment.Top)
+                        .padding(top = 8.dp)
+                        .size(28.dp),
+            ) {
+                Icon(
+                    if (isFullScreen) Icons.Default.CloseFullscreen else Icons.Default.OpenInFull,
+                    contentDescription =
+                        stringResource(
+                            when (expansion) {
+                                ComposerExpansion.Compact -> R.string.composer_expand
+                                ComposerExpansion.Expanded -> R.string.composer_expand_full_screen
+                                ComposerExpansion.FullScreen -> R.string.composer_collapse
+                            },
+                        ),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
             }
         }
     }

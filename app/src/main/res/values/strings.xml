@@ -257,6 +257,10 @@
     <string name="copy_text">Copy text</string>
     <string name="open_emoji_picker">Open emoji picker</string>
     <string name="show_keyboard">Show keyboard</string>
+    <string name="composer_expand">Expand message field</string>
+    <string name="composer_expand_full_screen">Open full-screen editor</string>
+    <string name="composer_collapse">Collapse message field</string>
+    <string name="composer_exit_full_screen">Exit full-screen editor</string>
     <string name="emoji_backspace">Delete emoji</string>
     <string name="customize_reactions">Customize reactions</string>
     <string name="customize_reactions_hint">Tap to replace an emoji</string>

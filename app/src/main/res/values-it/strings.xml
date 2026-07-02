@@ -197,6 +197,10 @@
     <string name="copy_text">Copia testo</string>
     <string name="open_emoji_picker">Apri selettore emoji</string>
     <string name="show_keyboard">Mostra tastiera</string>
+    <string name="composer_expand">Espandi il campo del messaggio</string>
+    <string name="composer_expand_full_screen">Apri l\'editor a schermo intero</string>
+    <string name="composer_collapse">Comprimi il campo del messaggio</string>
+    <string name="composer_exit_full_screen">Esci dall\'editor a schermo intero</string>
     <string name="emoji_backspace">Elimina emoji</string>
     <string name="customize_reactions">Personalizza reazioni</string>
     <string name="customize_reactions_hint">Tocca per sostituire un emoji</string>
