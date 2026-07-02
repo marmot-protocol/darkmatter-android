@@ -645,7 +645,7 @@ private fun VoiceLibraryRow(
             .map { playback -> playback.key == pillKey && playback.isPlaying }
             .distinctUntilChanged()
     }.collectAsState(false)
-    val recordedAtLabel = remember(context, row.recordedAt) { relativeTimestamp(context, row.recordedAt) }
+    val recordedAtLabel = rememberRelativeTimestamp(row.recordedAt)
 
     Row(
         modifier =
@@ -771,7 +771,7 @@ private fun FileLibraryRow(
     var menuOpen by remember(row.messageIdHex, row.attachmentIndex) { mutableStateOf(false) }
     val noOpenAppMessage = stringResource(R.string.media_no_app_to_open)
     val couldntOpenMessage = stringResource(R.string.media_couldnt_open)
-    val recordedAtLabel = remember(context, row.recordedAt) { relativeTimestamp(context, row.recordedAt) }
+    val recordedAtLabel = rememberRelativeTimestamp(row.recordedAt)
 
     // The tap is the user-initiated download trigger — files never auto-fetch
     // in the library. Prefer retained bytes for own in-flight sends, mirroring
@@ -991,8 +991,7 @@ private fun UrlLibraryRow(
     // from it opportunistically; any favicon/metadata fetch must be https-only
     // and pass HostSafety.isPrivateOrLoopbackHost before any network hop.
     val host = remember(entry.url) { hostOf(entry.url) }
-    val context = LocalContext.current
-    val recordedAtLabel = remember(context, entry.recordedAt) { relativeTimestamp(context, entry.recordedAt) }
+    val recordedAtLabel = rememberRelativeTimestamp(entry.recordedAt)
     Row(
         modifier =
             Modifier
@@ -1044,6 +1043,12 @@ private fun UrlLibraryRow(
             )
         }
     }
+}
+
+@Composable
+private fun rememberRelativeTimestamp(recordedAt: ULong): String {
+    val context = LocalContext.current
+    return remember(context, recordedAt) { relativeTimestamp(context, recordedAt) }
 }
 
 @Composable
