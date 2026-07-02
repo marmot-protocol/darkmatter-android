@@ -1810,6 +1810,11 @@ private fun ChatsScreen(
     var newChatDirect by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
     var quickActionsExpanded by remember { mutableStateOf(false) }
+    // One-tap "show my QR" shortcut (issue #819). Captures the ACTIVE account's
+    // id at tap time — the same contract as the Settings header's QR entry — so
+    // a background account switch while the sheet is up can't swap the identity
+    // being shown mid-handoff.
+    var myQrAccountId by remember { mutableStateOf<String?>(null) }
     var pendingDelete by remember { mutableStateOf<ChatListItem?>(null) }
     // Search expand/collapse + live query. The search input is anchored in
     // the top bar; tapping the magnifier swaps the chrome (account avatar
@@ -1840,12 +1845,14 @@ private fun ChatsScreen(
     // Lift the app-level toast host (it flows through WhiteNoiseSnackbarHost,
     // which reads LocalSnackbarBottomInset) above the quick-action FAB so a
     // toast — e.g. the archive confirmation — can't sit over the FAB and
-    // intercept its taps for the toast's duration — issue #352. Resets to
-    // zero on dispose so other surfaces aren't affected, mirroring
-    // ConversationScreen's composer lift (#122).
+    // intercept its taps for the toast's duration — issue #352. Lifted a
+    // further mini-FAB step so it also clears the persistent my-QR mini-FAB
+    // stacked above the quick-action FAB (#819). Resets to zero on dispose so
+    // other surfaces aren't affected, mirroring ConversationScreen's composer
+    // lift (#122).
     val snackbarBottomInset = LocalSnackbarBottomInset.current
     DisposableEffect(Unit) {
-        snackbarBottomInset.value = FAB_SNACKBAR_INSET
+        snackbarBottomInset.value = FAB_SNACKBAR_INSET + CHAT_LIST_MINI_FAB_STEP
         onDispose { snackbarBottomInset.value = 0.dp }
     }
 
@@ -2196,14 +2203,36 @@ private fun ChatsScreen(
                             }
                         }
                 }
+                // One-tap "show my QR" mini-FAB (issue #819), stacked directly
+                // above the quick-action FAB following the #451 mini-FAB column
+                // pattern. Persistent across list states (including the fresh-
+                // identity empty state) so an in-person identity handoff is
+                // always one tap away; hidden with the quick-action FAB while
+                // search is open so no FAB floats over the search results.
+                if (!searchOpen) {
+                    ChatListMyQrFab(
+                        onClick = { myQrAccountId = appState.activeAccount?.accountIdHex },
+                        modifier =
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .navigationBarsPadding()
+                                // end = 24dp (not 16) so this 40dp small FAB's
+                                // centre lines up with the 56dp quick-action FAB
+                                // below it, which the Scaffold insets 16dp from
+                                // the edge: 24 + 40/2 == 16 + 56/2 (#451).
+                                .padding(end = 24.dp, bottom = FAB_SNACKBAR_INSET),
+                    )
+                }
                 // Jump-to-top FAB (issue #413). Overlaid on the chat-list Box
                 // (a sibling of the list `when`) and aligned bottom-end so it
                 // floats above the rows. Fades + slides in from the bottom-right
                 // when the user is scrolled deep, hides near the top — the
                 // `jumpToTopVisible` hysteresis above debounces threshold
-                // jitter. Lifted by FAB_SNACKBAR_INSET (the same clearance the
-                // snackbar host uses, #352/#356) on top of the navigation-bar
-                // inset so it clears the quick-action FAB and the nav bar.
+                // jitter. Lifted by FAB_SNACKBAR_INSET (the clearance the
+                // quick-action FAB occupies, #352/#356) plus one mini-FAB step
+                // (the my-QR FAB now holds the first stacked slot, #819) on top
+                // of the navigation-bar inset so the column reads quick-action →
+                // my-QR → jump-to-top from the bottom.
                 // Fully-qualified so Kotlin binds the top-level overload rather
                 // than the ColumnScope extension (the outer Column is also an
                 // implicit receiver here) — the bottom-end alignment is carried
@@ -2216,11 +2245,7 @@ private fun ChatsScreen(
                         Modifier
                             .align(Alignment.BottomEnd)
                             .navigationBarsPadding()
-                            // end = 24dp (not 16) so this 40dp small FAB's centre
-                            // lines up with the 56dp quick-action FAB above it,
-                            // which the Scaffold insets 16dp from the edge:
-                            // 24 + 40/2 == 16 + 56/2 (#451).
-                            .padding(end = 24.dp, bottom = FAB_SNACKBAR_INSET),
+                            .padding(end = 24.dp, bottom = FAB_SNACKBAR_INSET + CHAT_LIST_MINI_FAB_STEP),
                 ) {
                     SmallFloatingActionButton(
                         onClick = {
@@ -2248,7 +2273,8 @@ private fun ChatsScreen(
                 // beneath and opens the wrong chat (#452). Transparent (no dim) —
                 // it only consumes the gesture and collapses the menu. The menu
                 // sits in the Scaffold FAB slot above this Box, so its items stay
-                // tappable; this also blocks the jump-to-top FAB while open.
+                // tappable; this also blocks the jump-to-top and my-QR FABs
+                // while open.
                 if (quickActionsExpanded) {
                     Box(
                         Modifier
@@ -2294,6 +2320,15 @@ private fun ChatsScreen(
                     appState.presentProfile(scanned.npub)
                 }
             },
+        )
+    }
+    // Same sheet the Settings account header opens (#819) — one shared QR
+    // surface, so scan-back handling and the share affordance stay identical.
+    myQrAccountId?.let { accountId ->
+        ProfileQrSheet(
+            appState = appState,
+            accountIdHex = accountId,
+            onDismiss = { myQrAccountId = null },
         )
     }
     pendingDelete?.let { item ->
@@ -3501,6 +3536,25 @@ fun QuickActionFabMenu(
 }
 
 /**
+ * One-tap shortcut to the user's own profile QR (issue #819), stacked in the
+ * chat-list FAB column so an in-person identity handoff never has to route
+ * through Profile → QR. Just the button — the caller owns placement and opens
+ * the shared [ProfileQrSheet] for the active account.
+ */
+@Composable
+fun ChatListMyQrFab(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SmallFloatingActionButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            Icons.Default.QrCode,
+            contentDescription = stringResource(R.string.my_qr_code),
+        )
+    }
+}
+
+/**
  * Render a [SnippetHighlight] as an [AnnotatedString] with the matched needle
  * range styled by [highlight]. The range is guaranteed valid by
  * `ChatListMessageSearch.buildSnippet`, but we clamp defensively so a future
@@ -4419,6 +4473,12 @@ private val COMPOSER_SNACKBAR_INSET = 72.dp
 // the bottom inset; 80.dp clears that stack with a small gap so the lifted
 // snackbar reads as sitting *above* the FAB, per Material guidance.
 private val FAB_SNACKBAR_INSET = 80.dp
+
+// One slot in the chat-list stacked mini-FAB column (#451/#819): a 40dp
+// SmallFloatingActionButton plus an 8dp gap. Each mini-FAB stacked above the
+// quick-action FAB adds one step to the overlays above it (jump-to-top FAB,
+// lifted snackbars).
+private val CHAT_LIST_MINI_FAB_STEP = 48.dp
 
 // Chat-list jump-to-top FAB thresholds (issue #413). The button shows once the
 // first visible row index reaches SHOW, and only hides again once it falls back
