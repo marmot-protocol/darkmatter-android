@@ -518,6 +518,7 @@
     <string name="donate_bitcoin_silent_payment">Pago silencioso de Bitcoin</string>
     <string name="donate_show_qr">Mostrar QR</string>
     <string name="donate_qr_dialog_title">Escanea para donar</string>
+    <string name="donate_qr_code_content_description">Código QR para la dirección de donación %1$s: %2$s</string>
     <string name="theme">Tema</string>
     <string name="theme_system">Sistema</string>
     <string name="theme_light">Claro</string>

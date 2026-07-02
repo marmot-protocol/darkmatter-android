@@ -516,6 +516,7 @@
     <string name="donate_bitcoin_silent_payment">Bitcoin 静默支付</string>
     <string name="donate_show_qr">显示二维码</string>
     <string name="donate_qr_dialog_title">扫码捐赠</string>
+    <string name="donate_qr_code_content_description">%1$s 捐赠地址的二维码：%2$s</string>
     <string name="theme">主题</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>

@@ -19541,7 +19541,10 @@ private sealed interface ProfilePictureImageState {
 }
 
 @Composable
-private fun QrCodeImage(content: String) {
+private fun QrCodeImage(
+    content: String,
+    contentDescription: String = stringResource(R.string.profile_qr_code),
+) {
     val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, content) {
         value = withContext(Dispatchers.Default) { qrBitmap(content, 900).asImageBitmap() }
     }
@@ -19554,7 +19557,7 @@ private fun QrCodeImage(content: String) {
         } else {
             Image(
                 bitmap = image!!,
-                contentDescription = stringResource(R.string.profile_qr_code),
+                contentDescription = contentDescription,
                 modifier = Modifier.size(257.dp).padding(16.dp),
                 contentScale = ContentScale.Fit,
             )
@@ -21046,6 +21049,8 @@ private fun CopyableValueRow(
             ) {
                 clipboard.setText(AnnotatedString(value))
                 appState.presentText(AppText.Resource(R.string.toast_copied_value, listOf(label)))
+            }.semantics(mergeDescendants = true) {
+                contentDescription = "$label, $value"
             },
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -21133,7 +21138,10 @@ private fun DonationQrDialog(
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                 )
-                QrCodeImage(content = value)
+                QrCodeImage(
+                    content = value,
+                    contentDescription = stringResource(R.string.donate_qr_code_content_description, label, value),
+                )
                 Text(
                     label,
                     style = MaterialTheme.typography.labelLarge,

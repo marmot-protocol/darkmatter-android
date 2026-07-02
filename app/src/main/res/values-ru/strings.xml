@@ -524,6 +524,7 @@
     <string name="donate_bitcoin_silent_payment">Тихий платеж Bitcoin</string>
     <string name="donate_show_qr">Показать QR</string>
     <string name="donate_qr_dialog_title">Отсканируйте, чтобы пожертвовать</string>
+    <string name="donate_qr_code_content_description">QR-код для адреса пожертвования %1$s: %2$s</string>
     <string name="theme">Тема</string>
     <string name="theme_system">Системная</string>
     <string name="theme_light">Светлая</string>

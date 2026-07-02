@@ -518,6 +518,7 @@
     <string name="donate_bitcoin_silent_payment">Stille Bitcoin-Zahlung</string>
     <string name="donate_show_qr">QR anzeigen</string>
     <string name="donate_qr_dialog_title">Zum Spenden scannen</string>
+    <string name="donate_qr_code_content_description">QR-Code für Spendenadresse %1$s: %2$s</string>
     <string name="theme">Design</string>
     <string name="theme_system">System</string>
     <string name="theme_light">Hell</string>
