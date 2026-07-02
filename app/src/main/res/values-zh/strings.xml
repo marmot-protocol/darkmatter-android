@@ -197,7 +197,6 @@
     <string name="show_keyboard">显示键盘</string>
     <string name="composer_expand">展开消息输入框</string>
     <string name="composer_expand_full_screen">打开全屏编辑器</string>
-    <string name="composer_collapse">收起消息输入框</string>
     <string name="composer_exit_full_screen">退出全屏编辑器</string>
     <string name="composer_compact">返回紧凑输入框</string>
     <string name="composer_resize_handle">调整消息输入框大小</string>

@@ -199,7 +199,6 @@
     <string name="show_keyboard">Klavyeyi göster</string>
     <string name="composer_expand">Mesaj alanını genişlet</string>
     <string name="composer_expand_full_screen">Tam ekran düzenleyiciyi aç</string>
-    <string name="composer_collapse">Mesaj alanını daralt</string>
     <string name="composer_exit_full_screen">Tam ekran düzenleyiciden çık</string>
     <string name="composer_compact">Kompakt yazma alanına dön</string>
     <string name="composer_resize_handle">Mesaj alanını yeniden boyutlandır</string>

@@ -1,17 +1,27 @@
 package dev.ipf.whitenoise.android.ui
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import dev.ipf.whitenoise.android.R
 import dev.ipf.whitenoise.android.core.MessageTextCopy
 import dev.ipf.whitenoise.android.ui.theme.WhiteNoiseTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +46,8 @@ class ComposerBarExpansionTest {
     private val compactLabel = context.getString(R.string.composer_compact)
     private val exitFullScreenLabel = context.getString(R.string.composer_exit_full_screen)
     private val resizeHandleLabel = context.getString(R.string.composer_resize_handle)
+    private val sendLabel = context.getString(R.string.send)
+    private val composerBarTag = "composer-bar"
 
     private fun setComposer() {
         composeRule.setContent {
@@ -46,6 +58,22 @@ class ComposerBarExpansionTest {
                     onCancelReply = {},
                     onSend = { _, _ -> },
                 )
+            }
+        }
+    }
+
+    private fun setBottomAnchoredComposer() {
+        composeRule.setContent {
+            WhiteNoiseTheme {
+                Box(Modifier.size(width = 360.dp, height = 640.dp)) {
+                    ComposerBar(
+                        replyingTo = null,
+                        messageTextCopy = MessageTextCopy.Default,
+                        onCancelReply = {},
+                        onSend = { _, _ -> },
+                        modifier = Modifier.align(Alignment.BottomCenter).testTag(composerBarTag),
+                    )
+                }
             }
         }
     }
@@ -94,6 +122,39 @@ class ComposerBarExpansionTest {
         setComposer()
 
         composeRule.onNodeWithContentDescription(resizeHandleLabel).assertIsDisplayed()
+    }
+
+    @Test
+    fun draggedExpandedComposerKeepsSendAnchoredToBottom() {
+        setBottomAnchoredComposer()
+
+        val dragDistance = with(composeRule.density) { 220.dp.toPx() }
+        composeRule.onNodeWithContentDescription(resizeHandleLabel).performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -dragDistance))
+            up()
+        }
+        composeRule.waitForIdle()
+
+        val composerBottom =
+            composeRule
+                .onNodeWithTag(composerBarTag)
+                .fetchSemanticsNode()
+                .boundsInRoot
+                .bottom
+        val sendBottom =
+            composeRule
+                .onNodeWithContentDescription(sendLabel)
+                .fetchSemanticsNode()
+                .boundsInRoot
+                .bottom
+        val bottomGap = composerBottom - sendBottom
+        val maxAnchoredGap = with(composeRule.density) { 16.dp.toPx() }
+
+        assertTrue(
+            "Send should stay anchored to the bottom of the pinned Expanded composer; gap was $bottomGap px",
+            bottomGap in 0f..maxAnchoredGap,
+        )
     }
 
     @Test

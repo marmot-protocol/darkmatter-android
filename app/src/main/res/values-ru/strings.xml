@@ -203,7 +203,6 @@
     <string name="show_keyboard">Показать клавиатуру</string>
     <string name="composer_expand">Развернуть поле сообщения</string>
     <string name="composer_expand_full_screen">Открыть полноэкранный редактор</string>
-    <string name="composer_collapse">Свернуть поле сообщения</string>
     <string name="composer_exit_full_screen">Выйти из полноэкранного редактора</string>
     <string name="composer_compact">Вернуться к компактному редактору</string>
     <string name="composer_resize_handle">Изменить размер поля сообщения</string>

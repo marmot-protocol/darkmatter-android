@@ -199,7 +199,6 @@
     <string name="show_keyboard">Mostrar teclado</string>
     <string name="composer_expand">Expandir o campo de mensagem</string>
     <string name="composer_expand_full_screen">Abrir o editor em tela cheia</string>
-    <string name="composer_collapse">Recolher o campo de mensagem</string>
     <string name="composer_exit_full_screen">Sair do editor em tela cheia</string>
     <string name="composer_compact">Voltar ao compositor compacto</string>
     <string name="composer_resize_handle">Redimensionar campo de mensagem</string>

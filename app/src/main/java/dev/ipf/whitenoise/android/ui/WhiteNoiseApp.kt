@@ -124,7 +124,6 @@ import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
@@ -10228,8 +10227,8 @@ private fun ConversationScreen(
                             // is still unknown (e.g. right after an account switch),
                             // so the bottom inset is stable and the composer doesn't
                             // pop in over the last message once it resolves. Matches
-                            // ComposerBar's resting height (the 44.dp pill plus its
-                            // Column's 10.dp vertical padding top and bottom). Kept
+                            // ComposerBar's resting height (the 12.dp resize handle,
+                            // 44.dp pill, and 10.dp vertical padding top/bottom). Kept
                             // transparent so no surface colour flashes before the
                             // composer or notice resolves.
                             ComposerGate.PENDING ->
@@ -10238,7 +10237,7 @@ private fun ConversationScreen(
                                         .fillMaxWidth()
                                         .navigationBarsPadding()
                                         .imePadding()
-                                        .height(64.dp),
+                                        .height(ComposerCompactPinnedHeight),
                                 )
                             ComposerGate.NOTICE -> RemovedMemberComposerNotice()
                             ComposerGate.INVITE ->
@@ -16714,7 +16713,7 @@ internal fun collapsedComposerExpansion(current: ComposerExpansion): ComposerExp
         ComposerExpansion.Compact -> ComposerExpansion.Compact
     }
 
-private val ComposerCompactPinnedHeight = 64.dp
+private val ComposerCompactPinnedHeight = 76.dp
 
 internal fun draggedComposerPinnedHeightPx(
     startHeightPx: Float,
@@ -17058,6 +17057,7 @@ internal fun ComposerBar(
             pinnedComposerMinHeightPx
                 ?.coerceIn(compactPinnedHeightPx, expansionCeilingPx)
                 ?.let { with(density) { it.toDp() } }
+        val fillsReservedComposerHeight = isFullScreenComposer || pinnedComposerMinHeight != null
 
         fun currentComposerHeightForDragPx(): Float =
             pinnedComposerMinHeightPx
@@ -17152,7 +17152,12 @@ internal fun ComposerBar(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .then(if (isFullScreenComposer) Modifier.weight(1f) else Modifier)
+                    // A dragged Expanded composer reserves more height than the
+                    // text currently needs. Fill that reservation so the input
+                    // row — and especially Send — stays bottom-anchored above
+                    // the IME instead of floating at the top of the reserved
+                    // space (#324).
+                    .then(if (fillsReservedComposerHeight) Modifier.weight(1f) else Modifier)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -17234,7 +17239,7 @@ internal fun ComposerBar(
                     // to the old centered alignment.
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = if (isFullScreenComposer) Modifier.weight(1f) else Modifier,
+                    modifier = if (fillsReservedComposerHeight) Modifier.weight(1f) else Modifier,
                 ) {
                     // Keep the text field composed while recording. Removing the focused
                     // BasicTextField makes Android dismiss the IME, which then removes
@@ -17245,7 +17250,7 @@ internal fun ComposerBar(
                         modifier =
                             Modifier
                                 .weight(1f)
-                                .then(if (isFullScreenComposer) Modifier.fillMaxHeight() else Modifier),
+                                .then(if (fillsReservedComposerHeight) Modifier.fillMaxHeight() else Modifier),
                     ) {
                         ComposerPill(
                             textFieldValue = textFieldValue,
@@ -17340,10 +17345,11 @@ internal fun ComposerBar(
                             onExpansionToggle = {
                                 applyComposerExpansion(advancedComposerExpansion(composerExpansion))
                             },
+                            fillReservedHeight = fillsReservedComposerHeight,
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
-                                    .then(if (isFullScreenComposer) Modifier.fillMaxHeight() else Modifier)
+                                    .then(if (fillsReservedComposerHeight) Modifier.fillMaxHeight() else Modifier)
                                     .alpha(if (isRecordingVoice) 0f else 1f)
                                     .then(if (isRecordingVoice) Modifier.clearAndSetSemantics {} else Modifier),
                         )
@@ -17877,11 +17883,13 @@ private fun ComposerPill(
     // it (Compact → Expanded → FullScreen → Compact).
     expansion: ComposerExpansion = ComposerExpansion.Compact,
     onExpansionToggle: () -> Unit = {},
+    fillReservedHeight: Boolean = false,
     // #589: report the BasicTextField's focus edge up so the conversation
     // screen can record whether the keyboard was up when the app was paused.
     onComposerFocusChanged: (Boolean) -> Unit = {},
 ) {
     val isFullScreen = expansion == ComposerExpansion.FullScreen
+    val fillComposerHeight = isFullScreen || fillReservedHeight
     // #414/#442: paint stored `@npub1…` chip runs as friendly visible labels
     // (`@alice` when the profile is resolved, short `@npub1…` otherwise)
     // while keeping the backing TextFieldValue canonical for send/markdown.
@@ -17960,7 +17968,7 @@ private fun ComposerPill(
             modifier =
                 Modifier
                     .heightIn(min = 44.dp)
-                    .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
+                    .then(if (fillComposerHeight) Modifier.fillMaxHeight() else Modifier)
                     .padding(start = 4.dp, end = 4.dp),
         ) {
             IconButton(
@@ -17985,7 +17993,7 @@ private fun ComposerPill(
                 modifier =
                     Modifier
                         .weight(1f)
-                        .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
+                        .then(if (fillComposerHeight) Modifier.fillMaxHeight() else Modifier)
                         .padding(vertical = 10.dp),
             ) {
                 BasicTextField(
@@ -17994,7 +18002,7 @@ private fun ComposerPill(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
+                            .then(if (fillComposerHeight) Modifier.fillMaxHeight() else Modifier)
                             .focusRequester(composerFocus)
                             // #589: track focus so the conversation screen's
                             // resume observer knows whether the keyboard was up
@@ -18123,7 +18131,7 @@ private fun ComposerPill(
                         .size(28.dp),
             ) {
                 Icon(
-                    if (isFullScreen) Icons.Default.CloseFullscreen else Icons.Default.OpenInFull,
+                    if (isFullScreen) Icons.Default.KeyboardArrowDown else Icons.Default.OpenInFull,
                     contentDescription =
                         stringResource(
                             when (expansion) {

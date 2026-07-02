@@ -199,7 +199,6 @@
     <string name="show_keyboard">Tastatur anzeigen</string>
     <string name="composer_expand">Eingabefeld vergrößern</string>
     <string name="composer_expand_full_screen">Vollbild-Editor öffnen</string>
-    <string name="composer_collapse">Eingabefeld verkleinern</string>
     <string name="composer_exit_full_screen">Vollbild-Editor verlassen</string>
     <string name="composer_compact">Zum kompakten Eingabefeld zurückkehren</string>
     <string name="composer_resize_handle">Nachrichtenfeldgröße ändern</string>

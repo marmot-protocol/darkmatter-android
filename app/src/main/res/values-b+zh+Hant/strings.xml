@@ -197,7 +197,6 @@
     <string name="show_keyboard">顯示鍵盤</string>
     <string name="composer_expand">展開訊息輸入欄</string>
     <string name="composer_expand_full_screen">開啟全螢幕編輯器</string>
-    <string name="composer_collapse">收合訊息輸入欄</string>
     <string name="composer_exit_full_screen">離開全螢幕編輯器</string>
     <string name="composer_compact">返回緊湊輸入框</string>
     <string name="composer_resize_handle">調整訊息輸入框大小</string>
