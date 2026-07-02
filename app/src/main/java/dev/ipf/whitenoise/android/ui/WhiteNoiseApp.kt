@@ -133,6 +133,7 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
@@ -17913,6 +17914,7 @@ private fun SettingsHomeScreen(
     var qrAccountId by remember { mutableStateOf<String?>(null) }
     var showAccountSelector by remember { mutableStateOf(false) }
     var showAddIdentity by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     LaunchedEffect(appState.accounts.size) {
         if (showAddIdentity) showAddIdentity = false
@@ -17965,6 +17967,40 @@ private fun SettingsHomeScreen(
                     SettingsRow(stringResource(R.string.security_and_privacy), stringResource(R.string.security_privacy_settings_subtitle)) {
                         onOpenDetail(SettingsDetail.SecurityPrivacy)
                     }
+                }
+            }
+            item {
+                // "Support the project" (#285). Static, public donation
+                // addresses shipped as localized resources — no protocol data,
+                // no Android-owned cache. A subtle accent icon keeps it distinct
+                // from destructive settings.
+                SectionCardWithAction(
+                    title = stringResource(R.string.support_the_project),
+                    action = {
+                        Icon(
+                            Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.support_the_project_subtitle),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    DonationAddressRow(
+                        label = stringResource(R.string.donate_lightning_address),
+                        value = stringResource(R.string.donate_lightning_value),
+                        clipboard = clipboard,
+                        appState = appState,
+                    )
+                    DonationAddressRow(
+                        label = stringResource(R.string.donate_bitcoin_silent_payment),
+                        value = stringResource(R.string.donate_bitcoin_silent_payment_value),
+                        clipboard = clipboard,
+                        appState = appState,
+                    )
                 }
             }
             item {
@@ -20994,11 +21030,13 @@ private fun CopyableValueRow(
     value: String,
     clipboard: androidx.compose.ui.platform.ClipboardManager,
     appState: WhiteNoiseAppState,
+    displayValue: String = value,
 ) {
     val copyLabel = stringResource(R.string.copy)
     // Identifier rows (npub, group id, public key) keep the value and trailing
     // copy icon on one line. The text may tail-ellipsize when space is tight,
-    // but it must never wrap a stray character onto a second row (#799).
+    // but it must never wrap a stray character onto a second row (#799). Callers
+    // may provide a pre-shortened displayValue when they need middle ellipsis.
     Column(
         Modifier
             .fillMaxWidth()
@@ -21014,7 +21052,7 @@ private fun CopyableValueRow(
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                value,
+                displayValue,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -21027,6 +21065,94 @@ private fun CopyableValueRow(
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+// Donation address row: tap-to-copy (reusing CopyableValueRow, #41) plus a
+// "Show QR" affordance that opens a full-screen QR for offline scanning (#285).
+@Composable
+private fun DonationAddressRow(
+    label: String,
+    value: String,
+    clipboard: androidx.compose.ui.platform.ClipboardManager,
+    appState: WhiteNoiseAppState,
+) {
+    var showQr by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        CopyableValueRow(
+            label = label,
+            value = value,
+            clipboard = clipboard,
+            appState = appState,
+            displayValue = IdentityFormatter.short(value, prefix = 18, suffix = 12),
+        )
+        TextButton(
+            onClick = { showQr = true },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+        ) {
+            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.donate_show_qr))
+        }
+    }
+    if (showQr) {
+        DonationQrDialog(
+            label = label,
+            value = value,
+            onDismiss = { showQr = false },
+        )
+    }
+}
+
+@Composable
+private fun DonationQrDialog(
+    label: String,
+    value: String,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.92f))
+                .clickable(onClick = onDismiss)
+                .padding(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    stringResource(R.string.donate_qr_dialog_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
+                QrCodeImage(content = value)
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                )
+                Text(
+                    value,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    color = Color.White.copy(alpha = 0.8f),
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding(),
+            ) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.dismiss), tint = Color.White)
+            }
         }
     }
 }
