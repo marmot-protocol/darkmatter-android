@@ -201,6 +201,10 @@
     <string name="copy_text">Копировать текст</string>
     <string name="open_emoji_picker">Открыть выбор эмодзи</string>
     <string name="show_keyboard">Показать клавиатуру</string>
+    <string name="composer_expand">Развернуть поле сообщения</string>
+    <string name="composer_expand_full_screen">Открыть полноэкранный редактор</string>
+    <string name="composer_collapse">Свернуть поле сообщения</string>
+    <string name="composer_exit_full_screen">Выйти из полноэкранного редактора</string>
     <string name="emoji_backspace">Удалить эмодзи</string>
     <string name="customize_reactions">Настроить реакции</string>
     <string name="customize_reactions_hint">Нажмите, чтобы заменить эмодзи</string>

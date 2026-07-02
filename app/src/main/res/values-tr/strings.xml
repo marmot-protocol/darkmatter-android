@@ -197,6 +197,10 @@
     <string name="copy_text">Metni kopyala</string>
     <string name="open_emoji_picker">Emoji seçiciyi aç</string>
     <string name="show_keyboard">Klavyeyi göster</string>
+    <string name="composer_expand">Mesaj alanını genişlet</string>
+    <string name="composer_expand_full_screen">Tam ekran düzenleyiciyi aç</string>
+    <string name="composer_collapse">Mesaj alanını daralt</string>
+    <string name="composer_exit_full_screen">Tam ekran düzenleyiciden çık</string>
     <string name="emoji_backspace">Emojiyi sil</string>
     <string name="customize_reactions">Tepkileri özelleştir</string>
     <string name="customize_reactions_hint">Bir emojiyi değiştirmek için dokun</string>
