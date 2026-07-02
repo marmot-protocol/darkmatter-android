@@ -17,6 +17,7 @@ import dev.ipf.marmotkit.MarkdownNostrEntityFfi
 import dev.ipf.marmotkit.MarkdownNostrHrpFfi
 import dev.ipf.marmotkit.MarkdownTableCellFfi
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -34,6 +35,15 @@ class MarkdownPreviewTextTest {
     ) = markdownDocumentToPreviewAnnotatedString(MarkdownDocumentFfi(blocks = blocks, truncated = false), codeStyle, maxLength)
 
     private fun paragraph(text: String) = MarkdownBlockFfi.Paragraph(listOf(MarkdownInlineFfi.Text(text)))
+
+    private fun paragraphWithMention(bech32: String) =
+        MarkdownBlockFfi.Paragraph(
+            listOf(
+                MarkdownInlineFfi.NostrMention(
+                    MarkdownNostrEntityFfi(MarkdownNostrHrpFfi.NPUB, bech32),
+                ),
+            ),
+        )
 
     @Test
     fun emptyDocumentFlattensToEmptyString() {
@@ -313,6 +323,45 @@ class MarkdownPreviewTextTest {
             )
 
         assertEquals(setOf(npub), markdownDocumentMentionBech32s(document))
+    }
+
+    @Test
+    fun topLevelRenderListIsCappedAndReportsElision() {
+        val blocks = List(MARKDOWN_MAX_TOP_LEVEL_BLOCKS + 2) { paragraph("block-$it") }
+
+        val visible = markdownVisibleTopLevelBlocks(blocks)
+
+        assertEquals(MARKDOWN_MAX_TOP_LEVEL_BLOCKS, visible.size)
+        assertEquals(paragraph("block-0"), visible.first())
+        assertEquals(paragraph("block-${MARKDOWN_MAX_TOP_LEVEL_BLOCKS - 1}"), visible.last())
+        assertTrue(markdownTopLevelBlocksElided(blocks))
+        assertFalse(markdownTopLevelBlocksElided(blocks.take(MARKDOWN_MAX_TOP_LEVEL_BLOCKS)))
+    }
+
+    @Test
+    fun topLevelMentionCollectorStopsAtBreadthCap() {
+        val npub = "npub1" + "q".repeat(58)
+        val document =
+            MarkdownDocumentFfi(
+                truncated = false,
+                blocks =
+                    List(MARKDOWN_MAX_TOP_LEVEL_BLOCKS) { MarkdownBlockFfi.ThematicBreak } +
+                        paragraphWithMention(npub),
+            )
+
+        assertEquals(emptySet<String>(), markdownDocumentMentionBech32s(document))
+    }
+
+    @Test
+    fun previewStopsAtTopLevelBreadthCapWhenBlocksDoNotSpendLength() {
+        val annotated =
+            build(
+                blocks =
+                    List(MARKDOWN_MAX_TOP_LEVEL_BLOCKS) { MarkdownBlockFfi.ThematicBreak } +
+                        paragraph("never reached"),
+            )
+
+        assertEquals("", annotated.text)
     }
 
     @Test

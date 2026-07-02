@@ -87,9 +87,10 @@ internal fun MarkdownMessageBody(
     modifier: Modifier = Modifier,
     mentionDisplayName: ((String) -> String?)? = null,
     onNostrProfileTap: ((String) -> Unit)? = null,
-    // Reports the layout of the final paragraph/heading so a caller can place
-    // an inline footer against the last line. Fires only for a text-bearing
-    // last block; other block types leave it unset.
+    // Reports the layout of the final rendered text line so a caller can place
+    // an inline footer against it. Fires for a text-bearing last block, or for
+    // the elision marker when the top-level block cap hides later siblings;
+    // other block types leave it unset.
     onLastTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -121,13 +122,22 @@ internal fun MarkdownMessageBody(
         remember(linkListener, mentionDisplayName) {
             MarkdownBodyContext(linkListener, mentionDisplayName)
         }
+    val visibleBlocks = markdownVisibleTopLevelBlocks(document.blocks)
+    val blocksElided = markdownTopLevelBlocksElided(document.blocks)
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        document.blocks.forEachIndexed { index, block ->
+        visibleBlocks.forEachIndexed { index, block ->
             MarkdownBlockView(
                 block,
                 bodyContext,
                 depth = 0,
-                onTextLayout = if (index == document.blocks.lastIndex) onLastTextLayout else null,
+                onTextLayout = if (!blocksElided && index == visibleBlocks.lastIndex) onLastTextLayout else null,
+            )
+        }
+        if (blocksElided) {
+            Text(
+                "…",
+                style = MaterialTheme.typography.bodyLarge,
+                onTextLayout = { onLastTextLayout?.invoke(it) },
             )
         }
     }
@@ -166,6 +176,20 @@ internal fun MarkdownMessageBody(
 internal const val MARKDOWN_MAX_BLOCK_DEPTH = 24
 
 internal fun markdownDepthExceeded(depth: Int): Boolean = depth >= MARKDOWN_MAX_BLOCK_DEPTH
+
+/**
+ * Maximum number of top-level Markdown blocks rendered or walked from one
+ * untrusted message. Depth caps stop recursive stack DoS, but a peer can also
+ * send thousands of depth-0 sibling paragraphs; Compose would eagerly measure
+ * every child in the bubble Column. 256 leaves ample room for legitimate chat
+ * formatting while bounding render, mention, and preview work. See #942.
+ */
+internal const val MARKDOWN_MAX_TOP_LEVEL_BLOCKS = 256
+
+internal fun markdownVisibleTopLevelBlocks(blocks: List<MarkdownBlockFfi>): List<MarkdownBlockFfi> =
+    if (blocks.size <= MARKDOWN_MAX_TOP_LEVEL_BLOCKS) blocks else blocks.take(MARKDOWN_MAX_TOP_LEVEL_BLOCKS)
+
+internal fun markdownTopLevelBlocksElided(blocks: List<MarkdownBlockFfi>): Boolean = blocks.size > MARKDOWN_MAX_TOP_LEVEL_BLOCKS
 
 /**
  * Maximum inline-nesting depth. Inline nodes (emphasis, strong, strikethrough,
@@ -446,7 +470,7 @@ private fun collectBlockMentionBech32s(
 
 internal fun markdownDocumentMentionBech32s(document: MarkdownDocumentFfi): Set<String> =
     mutableSetOf<String>()
-        .also { collectBlockMentionBech32s(document.blocks, it, depth = 0) }
+        .also { collectBlockMentionBech32s(markdownVisibleTopLevelBlocks(document.blocks), it, depth = 0) }
 
 /**
  * True when [document] contains a `NostrMention` that resolves to
@@ -467,9 +491,7 @@ internal fun documentMentionsAccount(
     resolveAccountIdHex: (String) -> String?,
 ): Boolean {
     val self = accountIdHex?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return false
-    val bech32s = mutableSetOf<String>()
-    collectBlockMentionBech32s(document.blocks, bech32s, depth = 0)
-    return bech32s.any { bech32 ->
+    return markdownDocumentMentionBech32s(document).any { bech32 ->
         resolveAccountIdHex(bech32)?.trim()?.lowercase() == self
     }
 }
@@ -730,8 +752,7 @@ internal fun rememberMarkdownPreviewText(
         if (mentionDisplayName == null) {
             emptyMap()
         } else {
-            val bech32s = mutableSetOf<String>()
-            collectBlockMentionBech32s(document.blocks, bech32s, depth = 0)
+            val bech32s = markdownDocumentMentionBech32s(document)
             bech32s.associateWith(mentionDisplayName)
         }
     return remember(document, contentColor, mentionNames) {
@@ -777,7 +798,7 @@ internal fun markdownDocumentToPreviewAnnotatedString(
 ): AnnotatedString {
     val flattened =
         buildAnnotatedString {
-            for (block in document.blocks) {
+            for (block in markdownVisibleTopLevelBlocks(document.blocks)) {
                 if (length >= maxLength) break
                 appendPreviewBlock(block, codeStyle, maxLength, mentionDisplayName, depth = 0)
             }
