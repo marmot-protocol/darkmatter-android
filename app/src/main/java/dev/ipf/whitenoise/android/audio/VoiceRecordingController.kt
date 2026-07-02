@@ -121,10 +121,13 @@ class VoiceRecordingController(
             return false
         }
         VoicePlaybackController.pause()
-        return beginRecording()
+        isRecording = true
+        resetRecordingUiState()
+        scope.launch(Dispatchers.Main) { beginRecording() }
+        return true
     }
 
-    private fun beginRecording(): Boolean {
+    private suspend fun beginRecording(): Boolean {
         val file =
             File(
                 outputDirectory,
@@ -132,7 +135,11 @@ class VoiceRecordingController(
             )
         val r = VoiceRecorder(context, file, bitrateProvider())
         return try {
-            r.start()
+            withContext(Dispatchers.IO) { r.start() }
+            if (!isRecording) {
+                withContext(Dispatchers.IO) { r.cancel() }
+                return false
+            }
             recorder = r
             isRecording = true
             resetRecordingUiState()
@@ -151,10 +158,12 @@ class VoiceRecordingController(
                 }
             true
         } catch (t: Throwable) {
-            abandonRecordingFocus()
             recorder = null
-            isRecording = false
-            onError(t)
+            if (isRecording) {
+                abandonRecordingFocus()
+                isRecording = false
+                onError(t)
+            }
             false
         }
     }
@@ -186,7 +195,15 @@ class VoiceRecordingController(
 
     fun stop() {
         if (abortPendingRestart()) return
-        val r = recorder ?: return
+        val r =
+            recorder ?: run {
+                if (isRecording) {
+                    isRecording = false
+                    resetRecordingUiState()
+                    abandonRecordingFocus()
+                }
+                return
+            }
         recorder = null
         tickJob?.cancel()
         tickJob = null
@@ -243,6 +260,12 @@ class VoiceRecordingController(
     fun cancel() {
         if (abortPendingRestart()) return
         val r = recorder
+        if (r == null && isRecording) {
+            isRecording = false
+            resetRecordingUiState()
+            abandonRecordingFocus()
+            return
+        }
         recorder = null
         tickJob?.cancel()
         tickJob = null

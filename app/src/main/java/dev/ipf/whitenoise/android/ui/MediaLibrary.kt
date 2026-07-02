@@ -79,6 +79,8 @@ import dev.ipf.whitenoise.android.state.WhiteNoiseAppState
 import dev.ipf.whitenoise.android.ui.theme.amoledSurfaceBorder
 import dev.ipf.whitenoise.android.ui.theme.amoledSurfaceBorderStroke
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
@@ -638,8 +640,12 @@ private fun VoiceLibraryRow(
     var localFile by remember(pillKey) { mutableStateOf<java.io.File?>(null) }
     var loading by remember(pillKey) { mutableStateOf(false) }
 
-    val playback by VoicePlaybackController.state.collectAsState()
-    val isPlayingThis = playback.key == pillKey && playback.isPlaying
+    val isPlayingThis by remember(pillKey) {
+        VoicePlaybackController.state
+            .map { playback -> playback.key == pillKey && playback.isPlaying }
+            .distinctUntilChanged()
+    }.collectAsState(false)
+    val recordedAtLabel = remember(context, row.recordedAt) { relativeTimestamp(context, row.recordedAt) }
 
     Row(
         modifier =
@@ -723,7 +729,7 @@ private fun VoiceLibraryRow(
             // here; the send timestamp stands in until playback materializes the
             // file. follow-up: surface duration once the file is local.
             Text(
-                relativeTimestamp(LocalContext.current, row.recordedAt),
+                recordedAtLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -765,6 +771,7 @@ private fun FileLibraryRow(
     var menuOpen by remember(row.messageIdHex, row.attachmentIndex) { mutableStateOf(false) }
     val noOpenAppMessage = stringResource(R.string.media_no_app_to_open)
     val couldntOpenMessage = stringResource(R.string.media_couldnt_open)
+    val recordedAtLabel = remember(context, row.recordedAt) { relativeTimestamp(context, row.recordedAt) }
 
     // The tap is the user-initiated download trigger — files never auto-fetch
     // in the library. Prefer retained bytes for own in-flight sends, mirroring
@@ -839,7 +846,7 @@ private fun FileLibraryRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                relativeTimestamp(LocalContext.current, row.recordedAt),
+                recordedAtLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -984,6 +991,8 @@ private fun UrlLibraryRow(
     // from it opportunistically; any favicon/metadata fetch must be https-only
     // and pass HostSafety.isPrivateOrLoopbackHost before any network hop.
     val host = remember(entry.url) { hostOf(entry.url) }
+    val context = LocalContext.current
+    val recordedAtLabel = remember(context, entry.recordedAt) { relativeTimestamp(context, entry.recordedAt) }
     Row(
         modifier =
             Modifier
@@ -1027,7 +1036,7 @@ private fun UrlLibraryRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "${appState.displayName(entry.sender)} · ${relativeTimestamp(LocalContext.current, entry.recordedAt)}",
+                "${appState.displayName(entry.sender)} · $recordedAtLabel",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
