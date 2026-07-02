@@ -45,6 +45,19 @@ class MarkdownPreviewTextTest {
             ),
         )
 
+    private fun listItem(blocks: List<MarkdownBlockFfi>) = MarkdownListItemFfi(blocks = blocks, checked = null)
+
+    private fun tableCell(text: String) = MarkdownTableCellFfi(listOf(MarkdownInlineFfi.Text(text)))
+
+    private fun tableCellWithMention(bech32: String) =
+        MarkdownTableCellFfi(
+            listOf(
+                MarkdownInlineFfi.NostrMention(
+                    MarkdownNostrEntityFfi(MarkdownNostrHrpFfi.NPUB, bech32),
+                ),
+            ),
+        )
+
     @Test
     fun emptyDocumentFlattensToEmptyString() {
         val annotated = build(emptyList())
@@ -326,16 +339,16 @@ class MarkdownPreviewTextTest {
     }
 
     @Test
-    fun topLevelRenderListIsCappedAndReportsElision() {
-        val blocks = List(MARKDOWN_MAX_TOP_LEVEL_BLOCKS + 2) { paragraph("block-$it") }
+    fun siblingRenderListIsCappedAndReportsElision() {
+        val blocks = List(MARKDOWN_MAX_CONTAINER_SIBLINGS + 2) { paragraph("block-$it") }
 
-        val visible = markdownVisibleTopLevelBlocks(blocks)
+        val visible = markdownVisibleSiblings(blocks)
 
-        assertEquals(MARKDOWN_MAX_TOP_LEVEL_BLOCKS, visible.size)
+        assertEquals(MARKDOWN_MAX_CONTAINER_SIBLINGS, visible.size)
         assertEquals(paragraph("block-0"), visible.first())
-        assertEquals(paragraph("block-${MARKDOWN_MAX_TOP_LEVEL_BLOCKS - 1}"), visible.last())
-        assertTrue(markdownTopLevelBlocksElided(blocks))
-        assertFalse(markdownTopLevelBlocksElided(blocks.take(MARKDOWN_MAX_TOP_LEVEL_BLOCKS)))
+        assertEquals(paragraph("block-${MARKDOWN_MAX_CONTAINER_SIBLINGS - 1}"), visible.last())
+        assertTrue(markdownSiblingsElided(blocks))
+        assertFalse(markdownSiblingsElided(blocks.take(MARKDOWN_MAX_CONTAINER_SIBLINGS)))
     }
 
     @Test
@@ -345,8 +358,40 @@ class MarkdownPreviewTextTest {
             MarkdownDocumentFfi(
                 truncated = false,
                 blocks =
-                    List(MARKDOWN_MAX_TOP_LEVEL_BLOCKS) { MarkdownBlockFfi.ThematicBreak } +
+                    List(MARKDOWN_MAX_CONTAINER_SIBLINGS) { MarkdownBlockFfi.ThematicBreak } +
                         paragraphWithMention(npub),
+            )
+
+        assertEquals(emptySet<String>(), markdownDocumentMentionBech32s(document))
+    }
+
+    @Test
+    fun nestedMentionCollectorStopsAtContainerBreadthCap() {
+        val npub = "npub1" + "q".repeat(58)
+        val document =
+            MarkdownDocumentFfi(
+                truncated = false,
+                blocks =
+                    listOf(
+                        MarkdownBlockFfi.BlockQuote(
+                            List(MARKDOWN_MAX_CONTAINER_SIBLINGS) { MarkdownBlockFfi.ThematicBreak } +
+                                paragraphWithMention(npub),
+                        ),
+                        MarkdownBlockFfi.ListBlock(
+                            kind = MarkdownListKindFfi.Bullet(marker = "-"),
+                            tight = true,
+                            items =
+                                List(MARKDOWN_MAX_CONTAINER_SIBLINGS) { listItem(listOf(MarkdownBlockFfi.ThematicBreak)) } +
+                                    listItem(listOf(paragraphWithMention(npub))),
+                        ),
+                        MarkdownBlockFfi.Table(
+                            alignments = listOf(MarkdownAlignmentFfi.NONE),
+                            header = listOf(tableCell("header")),
+                            rows =
+                                List(MARKDOWN_MAX_CONTAINER_SIBLINGS) { listOf(tableCell("row-$it")) } +
+                                    listOf(listOf(tableCellWithMention(npub))),
+                        ),
+                    ),
             )
 
         assertEquals(emptySet<String>(), markdownDocumentMentionBech32s(document))
@@ -357,8 +402,24 @@ class MarkdownPreviewTextTest {
         val annotated =
             build(
                 blocks =
-                    List(MARKDOWN_MAX_TOP_LEVEL_BLOCKS) { MarkdownBlockFfi.ThematicBreak } +
+                    List(MARKDOWN_MAX_CONTAINER_SIBLINGS) { MarkdownBlockFfi.ThematicBreak } +
                         paragraph("never reached"),
+            )
+
+        assertEquals("", annotated.text)
+    }
+
+    @Test
+    fun previewStopsAtNestedBreadthCapWhenBlocksDoNotSpendLength() {
+        val annotated =
+            build(
+                blocks =
+                    listOf(
+                        MarkdownBlockFfi.BlockQuote(
+                            List(MARKDOWN_MAX_CONTAINER_SIBLINGS) { MarkdownBlockFfi.ThematicBreak } +
+                                paragraph("never reached"),
+                        ),
+                    ),
             )
 
         assertEquals("", annotated.text)
