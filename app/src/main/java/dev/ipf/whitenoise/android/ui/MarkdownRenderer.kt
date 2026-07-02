@@ -122,13 +122,22 @@ internal fun MarkdownMessageBody(
             MarkdownBodyContext(linkListener, mentionDisplayName)
         }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        document.blocks.forEachIndexed { index, block ->
+        val lastVisibleBlockIndex = minOf(document.blocks.lastIndex, MARKDOWN_MAX_BLOCK_SIBLINGS - 1)
+        document.blocks.forEachMarkdownSiblingIndexed { index, block ->
             MarkdownBlockView(
                 block,
                 bodyContext,
                 depth = 0,
-                onTextLayout = if (index == document.blocks.lastIndex) onLastTextLayout else null,
+                onTextLayout =
+                    if (!document.blocks.hasMarkdownSiblingOverflow() && index == lastVisibleBlockIndex) {
+                        onLastTextLayout
+                    } else {
+                        null
+                    },
             )
+        }
+        if (document.blocks.hasMarkdownSiblingOverflow()) {
+            Text("…", style = MaterialTheme.typography.bodyLarge)
         }
     }
     pendingLinkUrl?.let { url ->
@@ -177,6 +186,28 @@ internal fun markdownDepthExceeded(depth: Int): Boolean = depth >= MARKDOWN_MAX_
 internal const val MARKDOWN_MAX_INLINE_DEPTH = 64
 
 internal fun markdownInlineDepthExceeded(depth: Int): Boolean = depth >= MARKDOWN_MAX_INLINE_DEPTH
+
+/**
+ * Maximum number of sibling block nodes rendered or walked at any one block
+ * container level. Depth caps prevent recursive stack blow-ups; this breadth
+ * cap prevents a flat peer-crafted document from eagerly composing or scanning
+ * thousands of depth-0 siblings in a non-lazy chat bubble. See #942.
+ */
+internal const val MARKDOWN_MAX_BLOCK_SIBLINGS = 256
+
+internal fun markdownBlockBreadthExceeded(count: Int): Boolean = count > MARKDOWN_MAX_BLOCK_SIBLINGS
+
+private fun List<*>.hasMarkdownSiblingOverflow(): Boolean = markdownBlockBreadthExceeded(size)
+
+private inline fun <T> List<T>.forEachMarkdownSibling(action: (T) -> Unit) {
+    val count = minOf(size, MARKDOWN_MAX_BLOCK_SIBLINGS)
+    for (index in 0 until count) action(this[index])
+}
+
+private inline fun <T> List<T>.forEachMarkdownSiblingIndexed(action: (Int, T) -> Unit) {
+    val count = minOf(size, MARKDOWN_MAX_BLOCK_SIBLINGS)
+    for (index in 0 until count) action(index, this[index])
+}
 
 /** Per-document inputs threaded through every block view. */
 private data class MarkdownBodyContext(
@@ -279,7 +310,10 @@ private fun MarkdownBlockQuoteView(
         // children (nested code blocks) don't measure under unbounded
         // constraints inside the IntrinsicSize.Min row.
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            blocks.forEach { MarkdownBlockView(it, ctx, depth + 1) }
+            blocks.forEachMarkdownSibling { MarkdownBlockView(it, ctx, depth + 1) }
+            if (blocks.hasMarkdownSiblingOverflow()) {
+                Text("…", style = MaterialTheme.typography.bodyLarge)
+            }
         }
     }
 }
@@ -291,7 +325,7 @@ private fun MarkdownListView(
     depth: Int,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(if (block.tight) 2.dp else 6.dp)) {
-        block.items.forEachIndexed { index, item ->
+        block.items.forEachMarkdownSiblingIndexed { index, item ->
             Row {
                 Text(
                     // Task-list checkboxes win over the plain bullet/number so
@@ -305,9 +339,15 @@ private fun MarkdownListView(
                     modifier = Modifier.padding(end = 6.dp),
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item.blocks.forEach { MarkdownBlockView(it, ctx, depth + 1) }
+                    item.blocks.forEachMarkdownSibling { MarkdownBlockView(it, ctx, depth + 1) }
+                    if (item.blocks.hasMarkdownSiblingOverflow()) {
+                        Text("…", style = MaterialTheme.typography.bodyLarge)
+                    }
                 }
             }
+        }
+        if (block.items.hasMarkdownSiblingOverflow()) {
+            Text("…", style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -323,13 +363,18 @@ private fun MarkdownTableView(
     ctx: MarkdownBodyContext,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        MarkdownTableRowView(block.header, block.alignments, header = true, ctx)
+        MarkdownTableRowView(block.header.takeMarkdownSiblings(), block.alignments, header = true, ctx)
         HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.25f))
-        block.rows.forEach { row ->
-            MarkdownTableRowView(row, block.alignments, header = false, ctx)
+        block.rows.forEachMarkdownSibling { row ->
+            MarkdownTableRowView(row.takeMarkdownSiblings(), block.alignments, header = false, ctx)
+        }
+        if (block.rows.hasMarkdownSiblingOverflow()) {
+            Text("…", style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
+
+private fun <T> List<T>.takeMarkdownSiblings(): List<T> = take(MARKDOWN_MAX_BLOCK_SIBLINGS)
 
 @Composable
 private fun MarkdownTableRowView(
@@ -428,16 +473,18 @@ private fun collectBlockMentionBech32s(
     depth: Int,
 ) {
     if (markdownDepthExceeded(depth)) return
-    blocks.forEach { block ->
+    blocks.forEachMarkdownSibling { block ->
         when (block) {
             is MarkdownBlockFfi.Paragraph -> collectMentionBech32s(block.inlines, out, depth = 0)
             is MarkdownBlockFfi.Heading -> collectMentionBech32s(block.inlines, out, depth = 0)
             is MarkdownBlockFfi.BlockQuote -> collectBlockMentionBech32s(block.blocks, out, depth + 1)
             is MarkdownBlockFfi.ListBlock ->
-                block.items.forEach { collectBlockMentionBech32s(it.blocks, out, depth + 1) }
+                block.items.forEachMarkdownSibling { collectBlockMentionBech32s(it.blocks, out, depth + 1) }
             is MarkdownBlockFfi.Table -> {
-                block.header.forEach { cell -> collectMentionBech32s(cell.inlines, out, depth = 0) }
-                block.rows.forEach { row -> row.forEach { cell -> collectMentionBech32s(cell.inlines, out, depth = 0) } }
+                block.header.forEachMarkdownSibling { cell -> collectMentionBech32s(cell.inlines, out, depth = 0) }
+                block.rows.forEachMarkdownSibling { row ->
+                    row.forEachMarkdownSibling { cell -> collectMentionBech32s(cell.inlines, out, depth = 0) }
+                }
             }
             else -> Unit
         }
@@ -777,9 +824,10 @@ internal fun markdownDocumentToPreviewAnnotatedString(
 ): AnnotatedString {
     val flattened =
         buildAnnotatedString {
-            for (block in document.blocks) {
-                if (length >= maxLength) break
-                appendPreviewBlock(block, codeStyle, maxLength, mentionDisplayName, depth = 0)
+            document.blocks.forEachMarkdownSibling { block ->
+                if (length < maxLength) {
+                    appendPreviewBlock(block, codeStyle, maxLength, mentionDisplayName, depth = 0)
+                }
             }
         }
     return if (flattened.length > maxLength) flattened.previewSubSequence(maxLength) else flattened
@@ -807,15 +855,15 @@ private fun AnnotatedString.Builder.appendPreviewBlock(
         is MarkdownBlockFfi.CodeBlock -> appendPreviewCodeContent(block.content, codeStyle, maxLength)
         is MarkdownBlockFfi.MathBlock -> appendPreviewCodeContent(block.content, codeStyle, maxLength)
         is MarkdownBlockFfi.BlockQuote ->
-            block.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName, depth + 1) }
+            block.blocks.forEachMarkdownSibling { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName, depth + 1) }
         is MarkdownBlockFfi.ListBlock ->
-            block.items.forEach { item ->
-                item.blocks.forEach { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName, depth + 1) }
+            block.items.forEachMarkdownSibling { item ->
+                item.blocks.forEachMarkdownSibling { appendPreviewBlock(it, codeStyle, maxLength, mentionDisplayName, depth + 1) }
             }
         is MarkdownBlockFfi.Table -> {
-            block.header.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, maxLength, mentionDisplayName) }
-            block.rows.forEach { row ->
-                row.forEach { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, maxLength, mentionDisplayName) }
+            block.header.forEachMarkdownSibling { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, maxLength, mentionDisplayName) }
+            block.rows.forEachMarkdownSibling { row ->
+                row.forEachMarkdownSibling { cell -> appendPreviewInlineSegment(cell.inlines, codeStyle, maxLength, mentionDisplayName) }
             }
         }
     }

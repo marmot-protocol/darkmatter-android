@@ -387,4 +387,40 @@ class MarkdownPreviewTextTest {
         assertEquals(200, annotated.length)
         assertTrue(annotated.text.all { it == 'a' })
     }
+
+    @Test
+    fun previewStillWalksTheLastAllowedSibling() {
+        val blocks = List(MARKDOWN_MAX_BLOCK_SIBLINGS - 1) { MarkdownBlockFfi.ThematicBreak } + paragraph("visible")
+
+        val annotated = build(blocks)
+
+        assertEquals("visible", annotated.text)
+    }
+
+    @Test
+    fun previewStopsAfterMaxBlockSiblingsEvenWhenLengthBudgetRemains() {
+        val blocks = List(MARKDOWN_MAX_BLOCK_SIBLINGS) { MarkdownBlockFfi.ThematicBreak } + paragraph("hidden")
+
+        val annotated = build(blocks)
+
+        assertEquals("", annotated.text)
+    }
+
+    @Test
+    fun documentMentionCollectorStopsAfterMaxBlockSiblings() {
+        val npub = "npub1" + "q".repeat(58)
+        val mention =
+            MarkdownInlineFfi.NostrMention(
+                MarkdownNostrEntityFfi(MarkdownNostrHrpFfi.NPUB, npub),
+            )
+        val document =
+            MarkdownDocumentFfi(
+                truncated = false,
+                blocks =
+                    List(MARKDOWN_MAX_BLOCK_SIBLINGS) { paragraph("noise") } +
+                        MarkdownBlockFfi.Paragraph(listOf(mention)),
+            )
+
+        assertTrue(markdownDocumentMentionBech32s(document).isEmpty())
+    }
 }
